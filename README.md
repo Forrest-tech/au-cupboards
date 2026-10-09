@@ -73,9 +73,37 @@ python -m uvicorn app.api.server:app --host 0.0.0.0 --port 8000
 # 端到端流水线（命令行）
 python -m app.cli run /workspace/var/extract/plan.pdf
 
-# 测试（68 项）
+# 测试（102 项）
 python -m pytest tests/ -q
 ```
+
+### DWG 支持（可选）
+
+未装 DWG 后端时系统照常工作，只是上传 DWG 会返回明确的安装指引。
+`GET /api/health` 的 `dwg_ready` 字段反映当前可用性。
+
+**方案 A：ODA File Converter（生产推荐）**
+免费注册下载 <https://www.opendesign.com/guestfiles/oda_file_converter>，
+安装后 `ODAFileConverter` 需在 `PATH` 中。本系统会自动探测并优先使用。
+
+**方案 B：LibreDWG（开源兜底，本环境已装）**
+
+```bash
+# Debian/Ubuntu 依赖
+sudo apt-get install -y build-essential libtool autoconf
+
+# 源码编译（apt 源与 PyPI 均无 libredwg 包，必须源码编译）
+curl -O https://ftp.gnu.org/gnu/libredwg/libredwg-0.13.3.tar.gz
+tar xzf libredwg-0.13.3.tar.gz && cd libredwg-0.13.3
+./configure --prefix=/usr/local --disable-bindings --disable-shared --enable-static
+make -j$(nproc) && make install
+
+# 验证
+dwgread --version   # → dwgread 0.13.3
+```
+
+> LibreDWG 为 **GPLv3**，本项目仅以独立进程方式调用，不链接其库。
+> 编译约 3.5 分钟（4 核）。
 
 ---
 
@@ -101,7 +129,7 @@ backend/app/
   config/parse_rules.json      ← 所有解析规则，改这里不改代码
   models/entities.py           SQLAlchemy 数据模型
   parsers/stage1.py            STAGE 1：图纸 → 楼层 + units（含单元表坐标法解析器）
-  parsers/dwg.py               DWG → DXF → ezdxf（含代理实体校验）
+  parsers/dwg.py               DWG → DXF → ezdxf（代理实体校验 + 完整性分级）
   services/stage2.py           STAGE 2：选型匹配 + 澳洲规范校验
   services/stage3.py           STAGE 3：PDF / Word / JPG / Excel / JSON 导出
   services/meter_requirement.py表位需求推导（WET 面积分档）
@@ -110,9 +138,15 @@ backend/app/
   api/server.pyFastAPI 接口
 frontend/index.html            三栏 UI（树导航 + 原图预览 + 楼层×柜型矩阵）
 backend/tests/
-  test_core_assumptions.py     核心假设
-  test_regression_74keeler.py  实测踩坑固化
-  test_api_e2e.py              端到端 API 行为
+  test_dwg.pyDWG 降级链 + 完整性校验（34 项）
+  test_core_assumptions.py     核心假设（25 项）
+  test_regression_74keeler.py  实测踩坑固化 + 44 户口径锁定（22 项）
+  test_api_e2e.py端到端 API 行为（21 项）
+  fixtures/
+    cupboard_library_design.dxf  自建柜型库 DXF（正向）
+    dwg_real_acad2000.dwg        真实 AutoCAD 2000（正向）
+    dwg_real_acad2018.dwg        真实 AutoCAD 2018（正向）
+    neg_truncated_by_dxf2dwg.dwg 截断损坏样本（反向，必须被拒绝）
 ```
 
 ---
@@ -226,6 +260,29 @@ A301/A302/A404 剖面图的索引条会列出各层编号（105/205/305…）。
 设计师电话 `449 984 889` 会被误认为单元编号，已加入 `noise_labels`；
 标题栏带（含`DRG NO` / `PROJECT NO` / `REVISION NO` / `DRAWING NO`）整体排除。
 
+### 11. DWG 转换器退出码为 0 ≠ 产物可信
+
+用 LibreDWG 自带的 `dxf2dwg` 造测试 DWG 时，**写出端有损**：
+`WATER_METER`→`W`、`CUPBOARD`→`C`、`CP-TRI-1x3`→`C`（全部截断为首字母），
+modelspace 几何全丢。但 `dxf2dwg` 与 `dwgread` 的**退出码都是 0**，
+ezdxf 也能"成功"读出文件 —— 旧实现返回 `ok=True`，会把垃圾数据当柜型库入库。
+
+> **不要相信退出码，要验证产物内容。** 现由 `assess_integrity()` 拦截
+> （`corrupt` → `ok=False`），反向夹具 `neg_truncated_by_dxf2dwg.dwg` 固化此行为。
+
+### 12. 柜型库几何在 block 里，只统计 modelspace 会误判为空图纸
+
+一份含 3 个柜型 block、13 个冷热水表圆、13 个燃气表方框的完整 DXF，
+modelspace 只有 4 个实体（3× INSERT + 1× TEXT）。只统计 modelspace 会被
+完整性校验判成 `degraded`。必须同时遍历 block 定义（排除 `*` 匿名块）。
+
+### 13. `error` 消息不能混入说明性提示
+
+完整性校验早期把所有 notes 拼进 error，产出过
+「…block 定义内有 45 个实体——柜型库通常如此…属正常。；图层名疑似被截断…」
+这种自相矛盾的用户可见消息。现改为结构化 `IntegrityReport`，
+`notes`（说明）与 `issues`（问题）分开，只有 `issues` 进 `error`。
+
 ---
 
 ## API
@@ -258,44 +315,80 @@ POST   /api/jobs/{id}/corrections      # 人工修正字典
 | 需求 | 条目 | 状态 |
 |------|------|------|
 | **1** 主界面三栏 | 左侧树状导航 | ✅ |
-| | 中间原样显示 PDF/Word/DWG | ✅ |
+| | 中间原样显示 PDF/Word/DWG | ✅ PDF/DWG；Word 走DOCX 指引（见限制） |
 | | 右侧按楼层按行显示 units 数与 cupboard 类型/样式/尺寸/描述 | ✅ |
 | | 导出 PDF / Word / JPG | ✅（另附 Excel / JSON） |
 | **2** 柜型库入库 | 顶部导航入库入口 | ✅ |
-| | 上传 → 预览 → 解析 → 分解后预览 → 人工确认 → 入库 | ✅（DWG 后端依赖见下） |
+| | 上传 → 预览 → 解析 → 分解后预览 → 人工确认 → 入库 | ✅ 真实 DWG 已端到端验证 |
 | | 左侧按 water+gas 数量分组 / 右侧显示排布种类 + 尺寸 + 介绍 | ✅ |
 | | 比较 / 删除 / 编辑文字| ✅ |
 | **3** Building 管理 | 顶部导航 building 添加 | ✅ |
 | | 上传图纸 → 预览 → 挂载树节点 → 自动解析楼层与 units | ✅ |
-| **4** 技术要求 | 成熟算法/API key | ✅（ezdxf/PyMuPDF/pdfplumber，无 AI 依赖） |
-| | 100% 识别 DWG/PDF/JPG | ⚠️ PDF 100%；DWG 需外部转换后端（见下） |
-| | 完整测试通过后交付 | ✅ 68 项测试通过 |
+| **4** 技术要求 | 成熟算法/API key | ✅（ezdxf/PyMuPDF/pdfplumber/LibreDWG，无 AI 依赖） |
+| | 100% 识别 DWG/PDF/JPG | ✅ PDF 100%（44 户全对）；✅ DWG 已用真实 AutoCAD 2000/2018 验证；⚠️ JPG 走 OCR 指引 |
+| | 完整测试通过后交付 | ✅ **102 项**测试通过 |
 | | 本地使用 | ✅ 单命令启动 |
-| | 代码保存在 GitHub | ⏳ 待推送凭据 |
+| | 代码保存在 GitHub | ⏳ **待推送凭据**（本地已提交，34 个文件） |
 
 ---
 
-## DWG 链路状态
+## DWG 链路状态 ✅ 已端到端验证
 
 ```
-ODA File Converter  →  需从 open-design-alliance.com 免费注册下载
-LibreDWG (dwgread)  →  可从 GNU FTP 源码编译（本机已内置编译工具链）
+ODA File Converter  →  需从 open-design-alliance.com 免费注册下载（生产建议）
+LibreDWG 0.13.3     →  ✅ 已源码编译安装，dwgread /usr/local/bin/dwgread
 ```
 
-`parsers/dwg.py` 已实现完整降级链：**ODA → LibreDWG → 报错并给出明确安装指引**，
-并含代理实体（`ACAD_PROXY_ENTITY`）校验。
+`parsers/dwg.py` 实现完整降级链：**ODA → LibreDWG → 报错并给出明确安装指引**，
+并含代理实体（`ACAD_PROXY_ENTITY`）校验与**转换产物完整性分级**。
 
-已用 `ezdxf` 构造等价 DXF 验证下游解析逻辑：
+### 真实 AutoCAD 文件验证结果
 
-```
-layers   = ['0', 'Defpoints', 'GAS', 'HOT_WATER', 'WALL', 'WATER']
-blocks   = ['CP-A-2X2', ...]
-entities = {'LWPOLYLINE': 5, 'INSERT': 1}
-代理实体校验 → 已实现，会在解析结果中显式警告
-```
+用 LibreDWG 自带的真实 ODA 示例图纸（`tests/fixtures/dwg_real_acad*.dwg`）：
 
-**DWG 优先级说明**：`ODA File Converter` 是商业免费注册件，能100% 正确读 R13–R2018
-全部版本；`LibreDWG` 对 2004+ 版本支持良好，R13/R14 有已知缺失。**生产环境建议装ODA。**
+| 指标 | ACAD 2018 | ACAD 2000 |
+|---|---|---|
+| `integrity` | **ok** | **ok** |
+| 后端 | libredwg | libredwg |
+| 实体总数 | 82 | 82 |
+| 图层 | `*ADSK_SYSTEM_LIGHTS` / `0` / `Defpoints` / `Tavolo 2` / `Tavolo 3` | 同 |
+| block | `CIRKLO_PUNKTOJ` / `bloko` | 同 |
+| 实体类型 | LWPOLYLINE / INSERT / DIMENSION / LINE / ARC / SPLINE / REGION / HATCH / 3DSOLID / MTEXT / MULTILEADER … 共 20+ 类 | 同 |
+
+两版交叉验证：设计图层集合与实体结构**完全一致** → 转换器对两个 DWG 版本无结构性偏差。
+
+### 完整性分级（`assess_integrity`）
+
+转换器**退出码为 0 不代表产物可信**。`inspect_dxf` 对产物做三级判定：
+
+| 级别 | 判据 | 行为 |
+|---|---|---|
+| `ok` | 实体数达标 + 图层/block 名正常 | 正常入库 |
+| `degraded` | 实体数低于下限 5 | 可用但提示存疑 |
+| `corrupt` | 全图 0 实体 / 图层名全被截成单字母 / block 名全被截成单字符 | **`ok=False` + 拒绝入库** |
+
+**为什么必须有这一层** —— 实测踩坑：用LibreDWG 自带的 `dxf2dwg` 造测试 DWG 时，
+写出端有损，`WATER_METER`→`W`、`CUPBOARD`→`C`、`CP-TRI-1x3`→`C`，
+modelspace 几何全丢，**但退出码是 0**，ezdxf 也能"成功"读出文件。
+修复前的实现会返回 `ok=True`，把截断的图层名当柜型库入库，全程零报错。
+**静默失败比失败本身危险得多。** 该场景已固化为反向测试夹具
+`tests/fixtures/neg_truncated_by_dxf2dwg.dwg`。
+
+### block 定义必须遍历
+
+柜型库 DWG 的几何主体在 block 定义里，modelspace 通常只有几个 `INSERT`。
+只统计 modelspace 会把一份含 3 个柜型 block、13 个冷热水表圆的完整图纸
+算成"只有 4 个实体"。因此 `DwgParseResult` 同时给出：
+
+- `block_entity_counts` — block 内的实体类型统计（匿名块 `*` 已排除）
+- `block_layers` — 每个 block 内的图层清单，**Module B 靠它区分 water / gas 分组**
+
+### 后端优先级
+
+`ODA File Converter` 是商业免费注册件，能 100% 正确读 R13–R2018 全部版本；
+`LibreDWG` 对 2004+ 支持良好，R13/R14 有已知缺失。**生产环境建议装 ODA。**
+本环境未装 ODA，全部走 LibreDWG 兜底，解析结果中会显式标注
+`"使用 LibreDWG 兜底：高版本 DWG 支持不全，代理实体可能丢失"`。
 
 ---
 
@@ -307,6 +400,12 @@ entities = {'LWPOLYLINE': 5, 'INSERT': 1}
 2. **柜型库尺寸是POC 占位值**（标注 `estimated`），真实参数必须由业主 DWG 解析入库。
 3. **WET 面积分档阈值**是经验规律而非规范强制（见上文诚实声明）。
 4. **AI 完全未启用**：`used_ai=False`。当前实测图纸全部含矢量文本层，无需 AI。
+5. **DWG 走 LibreDWG 兜底**：本环境未装 ODA File Converter。真实 AutoCAD
+   2000/2018 已验证通过，但 R13/R14 及含大量代理实体（天正/理正/探索者）
+   的图纸可能有损 —— 完整性校验会拦下明显损坏的产物，但**几何级别的
+   细微丢失仍需人工比对**。生产部署请装 ODA。
+6. **DOCX / JPG 未接入自动解析**：需求 1 要求中间栏"原样显示 Word"，
+   当前可上传并预览，但内容不参与解析。
 
 ---
 
@@ -314,11 +413,12 @@ entities = {'LWPOLYLINE': 5, 'INSERT': 1}
 
 ```bash
 cd backend && python -m pytest tests/ -q
-# 68 passed
+# 102 passed
 ```
 
 | 文件 | 项数 | 覆盖 |
 |------|------|------|
+| `test_dwg.py` | 34 | DWG 降级链、完整性分级、block 遍历（需求 2/4） |
 | `test_core_assumptions.py` | 25 | 核心假设（坐标法、规范校验、配置外置） |
 | `test_regression_74keeler.py` | 22 | 实测踩坑固化 + 44 户口径锁定 |
 | `test_api_e2e.py` | 21 | 端到端 HTTP 行为（需求 1/2/3逐条） |
