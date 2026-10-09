@@ -79,6 +79,29 @@ echo "────────── 自检 ──────────"
 ( cd backend && python -m app.cli health )
 echo ""
 
+# ---- DWG 后端自检（不影响启动）----
+# macOS 11 + 坏 Homebrew 是高频场景：brew install libredwg 会报
+# undefined method 'compatibility_version'。所以额外提供免 brew 方案，
+# 并且探测要认 macOS 的 .app 包内部路径（那个目录不在 PATH 里）。
+echo ""
+echo "────────── DWG 后端 ──────────"
+DWG_OUT="$( cd backend && python -c "
+from app.parsers.dwg import detect_backends
+b = detect_backends()
+oda = b.get('oda_file_converter') or '未安装'
+dwg = b.get('dwgread') or '未安装'
+print('  ODA File Converter :', oda)
+print('  dwgread           :', dwg)
+print('READY' if (oda != '未安装' or dwg != '未安装') else 'MISSING')
+" 2>/dev/null )" || DWG_OUT="MISSING"
+[ -n "$DWG_OUT" ] && printf '%s\n' "$DWG_OUT" | head -2
+if printf '%s' "$DWG_OUT" | grep -q MISSING; then
+  echo "  DWG 不可用 —— PDF 解析完全不受影响。"
+  echo "  要启用 DWG（不需要 Homebrew，macOS 11 可用）："
+  echo "    bash scripts/install_dwg_backend.sh"
+fi
+echo ""
+
 # ---- 启动 ----
 echo "启动服务：http://127.0.0.1:$PORT"
 echo "按 Ctrl+C 停止"

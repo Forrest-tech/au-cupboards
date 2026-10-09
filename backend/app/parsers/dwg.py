@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -56,21 +57,76 @@ class DwgParseResult:
 # ---------------------------------------------------------------- 后端探测
 
 
-def detect_backends() -> dict[str, str | None]:
-    """探测可用的 DWG 转换后端。"""
-    found: dict[str, str | None] = {"oda_file_converter": None, "dwgread": None, "oda_bin": None}
+# ODA File Converter 在各平台的可能位置（macOS 的 .app 包内部不在 PATH）
+ODA_APP_PATHS: tuple[str, ...] = (
+    "/Applications/ODAFileConverter.app/Contents/MacOS/ODAFileConverter",
+    "/Applications/ODA File Converter.app/Contents/MacOS/ODAFileConverter",
+    "~/Applications/ODAFileConverter.app/Contents/MacOS/ODAFileConverter",
+    "/usr/local/bin/ODAFileConverter",
+    "/opt/homebrew/bin/ODAFileConverter",
+)
+
+# 免 brew 安装脚本的目标目录（scripts/install_dwg_backend.sh）
+LOCAL_BIN = "~/.local/bin"
+
+
+def _expand(p: str) -> Path:
+    return Path(p).expanduser()
+
+
+def _oda_candidates() -> list[str]:
+    """ODA File Converter 可执行文件的所有可能位置。
+
+    macOS 上必须显式查 .app 包内部 —— ODA 装完是
+    /Applications/ODAFileConverter.app/Contents/MacOS/ODAFileConverter，
+    那个目录**不在 PATH 里**，所以 shutil.which 永远返回 None，
+    结果是「明明装了却报未安装」。这是实测踩过的坑。
+    """
+    found: list[str] = []
 
     for exe in ("ODAFileConverter", "ODAFileConverter.exe"):
         p = shutil.which(exe)
         if p:
-            found["oda_file_converter"] = p
+            found.append(p)
             break
 
-    dwgread = shutil.which("dwgread")
-    if dwgread:
-        found["dwgread"] = dwgread
-
+    for app in ODA_APP_PATHS:
+        try:
+            fp = _expand(app)
+            if fp.is_file() and os.access(fp, os.X_OK) and str(fp) not in found:
+                found.append(str(fp))
+        except OSError:
+            continue
     return found
+
+
+def _oda_exe() -> str | None:
+    cands = _oda_candidates()
+    return cands[0] if cands else None
+
+
+def _dwgread_exe() -> str | None:
+    """找 dwgread。除了 PATH，也查本项目安装脚本的目标目录
+    ~/.local/bin —— 免 brew 编译装到那里，不在默认 PATH 也应能找到。"""
+    p = shutil.which("dwgread")
+    if p:
+        return p
+    try:
+        local = _expand(f"{LOCAL_BIN}/dwgread")
+        if local.is_file() and os.access(local, os.X_OK):
+            return str(local)
+    except OSError:
+        pass
+    return None
+
+
+def detect_backends() -> dict[str, str | None]:
+    """探测可用的 DWG 转换后端。"""
+    return {
+        "oda_file_converter": _oda_exe(),
+        "dwgread": _dwgread_exe(),
+        "oda_bin": shutil.which("ODAFileConverter"),
+    }
 
 
 def convert_with_oda(dwg_path: Path, out_dir: Path) -> tuple[Path | None, str | None]:
@@ -80,9 +136,11 @@ def convert_with_oda(dwg_path: Path, out_dir: Path) -> tuple[Path | None, str | 
         ODAFileConverter <in_dir> <out_dir> <out_ver> <out_type> <recurse> <audit>
       例：ODAFileConverter in/ out/ ACAD2018 DXF 0 1
     """
-    exe = shutil.which("ODAFileConverter") or shutil.which("ODAFileConverter.exe")
+    exe = _oda_exe()
     if not exe:
-        return None, "未找到 ODAFileConverter（需从 open-design-alliance.com 免费注册下载）"
+        return None, ("未找到 ODAFileConverter（macOS 装完在 "
+                      "/Applications/ODAFileConverter.app/Contents/MacOS/，"
+                      "该目录不在 PATH；本服务已自动探测该路径，若仍报缺失请确认已安装）")
 
     in_dir = out_dir / "in"
     in_dir.mkdir(parents=True, exist_ok=True)
@@ -104,9 +162,10 @@ def convert_with_oda(dwg_path: Path, out_dir: Path) -> tuple[Path | None, str | 
 
 def convert_with_libredwg(dwg_path: Path, out_dir: Path) -> tuple[Path | None, str | None]:
     """LibreDWG 兜底。注意 GPLv3，仅作独立进程调用。"""
-    exe = shutil.which("dwgread")
+    exe = _dwgread_exe()
     if not exe:
-        return None, "未找到 dwgread（LibreDWG 命令行）"
+        return None, ("未找到 dwgread。macOS 上 Homebrew 常因系统版本不受支持而失败，"
+                      "可用免 brew 方案：bash scripts/install_dwg_backend.sh")
     out = out_dir / f"{dwg_path.stem}.dxf"
     try:
         proc = subprocess.run([exe, "-O", "DXF", "-o", str(out), str(dwg_path)],

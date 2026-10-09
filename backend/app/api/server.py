@@ -79,14 +79,16 @@ def health() -> dict[str, Any]:
     # DWG 不可用时给出**可执行**的下一步 —— 只说「未安装后端」用户无从下手
     if not ready:
         out["dwg_hint"] = (
-            "DWG 解析后端缺失。PDF 解析不受影响，仅 DWG 上传不可用。\n"
-            "装 ODA File Converter（推荐，免费注册下载）：\n"
-            "  https://www.opendesign.com/guestfiles/oda_file_converter\n"
-            "装完在系统 PATH 里能看到 oda_file_converter 或 ODAFileConverter 即可。\n"
-            "或用 Homebrew 装 LibreDWG（提供 dwgread 命令）：\n"
-            "  brew install libredwg\n"
-            "装完重启服务，顶栏徽章会变成「DWG 就绪」。"
-        )
+                "DWG 解析后端缺失。PDF 解析不受影响，仅 DWG 上传不可用。\n"
+                "推荐（macOS/Windows/Linux 通用，不需要 Homebrew）：\n"
+                "  bash scripts/install_dwg_backend.sh\n"
+                "它会自动检测已装的 ODA，没有则从官方源码编译 LibreDWG\n"
+                "到 ~/.local/bin，并提示如何加入 PATH。\n\n"
+                "或者手动装 ODA File Converter（免费注册下载）：\n"
+                "  https://www.opendesign.com/guestfiles/oda_file_converter\n"
+                "装完无需改 PATH —— macOS 的 .app 路径本服务会自动探测。\n\n"
+                "装完重启服务，顶栏徽章会变成「DWG 就绪」。"
+            )
     return out
 
 

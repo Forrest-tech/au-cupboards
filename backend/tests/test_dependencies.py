@@ -133,6 +133,26 @@ class TestAppImportsCleanly:
         )
         assert r.returncode == 0, r.stderr[-300:]
 
+    def test_every_source_file_compiles(self):
+        """所有 .py 都能编译 —— 不导入，只查语法。
+
+        实测教训：改 server.py 时漏了一行缩进，表现为 21 个 e2e
+        fixture error，报错指向 test 文件而不是真正出错的 server.py，
+        定位成本极高。纯语法编译能在毫秒级直接指出「哪个文件第几行」。
+        """
+        import py_compile
+        bad: list[str] = []
+        for p in sorted((ROOT / "backend").rglob("*.py")):
+            if "__pycache__" in p.parts:
+                continue
+            try:
+                py_compile.compile(str(p), doraise=True, cfile="/tmp/_synchk.pyc")
+            except py_compile.PyCompileError as e:
+                bad.append(str(e).strip())
+            except Exception as e:      # pragma: no cover - 编码等边缘情况
+                bad.append(f"{p}: {e}")
+        assert not bad, "以下文件语法错误：\n" + "\n".join(bad)
+
     @pytest.mark.parametrize("mod", [
         "app.config", "app.parsers.stage1", "app.parsers.dwg",
         "app.services.stage2", "app.services.stage3",

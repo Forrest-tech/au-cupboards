@@ -12,13 +12,22 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
 
+from app.parsers import dwg
 from app.parsers.dwg import (
     DwgBackend,
+    LOCAL_BIN,
+    ODA_APP_PATHS,
+    _dwgread_exe,
+    _oda_candidates,
+    _oda_exe,
     assess_integrity,
+    convert_with_libredwg,
+    convert_with_oda,
     detect_backends,
     inspect_dxf,
     parse_dwg,
@@ -60,6 +69,118 @@ def test_backend_detection_always_returns_stable_keys():
     """探测结果的键必须稳定，前端 /api/health 依赖它。"""
     b = detect_backends()
     assert set(b) == {"oda_file_converter", "dwgread", "oda_bin"}
+
+
+class TestMacosBackendDiscovery:
+    """macOS 上「明明装了却报未安装」的回归守卫。
+
+    实测坑：ODA File Converter 在 macOS 装完是 .app 包，真实可执行文件在
+    /Applications/ODAFileConverter.app/Contents/MacOS/ —— 该目录不在 PATH，
+    shutil.which 必然返回 None，于是装好的 ODA 被当成没装。
+    """
+
+    def test_oda_candidates_include_app_bundle(self):
+        """候选表必须含 macOS .app 包内路径。
+
+        不能断言 _oda_candidates() 的返回值 —— 它只返回真实存在的文件，
+        在没装 ODA 的机器上返回空列表是正确的。
+        """
+        assert any("ODAFileConverter.app/Contents/MacOS" in p for p in ODA_APP_PATHS), \
+            "候选表漏了 macOS .app 包内路径 —— 装了 ODA 也会报未安装"
+
+    def test_oda_app_found_outside_path(self, tmp_path, monkeypatch):
+        """核心回归：.app 装好但不在 PATH，也必须能被发现。"""
+        app = tmp_path / "Applications" / "ODAFileConverter.app" / "Contents" / "MacOS" / "ODAFileConverter"
+        app.parent.mkdir(parents=True)
+        app.write_text("#!/bin/sh\n")
+        app.chmod(0o755)
+
+        monkeypatch.setattr(dwg, "ODA_APP_PATHS", (str(app),))
+        monkeypatch.setattr(shutil, "which", lambda _n: None)
+        got = dwg._oda_exe()
+        assert got == str(app), f".app 内的 CLI 未被探测到（返回 {got!r}）"
+        assert detect_backends()["oda_file_converter"] == str(app)
+
+    def test_oda_candidates_are_absolute(self):
+        """候选必须是绝对路径 —— 靠 which 拿到的相对路径在 subprocess 里会失效。"""
+        for c in _oda_candidates():
+            assert c.startswith("/"), f"候选路径不是绝对路径: {c}"
+
+    def test_oda_candidates_empty_when_nothing_installed(self, tmp_path, monkeypatch):
+        """什么都没装时返回空列表 —— 不能把不存在的路径当成已安装。"""
+        monkeypatch.setattr(shutil, "which", lambda _n: None)
+        monkeypatch.setattr(Path, "is_file", lambda _s: False)
+        assert _oda_candidates() == []
+        assert _oda_exe() is None
+
+    def test_detect_backends_reports_none_when_absent(self, tmp_path, monkeypatch):
+        """detect_backends 必须给出 None，而不是空串/假路径。"""
+        monkeypatch.setattr(shutil, "which", lambda _n: None)
+        monkeypatch.setattr(Path, "is_file", lambda _s: False)
+        b = detect_backends()
+        assert set(b) == {"oda_file_converter", "dwgread", "oda_bin"}
+        assert all(v is None for v in b.values()), f"未安装时不应报路径: {b}"
+
+    def test_dwgread_falls_back_to_local_bin(self, tmp_path, monkeypatch):
+        """免 brew 脚本装到 ~/.local/bin，不在 PATH 也必须能找到。"""
+        bin_dir = tmp_path / ".local" / "bin"
+        bin_dir.mkdir(parents=True)
+        fake = bin_dir / "dwgread"
+        fake.write_text("#!/bin/sh\necho dwgread 0.13.3\n")
+        fake.chmod(0o755)
+
+        monkeypatch.setattr(dwg, "LOCAL_BIN", str(bin_dir))
+        monkeypatch.setattr(shutil, "which", lambda _n: None)
+        got = _dwgread_exe()
+        assert got == str(fake), f"~/.local/bin/dwgread 未被探测到（返回 {got!r}）"
+
+    def test_dwgread_prefers_path_over_local(self, tmp_path, monkeypatch):
+        """PATH 里若有 dwgread，应优先用它（用户自己装的版本）。"""
+        bin_dir = tmp_path / ".local" / "bin"
+        bin_dir.mkdir(parents=True)
+        (bin_dir / "dwgread").write_text("#!/bin/sh\n")
+        (bin_dir / "dwgread").chmod(0o755)
+
+        monkeypatch.setattr(dwg, "LOCAL_BIN", str(bin_dir))
+        monkeypatch.setattr(shutil, "which",
+                            lambda n: "/usr/local/bin/" + n if n == "dwgread" else None)
+        assert _dwgread_exe() == "/usr/local/bin/dwgread"
+
+    def test_no_false_positive_when_absent(self, tmp_path, monkeypatch):
+        """什么都没装时必须返回 None —— 不能把不存在的路径当成已安装。"""
+        monkeypatch.setattr(dwg, "LOCAL_BIN", str(tmp_path / "nope"))
+        monkeypatch.setattr(shutil, "which", lambda _n: None)
+        assert _dwgread_exe() is None
+
+    def test_convert_error_mentions_script(self, tmp_path, monkeypatch):
+        """报错文案要指向免 brew 方案 —— 用户的 brew 就是坏的。"""
+        monkeypatch.setattr(dwg, "LOCAL_BIN", str(tmp_path / "nope"))
+        monkeypatch.setattr(shutil, "which", lambda _n: None)
+        dxf, err = convert_with_libredwg(
+            Path("/nonexistent.dwg"), Path(tempfile.mkdtemp()))
+        assert dxf is None
+        assert err and "install_dwg_backend.sh" in err, \
+            f"dwgread 缺失的报错没有给出可执行的替代方案: {err!r}"
+
+    def test_oda_convert_error_mentions_app_path(self, tmp_path, monkeypatch):
+        """ODA 缺失的报错要点明 .app 位置，否则用户反复检查 PATH 也没用。"""
+        monkeypatch.setattr(dwg, "ODA_APP_PATHS", (str(tmp_path / "x"),))
+        monkeypatch.setattr(shutil, "which", lambda _n: None)
+        monkeypatch.setattr(Path, "is_file", lambda _s: False)
+        dxf, err = convert_with_oda(Path("/nonexistent.dwg"), Path(tempfile.mkdtemp()))
+        assert dxf is None
+        assert err and "/Applications/" in err, f"报错未提示 .app 实际位置: {err!r}"
+
+    def test_install_script_exists_and_is_valid_bash(self):
+        """免 brew 安装脚本必须存在且语法正确 —— 报错文案指向它，
+        它不能是空头支票。"""
+        p = (Path(__file__).resolve().parents[2] / "scripts" / "install_dwg_backend.sh")
+        assert p.is_file(), "缺少 scripts/install_dwg_backend.sh"
+        r = subprocess.run(["bash", "-n", str(p)], capture_output=True, text=True)
+        assert r.returncode == 0, f"脚本语法错误: {r.stderr}"
+        body = p.read_text()
+        assert "libredwg" in body.lower()
+        assert "ODAFileConverter.app" in body, "脚本没处理 macOS .app 已装的情况"
 
 
 # ---------------------------------------------------------------- 完整性校验
