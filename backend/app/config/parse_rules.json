@@ -1,0 +1,179 @@
+{
+  "version": "1.2",
+  "_note": "外部化解析规则。任何改动重启即生效，无需改代码。改错了可回滚。建议每次人工修正后新增一条 rule_id 便于溯源。",
+  "unit_label_rules": [
+    {
+      "rule_id": "UR-001-floor-coded",
+      "description": "楼层编码式单元号（101/110/201/...）。主信号：矢量文本层中形如 [楼层][序号] 的三位编号，与其邻近的面积标签配对。实测 A103=101~111(11户)、A104=201~211、A105=301~311、A106=401~403(3户)。序号上限 seq_max 需 >=11，否则 110/111 会被序号连续性信号误判为噪声。",
+      "code_pattern": "\\b([1-9](0[1-9]|1[0-9]))\\b",
+      "area_pattern": "^([\\d]+\\.?[\\d]*)$|^m2$|^m²$",
+      "applies_to": [
+        "floor_plan"
+      ],
+      "pair_window": 8,
+      "seq_min": 1,
+      "seq_max": 30,
+      "floor_prefix_mode": "leading_digit",
+      "label_scheme": "floor_coded",
+      "noise_labels": [
+        "449",
+        "984",
+        "889"
+      ],
+      "_noise_reason": "449/984/889 是设计师电话 +61 449 984 889 被拆成独立词。落在标题栏带内的数字一律视为噪声。"
+    },
+    {
+      "rule_id": "UR-002-ground-coded",
+      "description": "地面层字母编码式单元号（G01~G08）。实测 74KEELER ST 的 GROUND 层完全不用数字编码，而是 G+两位序号；对应单元表 A008 中的 G01~G08。楼层前缀为字母 G 而非数字，故floor_prefix_mode 必须为 letter_ground。",
+      "code_pattern": "\\b(G0[1-9])\\b",
+      "area_pattern": "^([\\d]+\\.?[\\d]*)$|^m2$|^m²$",
+      "applies_to": [
+        "floor_plan"
+      ],
+      "pair_window": 8,
+      "seq_min": 1,
+      "seq_max": 30,
+      "floor_prefix_mode": "letter_ground",
+      "label_scheme": "ground_coded",
+      "communal_pattern": "\\b(CLA\\d*)\\b",
+      "communal_description": "CO-LIVING 集体居住区（A008 中 CLA1@GROUND 50.75m2 + CLA2@LEVEL4 35.54m2，共 2 处，与封面申报的 2 COMMUNAL LIVING AREA 吻合）"
+    },
+    {
+      "rule_id": "UR-003-communal",
+      "description": "CO-LIVING 集体居住区编号（CLA1/CLA2）。非独立 unit，但需要配计量柜，故单独建档并标记 is_communal=true。",
+      "code_pattern": "\\b(CLA\\d{1,2})\\b",
+      "area_pattern": "^([\\d]+\\.?[\\d]*)$|^m2$|^m²$",
+      "applies_to": [
+        "floor_plan"
+      ],
+      "pair_window": 10,
+      "seq_min": 1,
+      "seq_max": 30,
+      "floor_prefix_mode": "any_floor",
+      "label_scheme": "communal",
+      "communal_pattern": "\\b(CLA\\d*)\\b"
+    }
+  ],
+  "unit_schedule_rules": [
+    {
+      "rule_id": "US-001",
+      "description": "UNIT SCHEDULE 单元表解析。实测 A008 是全项目唯一的权威单元清单表，按 STOREY 分块列出 'UNIT No. / DRY-WET AREA / REQUIRED AREA / PROVIDED AREA / GROSS AREA'。相比逐张平面图解析，单元表是更硬的证据（一次给出全部楼层 + 面积 + 序位），因此作为第二数据源与平面图交叉验证。",
+      "storey_markers": [
+        "GROUND FLOOR",
+        "LEVEL 1",
+        "LEVEL 2",
+        "LEVEL 3",
+        "LEVEL 4",
+        "BASEMENT"
+      ],
+      "storey_floor_map": {
+        "GROUND FLOOR": 0,
+        "BASEMENT": -1,
+        "LEVEL 1": 1,
+        "LEVEL 2": 2,
+        "LEVEL 3": 3,
+        "LEVEL 4": 4
+      },
+      "code_pattern": "\\b(G0[1-9]|CLA\\d{1,2}|[1-9](0[1-9]|1[0-9]))\\b",
+      "area_pattern": "^([\\d]{1,3}\\.\\d{1,2})\\s*m2$"
+    }
+  ],
+  "floor_detection_rules": [
+    {
+      "rule_id": "FR-001-zoning",
+      "description": "【已降级】图号第二位是分区号而非楼层 —— 实测 A101~A107 第2位恒为1，但分别对应 L1/L2/L3/L4。因此图号不能作为楼层信号，仅作页面标识。仅当页面无 LEVEL n PLAN 文本时作为兜底（可能误判，置信度低）。",
+      "patterns": [
+        "\\bA(?P<floor>[1-9])[0-9]{2}\\b"
+      ],
+      "floor_group": "floor"
+    },
+    {
+      "rule_id": "FR-002-text-level",
+      "description": "【主信号】标题栏 'LEVEL n PLAN' 文本 —— 实测 A103=LEVEL 1 PLAN, A104=LEVEL 2 PLAN, A105=LEVEL 3 PLAN, A106=LEVEL 4 PLAN。这是唯一100% 可靠的楼层来源。注意：单元表 A008 里同时出现 LEVEL 1..LEVEL 4 字样，故本规则仅在 role=floor_plan 时生效。",
+      "patterns": [
+        "\\bLEVEL\\s*(?P<floor>[1-9])\\s*PLAN\\b",
+        "\\bLEVEL\\s*(?P<floor>[1-9])\\b"
+      ],
+      "floor_group": "floor"
+    },
+    {
+      "rule_id": "FR-004-ground",
+      "description": "【主信号-地面层】'GROUND FLOOR' 文本。实测出现在 A007/A008/A009/A010/A011/A014/A102 等 GROUND 平面图与单元表上。",
+      "patterns": [
+        "\\bGROUND\\s+FLOOR\\b",
+        "\\b(?P<floor>0)\\s*\\b(?:GROUND|SITE)\\s*PLAN\\b"
+      ],
+      "floor_group": "floor"
+    },
+    {
+      "rule_id": "FR-005-ground-label",
+      "description": "【地面层兜底】页面矢量文本层含 G0X 编码时判定为 GROUND。与 FR-004 投票，2 票一致才采纳。",
+      "patterns": [],
+      "floor_group": "floor"
+    },
+    {
+      "rule_id": "FR-003-basement",
+      "description": "地下层标记。负一层记为 -1。",
+      "patterns": [
+        "\\bBASEMENT\\b",
+        "\\bB\\s?1\\b"
+      ],
+      "floor_group": "floor"
+    }
+  ],
+  "drawing_no_rules": [
+    {
+      "rule_id": "DR-001-A1xx",
+      "description": "标准图号 A1xx（建筑平面图区）。",
+      "pattern": "\\b(A[0-9]{3})\\b"
+    },
+    {
+      "rule_id": "DR-002-A0xx",
+      "description": "总图/表格区图号 A0xx（如 A008 单元表）。",
+      "pattern": "\\b(A0[0-9]{2})\\b"
+    }
+  ],
+  "page_role_rules": [
+    {
+      "rule_id": "PR-001",
+      "description": "页面角色判定：UNIT SCHEDULE 标题优先（单元表是权威数据源），否则按标记词数量与图号前缀区分 floor_plan / other。A0xx 图号默认不是楼层平面图，避免 A004Site 图被误判。",
+      "floor_plan_markers": [
+        "UNIT",
+        "LIVING",
+        "BALCONY",
+        "BEDROOM",
+        "KITCHEN",
+        "BATH",
+        "SETBACK"
+      ],
+      "unit_schedule_markers": [
+        "UNIT SCHEDULE",
+        "UNIT TYPE",
+        "UNIT COUNT",
+        "SINGLE",
+        "DOUBLE",
+        "CO-LIVING"
+      ],
+      "unit_schedule_title": "UNIT SCHEDULE",
+      "floor_plan_marker_threshold": 6,
+      "excluded_drawing_prefixes": [
+        "A000",
+        "A001",
+        "A002",
+        "A003",
+        "A004",
+        "A005",
+        "A006"
+      ],
+      "titleblock_y_min": 0.86
+    }
+  ],
+  "confidence": {
+    "w_text": 0.6,
+    "w_seq": 0.25,
+    "w_geo": 0.15,
+    "w_schedule": 0.4,
+    "auto_accept": 0.85,
+    "needs_review": 0.55
+  }
+}

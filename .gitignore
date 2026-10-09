@@ -1,0 +1,85 @@
+# ---- CodeBuddy / Genie 工具链目录（与项目代码无关）----
+.codebuddy/
+.templates/
+.genie/
+
+# ---- 运行期数据（绝不入库）----
+var/
+*.db
+*.sqlite
+*.sqlite3
+backend/var/
+
+# ---- 上传的用户图纸（含商业敏感信息）----
+*.dwg
+*.dxf
+!backend/tests/fixtures/*.dwg
+!backend/tests/fixtures/*.dxf
+uploads/
+
+# ---- 导出产物 ----
+*.xlsx
+*.docx
+*.pdf
+!docs/*.pdf
+*.jpg
+*.jpeg
+*.png
+!/docs/**/*.png
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# ---- Node ----
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- 编辑器 / IDE ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ---- 密钥与本地配置（重要）----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+credentials.json
+secrets.json
+*.p12
+*.pfx
+
+# ---- 临时文件 ----
+tmp/
+temp/
+*.log
+.DS_Store

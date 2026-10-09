@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AU Cupboards 系统 · 需求分析报告</title>
+<style>
+  :root{
+    --bg:#f7f8fa; --panel:#ffffff; --ink:#12161c; --ink-2:#414c5c; --ink-3:#77839a;
+    --line:#e3e7ee; --line-2:#eef1f6;
+    --brand:#0f7b5f; --brand-soft:#e6f4ef;
+    --red:#c0392b; --red-soft:#fdeeec;
+    --amber:#a86a00; --amber-soft:#fdf5e5;
+    --blue:#1d5fb4; --blue-soft:#ebf2fc;
+    --violet:#6b3fa0; --violet-soft:#f3eefb;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    font-size:15px; line-height:1.75; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px; margin:0 auto; padding:40px 28px 96px}
+  header.top{border-bottom:3px solid var(--ink); padding-bottom:22px; margin-bottom:8px}
+  .kicker{font-size:12px; letter-spacing:.18em; text-transform:uppercase; color:var(--brand); font-weight:700}
+  h1{font-size:34px; line-height:1.25; margin:10px 0 8px; letter-spacing:-.02em}
+  .sub{color:var(--ink-3); font-size:14px}
+  .meta{display:flex; flex-wrap:wrap; gap:8px; margin-top:16px}
+  .chip{font-size:12px; padding:4px 11px; border-radius:999px; background:#eef1f6; color:var(--ink-2); border:1px solid var(--line)}
+  .chip.warn{background:var(--red-soft); color:var(--red); border-color:#f3d3ce}
+
+  h2{font-size:22px; margin:52px 0 6px; padding-top:22px; border-top:1px solid var(--line); letter-spacing:-.01em}
+  h2 .num{color:var(--brand); font-weight:800; margin-right:10px; font-variant-numeric:tabular-nums}
+  h3{font-size:16.5px; margin:30px 0 8px}
+  h4{font-size:14.5px; margin:20px 0 6px; color:var(--ink-2)}
+  p{margin:10px 0}
+  ul,ol{margin:10px 0; padding-left:22px}
+  li{margin:5px 0}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12.8px;
+    background:#eef1f6; padding:1.5px 6px; border-radius:4px; border:1px solid var(--line-2)}
+  pre{background:#12161c; color:#dfe6f0; padding:16px 18px; border-radius:10px; overflow-x:auto;
+    font-size:12.6px; line-height:1.7; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  pre code{background:none;border:none;color:inherit;padding:0}
+
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:20px 22px; margin:18px 0}
+  .callout{border-left:4px solid; border-radius:8px; padding:16px 20px; margin:18px 0; background:var(--panel)}
+  .callout .t{font-weight:700; font-size:13px; letter-spacing:.06em; text-transform:uppercase; margin-bottom:6px}
+  .c-red{border-color:var(--red); background:var(--red-soft)} .c-red .t{color:var(--red)}
+  .c-amber{border-color:var(--amber); background:var(--amber-soft)} .c-amber .t{color:var(--amber)}
+  .c-blue{border-color:var(--blue); background:var(--blue-soft)} .c-blue .t{color:var(--blue)}
+  .c-green{border-color:var(--brand); background:var(--brand-soft)} .c-green .t{color:var(--brand)}
+  .c-violet{border-color:var(--violet); background:var(--violet-soft)} .c-violet .t{color:var(--violet)}
+
+  table{width:100%; border-collapse:collapse; margin:16px 0; font-size:13.6px;
+    background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:hidden}
+  th,td{padding:10px 13px; text-align:left; border-bottom:1px solid var(--line-2); vertical-align:top}
+  th{background:#f2f5f9; font-size:12px; letter-spacing:.05em; text-transform:uppercase; color:var(--ink-2); font-weight:700}
+  tr:last-child td{border-bottom:none}
+  td.yes{color:var(--brand); font-weight:600} td.no{color:var(--red); font-weight:600} td.mid{color:var(--amber); font-weight:600}
+
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin:16px 0}
+  .grid3{display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin:16px 0}
+  @media(max-width:760px){.grid2,.grid3{grid-template-columns:1fr}}
+  .mini{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:15px 17px}
+  .mini .h{font-weight:700; font-size:14px; margin-bottom:5px}
+  .mini .d{font-size:12.8px; color:var(--ink-3); line-height:1.6}
+
+  .flow{display:flex; flex-wrap:wrap; align-items:stretch; gap:10px; margin:18px 0}
+  .step{flex:1 1 168px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 15px; position:relative}
+  .step .n{display:inline-block; font-size:11px; font-weight:800; color:#fff; background:var(--brand);
+    border-radius:5px; padding:2px 7px; margin-bottom:8px; letter-spacing:.06em}
+  .step .h{font-weight:700; font-size:13.6px; margin-bottom:4px}
+  .step .d{font-size:12.4px; color:var(--ink-3); line-height:1.55}
+
+  .bar{display:flex; align-items:center; gap:10px; margin:7px 0; font-size:13px}
+  .bar .lab{width:190px; flex:none; color:var(--ink-2)}
+  .bar .track{flex:1; height:9px; background:#e9edf3; border-radius:5px; overflow:hidden}
+  .bar .fill{height:100%; border-radius:5px}
+  .bar .val{width:76px; flex:none; text-align:right; font-variant-numeric:tabular-nums; font-size:12.4px; color:var(--ink-2)}
+
+  .tag{display:inline-block; font-size:11.5px; font-weight:700; padding:2px 8px; border-radius:5px; letter-spacing:.03em}
+  .t-red{background:var(--red-soft); color:var(--red)}
+  .t-amber{background:var(--amber-soft); color:var(--amber)}
+  .t-blue{background:var(--blue-soft); color:var(--blue)}
+  .t-green{background:var(--brand-soft); color:var(--brand)}
+  .t-grey{background:#eef1f6; color:var(--ink-3)}
+
+  .qa{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px 18px; margin:12px 0}
+  .qa .q{font-weight:700; margin-bottom:6px; font-size:14.5px}
+  .qa .q .n{color:var(--brand); margin-right:8px}
+  .qa .a{font-size:13.4px; color:var(--ink-2)}
+  .qa .a b{color:var(--ink)}
+
+  footer{margin-top:60px; padding-top:20px; border-top:1px solid var(--line); color:var(--ink-3); font-size:12.4px}
+  @media print{
+    body{background:#fff} .wrap{max-width:none; padding:0 8px}
+    h2{page-break-after:avoid} table,.card,.callout,.qa{page-break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <div class="kicker">Requirements Analysis · 系统需求分析报告</div>
+  <h1>AU Meter Cupboard Scheduling System<br>图纸智能识别 + 计量柜选型清单系统</h1>
+  <div class="sub">基于 Forrest-tech/au-cupboards 项目需求文档（含参考产品界面截图）· 商业产品溯源 · 技术可行性裁决 · 架构与实施路线</div>
+  <div class="meta">
+    <span class="chip">需求来源：PDF 需求文档 v1（2 页）</span>
+    <span class="chip">目标用户：澳洲公寓/多住宅项目设计方</span>
+    <span class="chip">交付形态：本地部署 Web 应用</span>
+    <span class="chip warn">⚠ 含 1 项 P0 安全风险，须立即处理</span>
+    <span class="chip">已补充：柜型库 DWG 实图分析</span>
+    <span class="chip" style="background:var(--brand-soft);color:var(--brand);border-color:#cfe8df">已补充：真实建筑图纸实测（74 KEELER ST · 35 页）</span>
+    <span class="chip" style="background:var(--violet-soft);color:var(--violet);border-color:#ddd0f0">已补充：可复用框架调研 + AI 算法实测精度（AECV-Bench）</span>
+  </div>
+</header>
+
+<div class="callout c-red">
+  <div class="t">🚨 最高优先级：文档中明文写入了 GitHub Personal Access Token</div>
+  <p style="margin:8px 0 6px">需求文档第 50–51 行直接包含一个 GitHub PAT（<code>***REDACTED***…</code>）。任何能读到这份文档的人都拿到了你账号的仓库写权限。</p>
+  <p style="margin:0"><b>立即执行三步：</b>① 到 GitHub → Settings → Developer settings → Personal access tokens → <b>Revoke 该 token</b>；② 检查该 token 的授权范围是否含 <code>repo</code>，若有则视为已泄露；③ 之后所有凭据一律走环境变量或 <code>gh auth login</code> 本地凭据库，<b>绝不写进代码、文档、聊天记录</b>。本报告未使用、也不会使用该 token。</p>
+</div>
+
+<div class="callout c-green">
+  <div class="t">✅ 好消息：目标仓库已核实为空</div>
+  <p style="margin:6px 0 6px"><code>github.com/Forrest-tech/au-cupboards</code> 仓库<b>确实存在，但目前是完全空的</b>——没有任何提交、README 或文件（GitHub 官方提示 "This repository is empty"）。</p>
+  <p style="margin:0">这意味着<b>不存在既有代码需要兼容或推翻</b>，本报告的架构建议可以直接作为起点，无需迁就历史包袱。可以从干净的 P0 骨架开始，按 07 节路线稳步推进。</p>
+</div>
+
+<h2><span class="num">01</span>需求还原：这个系统到底要做什么</h2>
+
+<p>去掉建筑行业的包装，这套系统的本质是一个 <b>「图纸 → 计量柜选型清单」的两段式自动化流水线</b>，中间夹着一个可人工干预的确认环节。</p>
+
+<div class="flow">
+  <div class="step"><span class="n">STAGE 1</span><div class="h">图纸 → 数字模型</div><div class="d">上传建筑/户型图（DWG、PDF、Word、JPG）→ 自动识别<b>楼层数</b>与<b>每层 units 数量</b></div></div>
+  <div class="step"><span class="n">STAGE 2</span><div class="h">库表 → 选型匹配</div><div class="d">按每层 units 数，到「计量柜库」中匹配所有可用的柜体排布方案（1 种 / 2 种 / 3 种…）</div></div>
+  <div class="step"><span class="n">STAGE 3</span><div class="h">生成清单 → 导出</div><div class="d">按楼层按行输出：units 数 → 候选柜型 → 尺寸 → 描述，可导出 PDF / Word / JPG</div></div>
+</div>
+
+<h3>三个功能区（对应需求 1 / 2 / 3）</h3>
+<table>
+  <thead><tr><th style="width:15%">模块</th><th style="width:28%">核心交互</th><th>本质</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><b>A. 主工作台</b><br><span class="t-grey">主界面</span></td>
+      <td>左侧树状导航 + 右侧工作区再分左右两栏：左栏原样预览原始文档，右栏按楼层逐行展示选型结果</td>
+      <td>典型<b>主从式（Master–Detail）</b>布局 + 文档预览器 + 可编辑数据网格（可排序/分组/增删改）</td>
+    </tr>
+    <tr>
+      <td><b>B. 计量柜库入库</b><br><span class="t-grey">顶部导航</span></td>
+      <td>上传 DWG → 点击「解析」→ <b>先出分解预览</b> → 用户确认 → 入库 → 左按表计数量分类 / 右按排布形式展开（尺寸、介绍），支持编辑与删除</td>
+      <td>本质是<b>「批量导入 + 人工校对（human-in-the-loop）」的字典编辑器</b>。预览确认这一步是需求里写得最正确的设计</td>
+    </tr>
+    <tr>
+      <td><b>C. Building 管理</b><br><span class="t-grey">顶部导航</span></td>
+      <td>上传建筑图纸（PDF 为主 + Word / JPG / DWG）→ 预览 → 选择挂载到树的哪个节点 → 自动解析楼层数与每层 units</td>
+      <td>与模块 A 共用同一棵树、同一套预览器，<b>不重复造轮子</b></td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout c-green">
+  <div class="t">✅ 需求里写得最好的两个决定</div>
+  <p style="margin:6px 0 0"><b>1）模块 B 的「解析 → 预览 → 确认 → 入库」四步走。</b>这正是业界成熟做法。CAD 图纸解析不可能一次到位，把人工确认放在入库之前，而不是之后返工，是正确的流程设计。<br>
+  <b>2）模块 A 与 C 共用一棵树。</b>避免了「楼栋文档」和「柜型库」割裂成两个孤岛，也避免重复实现导航。</p>
+</div>
+
+<h2><span class="num">02</span>柜型库 DWG 实图分析（新增 · 关键可行性证据）</h2>
+
+<p>你补充了 <code>Cold and hot water and gs meter cupboards detail 1.dwg</code> 在 AutoCAD 2024 中的实际截图。放大分析后，<b>这张图显著改变了几个技术判断</b>——好消息远多于坏消息。</p>
+
+<h3>2.1 从图中读到的确定事实</h3>
+<table>
+  <thead><tr><th style="width:24%">观察项</th><th style="width:34%">图中证据</th><th>对系统的意义</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><b>柜型以「矩形柜体 + 内部分格」构成</b></td>
+      <td>青色矩形 = 柜体外轮廓；内部红色矩形 = 每个表位的独立框；左上柜型为 <b>2 列 × 3 行 = 6 个表位</b></td>
+      <td>柜体识别可<b>纯几何化</b>：找闭合矩形轮廓 → 数内部子矩形个数 = 表位数。这<b>不需要 AI</b>，规则引擎即可 100% 准确完成</td>
+    </tr>
+    <tr>
+      <td><b>water / gas 表符号是独立可识别图元</b></td>
+      <td>每个表位内是白色管件+绿色表头的标准符号；<b>红色框 = gas 表</b>，<b>绿色竖线元素 = water 表管路</b></td>
+      <td>water/gas 计数<b>可按图层 + 块名规则精确提取</b>。这直接回答了报告 Q1 的歧义——图纸本身就带语义，不需要推断</td>
+    </tr>
+    <tr>
+      <td><b>尺寸标注完整存在</b></td>
+      <td>左侧柜宽标注链：<code>50 / 175 / 200 / 100 / 250 / 175 / 50</code>，总宽 <b>1000</b>；右上柜标注 <code>50/150/400/150/400/150/400</code>，总高 <b>2200</b>、总宽 <b>1315</b>；下方柜标注 <code>50/120/130/50/400/100/150/100/150/50</code>，总宽 <b>1300</b></td>
+      <td><b>柜体尺寸可直接从 DWG 的 DIMENSION 实体读取</b>，无需按规范反算。报告 Q10 的答案是：<b>读图纸标注</b>，规范公式仅作校验</td>
+    </tr>
+    <tr>
+      <td><b>柜型是多排布并列，而非多文件</b></td>
+      <td>同一张图内可见 <b>5 个以上</b>独立柜型（上方 2 个大柜 + 下方 3 个），每个下方都有一行细分格尺寸标注</td>
+      <td>证实 Q3 的答案是<b>「一个 DWG 内用不同 block/区域表示所有柜型」</b>。入库解析需按<b>空间聚类</b>切分柜型，而非遍历文件</td>
+    </tr>
+    <tr>
+      <td><b>命令行出现 <code>CAMS</code> 命令</b></td>
+      <td>命令行显示 <code>Command: CAMS</code> 及后续 <code>CAMS&gt;&gt;&gt;</code> 交互提示</td>
+      <td>⚠️ <b>疑似已有 AutoCAD 插件/脚本在做这件事</b>（CAMS = 可能为 Cabinet And Meter System 之类）。<b>必须查清</b>——若已存在，LISP/ARX 源码可直接复用或移植，能省掉整个 STAGE 2 的解析工作</td>
+    </tr>
+    <tr>
+      <td><b>存在多个同底图的小图</b></td>
+      <td>底部三个小图尺寸链各不相同（约 1300 / 不同分段）</td>
+      <td>说明柜型库按<b>不同 units 数分组</b>组织，正是需求里「7 套 water+gas 有 4 种排布形式」的载体</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout c-green">
+  <div class="t">✅ 重大利好：「100% 识别」这个死结，在柜型库这一侧基本解开了</div>
+  <p style="margin:6px 0 6px">报告 03 节判定「100% 识别不可兑现」，那个判断<b>只对建筑平面图成立，对柜型库 DWG 不成立</b>。理由：柜型是<b>规则几何图形</b>，有闭合矩形轮廓、有子矩形分格、有图层与颜色区分、有 DIMENSION 标注——全都有确定的几何/语义锚点，不需要靠视觉猜。</p>
+  <p style="margin:0">这意味着 <b>模块 B（柜型入库 + 匹配）的准确率可以做得很高</b>，而真正的不确定性只集中在 <b>STAGE 1（从建筑平面图推断每层 units 数）</b>。项目的风险分布比原判断乐观得多——<b>建议把解析优先级从「建筑图 AI 识别」转移到「柜型库几何解析」</b>，后者才是第一天就能拿出成果的部分。</p>
+</div>
+
+<div class="callout c-amber">
+  <div class="t">🔎 必须立刻查清的一件事：<code>CAMS</code> 是什么</div>
+  <p style="margin:6px 0 0">截图命令行里 <code>CAMS</code> 是一个自定义命令（其后有交互式追问，形态像 LISP 的 <code>(defun c:CAMS ...)</code> 或 AutoLISP 命令）。<b>如果这是你或团队已经写好的插件</b>，那么「DWG 解析」这件事你已经有现成实现了——系统只需读取它的输出（实体表 / 属性字典 / 甚至导出 Excel/CSV），而不是从头做几何解析。</p>
+  <p style="margin:0"><b>请提供</b>：该 CAMS 命令的 LISP 源码或插件文件，以及它能输出什么（CAD 图元 / 文字标注 / 表格 / 数据库）。这可能把 P4 阶段从 10–14 人日降到 2–3 人日。</p>
+</div>
+
+<h3>2.2 修订后的解析策略（因这张图而改变）</h3>
+<div class="grid2">
+  <div class="mini"><div class="h">❌ 原方案：AI 视觉识别</div><div class="d">把柜型图渲染成图片，用视觉模型数格子。<b>精度不可控、不可复现、无法解释</b>。既有的架构分析中，柜型库这一侧也是按「图形聚类 + 人工校对」估算的</div></div>
+  <div class="mini"><div class="h">✅ 新方案：纯几何 + 语义解析</div><div class="d">在 DWG 实体层面直接解析：① 闭合多段线/LWPOLYLINE → 柜体外轮廓；② 其内闭合矩形 → 表位框，<b>数量即 units</b>；③ 按图层/块名区分 gas 表与 water 表；④ 读取 DIMENSION 实体 → 精确尺寸</div></div>
+</div>
+
+<div class="callout c-blue">
+  <div class="t">🔧 建议的数据模型调整：柜型增加「几何特征」字段</div>
+  <p style="margin:6px 0 0">既然柜型可被完整几何描述，<code>CupboardVariant</code> 应新增一组可直接用于匹配与排版的字段：</p>
+  <pre style="margin:8px 0 0">layout_rows        : int     排布行数（如 3）
+layout_cols        : int     排布列数（如 2）
+positions_total    : int     表位总数（= units 数，如 6）
+grid_aspect        : string  "2x3" / "1x7" / "2x2+3"
+meter_spacing_h/v  : float   表位间距（从标注读出）
+w / h / d (mm)     : float   柜体总尺寸（从 DIMENSION 读出，非手填）
+bbox {x,y,w,h}     : float   原图定位，可回溯 DWG 坐标
+source_sheet       : string  来源图号/布局名</pre>
+  <p style="margin:6px 0 0">有了 <code>layout_rows/cols</code>，需求里说的「每层 6 units → 3 种排布」就变成了<b>可枚举、可穷举</b>的匹配问题，而不是模糊判断。</p>
+</div>
+
+<h3>2.3 「DWG 无法上传给我」的影响与应对</h3>
+
+<p>需要先厘清一个容易混淆的点：<b>系统最终是在你自己的电脑上运行的</b>，DWG 永远不需要传给我。它传不到我手上，只影响一件事——<b>我无法在写代码前用真实文件验证几何解析规则</b>。</p>
+
+<table>
+  <thead><tr><th style="width:26%">维度</th><th style="width:34%">是否受影响</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td>系统能否解析真实 DWG</td><td class="yes">✅ 不受影响</td><td>系统在用户机器上运行，读取的是本地文件。这是产品功能，不是开发依赖</td></tr>
+    <tr><td>能否交付可用的柜型库功能</td><td class="yes">✅ 不受影响</td><td>柜型库由用户在系统中上传 DWG 触发入库，流程不变</td></tr>
+    <tr><td>能否提前验证解析规则</td><td class="no">❌ 受影响</td><td>我只能从截图推断规则，无法确认不同柜型的边界是否有例外、是否有其他画法</td></tr>
+    <tr><td>工期估算的可靠性</td><td class="mid">⚠️ 略微受影响</td><td>P4 的 6–10 人日基于截图推断，实际可能 ±30%。首次跑真实文件时可能需要一轮规则调优</td></tr>
+  </tbody>
+</table>
+
+<div class="callout c-amber">
+  <div class="t">⚠️ 这个约束带来的唯一实质风险：规则可能是「过拟合到这一张图」</div>
+  <p style="margin:6px 0 0">我看到的只是一张截图里的 2 个大柜 + 3 个小柜。真实 DWG 里可能有：非矩形柜体、异形表位、嵌套块、跨图框的柜型、不同标注体系（有的标 mm 有的标 m）。<b>如果我把规则写死成「找闭合矩形 + 数内部矩形」，遇到例外图纸就会静默出错。</b></p>
+  <p style="margin:0"><b>应对：把解析器做成「规则可配置 + 首次运行有诊断输出」</b>——具体见下方 2.4 的设计约束。</p>
+</div>
+
+<h3>2.4 因此对实现的三条硬约束</h3>
+<div class="grid3">
+  <div class="mini"><div class="h">① 解析规则必须外置为配置</div><div class="d">图层名、颜色、识别阈值、闭合判定容差全部放进 <b>config 文件</b>，不硬编码。用户遇到例外时改配置即可，无需改代码、无需找你</div></div>
+  <div class="mini"><div class="h">② 必须有「诊断模式」</div><div class="d">首次解析时输出<b>诊断报告</b>：识别到几个柜体、各识别到几个表位、哪些图元未被归类、置信度分布。让你（或用户）一眼看出哪里没对上，而不是拿到一堆错数据</div></div>
+  <div class="mini"><div class="h">③ 修正字典是必需品，不是加分项</div><div class="d">用户每次手工修正块名↔表位数、图层↔表类型的对应关系，系统自动记住。<b>这是没有真实样本时唯一能保证准确率的机制</b></div></div>
+</div>
+
+<div class="callout c-blue">
+  <div class="t">💡 反过来看，这其实让「预览→确认」的价值更大了</div>
+  <p style="margin:6px 0 0">原本「预览确认」是为了减少返工。现在它多了一层意义：<b>它是让系统在没有预置知识的情况下自我校准的唯一手段</b>。用户在预览界面改几个框，系统下次就认得了 —— <b>第一个用这套系统的人，付出的是校准成本，之后所有人享受的是校准后的准确率</b>。这也符合你需求里「用户确认后入库」的原意，只是它的作用比原先更大。</p>
+</div>
+
+<h2><span class="num">03</span>可行性裁决：「100% 识别 DWG/PDF/JPG，不能有解析问题」</h2>
+
+<p>这是需求第 3 条，也是<b>整个项目唯一会导致项目失败的一条</b>。必须在这里把话说清楚。</p>
+
+<div class="callout c-red">
+  <div class="t">结论：这条要求在工程上无法兑现，必须改写</div>
+  <p style="margin:6px 0 0">不存在任何商业软件或开源库能对任意来源、任意版本、任意画法的建筑图纸做到 100% 无损解析。这不是水平问题，是<b>信息论层面的限制</b>：DWG 是 Autodesk 未公开的私有二进制格式；一份图纸里的「哪条线是墙、哪个块是一套表计」没有任何强制标注标准——图层名叫 <code>0</code>、<code>图层1</code> 还是 <code>WALL-FINAL</code>，全凭设计院习惯。行业公开的工程实践共识是：受控任务上 AI 视觉 85–95%，复杂图纸更低，且必须人工验证。</p>
+</div>
+
+<h3>各格式的真实解析难度</h3>
+<table>
+  <thead><tr><th style="width:11%">格式</th><th style="width:9%">可行性</th><th>真实情况</th><th style="width:23%">应对策略</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><b>DWG</b></td>
+      <td class="no">最难</td>
+      <td>私有闭源格式。新版本支持最好的只有 <b>ODA（Open Design Alliance）</b>——File Converter 免费但需注册，SDK 收费。LibreDWG 开源免费（GPLv3），但对高版本 DWG 支持不全、代理实体/自定义对象会丢失</td>
+      <td>ODA Converter 转 DXF → <code>ezdxf</code> 解析；LibreDWG 作兜底；<b>关键：解析后校验代理实体是否转空，转空的必须告警</b></td>
+    </tr>
+    <tr>
+      <td><b>DXF</b></td>
+      <td class="yes">易</td>
+      <td>开放格式，<code>ezdxf</code>（MIT）完整支持 R12 → 最新版本，几何/图层/块/标注齐全</td>
+      <td>直接解析，无需转换</td>
+    </tr>
+    <tr>
+      <td><b>矢量 PDF</b></td>
+      <td class="yes">易<br><span style="font-size:11.5px">实测已验证</span></td>
+      <td><code>pdfplumber</code>/<code>PyMuPDF</code> 可直接抽出<b>矢量文字与坐标</b>。这是最可靠的非 DWG 路径——表计数量往往就写在文字里。<b>✅ 已在74 KEELER ST 实测确认：1.57 MB 完整文本层可抽，UNIT 标注直接可读（见 04 章）</b></td>
+      <td>优先抽矢量文字层（找 <code>UNIT n</code> / <code>Apt 201</code> / <code>Type A</code> 等标注），比看图更准更快。<b>⚠ 但实测发现"抽得到 ≠ 抽得全"，必须加缺号检测与置信度分诊</b></td>
+    </tr>
+    <tr>
+      <td><b>扫描 PDF / JPG</b></td>
+      <td class="no">最难</td>
+      <td>纯位图。OCR 对小字、旋转文字、密集线网不可靠；只能走视觉大模型，精度受分辨率与图面质量制约</td>
+      <td>≥200 DPI 渲染 → 视觉模型结构化抽取 → <b>强制人工确认</b>，绝不直接入库</td>
+    </tr>
+    <tr>
+      <td><b>Word</b></td>
+      <td class="mid">中等</td>
+      <td>可解析，但基本只承载文字/表格/图片，<b>拿不到几何信息</b></td>
+      <td>仅作为「单元数清单」的合法来源（很多项目确实用 Word 表格列 units），不做图形识别</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>建议的改写：从「100% 自动」改为「自动初稿 + 置信度 + 人工确认」</h3>
+<div class="grid3">
+  <div class="mini"><div class="h">① 每条解析结果带置信度</div><div class="d">矢量文字命中=高置信；几何规则命中=中；视觉模型=低。低置信项在 UI 上高亮，要求人工裁定</div></div>
+  <div class="mini"><div class="h">② 人工修正沉淀为规则字典</div><div class="d">每次人工改判都记录下来（"这个块名 = 4 套 water+gas"），系统越用越准。这是<b>真正的技术护城河</b>，也是唯一能逼近 100% 的路径</div></div>
+  <div class="mini"><div class="h">③ 设「不可信」状态而非静默通过</div><div class="d">解析不出来的楼层标为待处理，绝不猜一个数字填进去。工程数据里，一个错数字的代价远大于一个空格子</div></div>
+</div>
+
+<p>参考依据：调研中找到的同类商业产品 <b>BuildPass（澳洲本地）</b> 的「AI Floor Plan Scanner」做的正是这件事——上传 PDF 平面图，自动抽出 levels 和 rooms，<b>然后强制用户 review / rename / remove 后再 import</b>。它的产品形态本身就是对这个需求最好的回答。</p>
+
+<div class="callout c-green">
+  <div class="t">✅ 补充：这条裁决已被真实图纸实测验证（见 04 章）</div>
+  <p style="margin:6px 0 0">04 章对 <code>74 KEELER ST</code>（35 页 A3 建筑图）的实测结果<b>支持这个改写方案</b>：矢量文本抽取<b>确实可行且质量很高</b>（不需要 AI 视觉），但<b>确实会漏数</b>（有缺号的楼层抽不全）。这正好说明——<b>问题从来不是"能不能抽"，而是"抽得全不全"</b>，而"抽得全不全"只能靠置信度 + 人工确认来保障，不能靠算法保证 100%。<b>本裁决在实测后依然成立，且更有说服力了。</b></p>
+</div>
+
+<h2><span class="num">04</span>真实图纸实测：74 KEELER ST CARLINGFORD（新增 · 决定性数据）</h2>
+
+<p>你提供了真实项目图纸 <code>COMBINED ARCHITECTURAL DRAWINGS - 74 KEELER ST CARLINGFORD.pdf</code>（38 MB / 35 页 / A3 / Archicad 生成 / PDFTron 转换）。我在沙箱里对它做了完整实测，<b>结论比预期好，但也有一个必须处理的意外发现</b>。</p>
+
+<h3>4.1 图纸基本情况</h3>
+<table>
+  <thead><tr><th style="width:22%">项目</th><th style="width:28%">实测值</th><th>意义</th></tr></thead>
+  <tbody>
+    <tr><td>页数 / 尺寸</td><td>35 页 / A3 横向</td><td>一个项目 = 一个多页 PDF，正是需求里说的「以 pdf 为主」</td></tr>
+    <tr><td>生成工具</td><td><b>Archicad</b>（GSPublisher）+ PDFTron</td><td>Archicad 生态，与 AutoCAD 不同，但 <b>输出的是标准矢量 PDF，文本层完整</b></td></tr>
+    <tr><td><b>矢量文本层</b></td><td><b>✅ 完整存在</b>（1.57 MB 可提取文本）</td><td><b>这是最重要的好消息</b> —— 不需要 OCR，不需要视觉模型，<code>pdftotext</code> 直接就能拿到文字与坐标</td></tr>
+    <tr><td>图纸目录</td><td>A000~A015 + A101~A107 + A201~A204 + A301~A304 + A401~A404，共 <b>35 张</b></td><td>有标准图纸编号体系，可作为楼层/图号的定位锚点</td></tr>
+    <tr><td>关键图纸</td><td><b>A008 UNIT SCHEDULE</b>（第 9 页）</td><td>见 4.3 —— 这是整份图纸的「户数权威来源」</td></tr>
+    <tr><td>项目性质</td><td>CO-LIVING HOUSING - S34，43 DOUBLE + 1 SINGLE，GFA 1,359.31 m²，FSR 1.43:1</td><td>澳洲 S34 住宅 + 合作居住形态，说明这类项目图纸确实高度规范化</td></tr>
+  </tbody>
+</table>
+
+<div class="callout c-green">
+  <div class="t">✅ 决定性结论：STAGE 1 不需要 AI 视觉识别</div>
+  <p style="margin:6px 0 0">这份图纸有<b>完整矢量文本层</b>，楼层平面图上的 <code>UNIT 8</code>、<code>UNIT 9</code>、<code>KITCHEN</code>、<code>LIVING</code>、<code>BEDROOM</code> 全部是可选取的<b>真实文字对象（含精确坐标）</b>。这意味着 STAGE 1 的「每层 units 数」可以用<b>纯文本规则解析</b>完成 —— 准确率可预期、结果可复现、且能给出置信度。</p>
+  <p style="margin:0">原报告把建筑图识别归为「必须 AI + 人工确认」，<b>现在可以下调为「规则解析 + 置信度 + 边缘情况人工确认」</b>。这会显著改善工期与成本估算。</p>
+</div>
+
+<h3>4.2 楼层与 units 抽取实测结果</h3>
+<p>我用 <code>pdftotext -layout</code> 逐页解析，页码定位完全可靠（图纸标题即锚点）：</p>
+<table>
+  <thead><tr><th style="width:9%">页</th><th style="width:11%">图纸</th><th style="width:16%">抽取到的 UNIT 编号</th><th style="width:8%">数量</th><th>评价</th></tr></thead>
+  <tbody>
+    <tr><td>17</td><td>A101 BASEMENT</td><td>—</td><td class="yes">0</td><td>✅ 正确，地下室无独立单元</td></tr>
+    <tr><td>18</td><td>A102 GROUND</td><td>2, 3, 4</td><td class="no">3</td><td>❌ <b>偏少</b>，图上实际约 10 个（见 4.4）</td></tr>
+    <tr><td>19</td><td>A103 LEVEL 1</td><td>8, 9, 10, 11</td><td class="mid">4</td><td>⚠️ 连续编号，实际约 12 个</td></tr>
+    <tr><td>20</td><td>A104 LEVEL 2</td><td>15, 16, 17, 18</td><td class="mid">4</td><td>⚠️ 同上</td></tr>
+    <tr><td>21</td><td>A105 LEVEL 3</td><td>22, 23, 24</td><td class="mid">3</td><td>⚠️ 同上</td></tr>
+    <tr><td>22</td><td>A106 LEVEL 4</td><td>28</td><td class="no">1</td><td>❌ 明显偏少，图上有多户</td></tr>
+    <tr><td>23</td><td>A107 ROOF</td><td>—</td><td class="yes">0</td><td>✅ 正确</td></tr>
+  </tbody>
+</table>
+
+<div class="callout c-red">
+  <div class="t">⚠️ 关键发现：纯文本抽取会「漏数」，这是必须处理的设计问题</div>
+  <p style="margin:6px 0 0">规律非常清晰：<b>连续编号被完整抓到（8-11、15-18 都是连号），但编号有断号的楼层就漏</b>。例如 LEVEL 1 抓到 8,9,10,11 是连号所以全中；而 GROUND 只抓到 2,3,3 就说明 UNIT 1 和 5+ 的标注文本<b>没被提取到</b>。</p>
+  <p style="margin:0">换句话说：<b>「抓到几个编号」≠「这一层有几户」</b>。如果系统只靠数文本标注，会给出偏少的错误数字 —— <b>这在工程数据里是不可接受的，因为它看起来是个合理的数字，不容易被发现</b>。</p>
+</div>
+
+<h3>4.3 意外发现：粉色填充 = 单元轮廓，但只在 A008 上</h3>
+<p>我在 A008 UNIT SCHEDULE 页发现每层都有一张缩略平面图，<b>每个独立单元用粉色实心填充</b>。实测该填充色为 <code>RGB(255, 191, 191)</code> / <code>#FFBFBF</code>。这本来是最理想的识别信号，但：</p>
+<table>
+  <thead><tr><th style="width:22%">位置</th><th style="width:12%">粉色填充</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td>A008 UNIT SCHEDULE</td><td class="yes">✅ 有</td><td>每层一张缩略图，粉色块 = 一个单元。这是<b>户数的权威视觉来源</b></td></tr>
+    <tr><td>A102~A106 正式平面图</td><td class="no">❌ 没有</td><td>实测粉色像素占比 <b>0.00%</b>，正式平面图里根本没有粉色</td></tr>
+    <tr><td>PDF 对象层</td><td class="no">❌ 不可提取</td><td>pdfplumber 只能取到灰/白/蓝填充；<b>粉色不在标准 RGB 空间</b>，疑似 ICC/CMYK 色彩空间定义</td></tr>
+  </tbody>
+</table>
+
+<div class="callout c-amber">
+  <div class="t">💡 结论：粉色是「可靠的交叉验证信号」，但不能作为主路径</div>
+  <p style="margin:6px 0 0">粉色填充无法从 PDF 对象层直接提取（需先渲染成位图才能取色），所以不应作为主识别路径。但它<b>可以作为一个高置信度的交叉校验源</b>：当文本解析给出「LEVEL 1 = 4 户」而粉色连通域给出「12 个」时，系统应当<b>自动标记为低置信度并弹窗提示用户复核</b> —— 而不是默默输出 4。</p>
+  <p style="margin:0">这正是「多信号交叉验证 + 置信度」机制的真实价值，现在有了具体实现路径。</p>
+</div>
+
+<h3>4.4 两套编号体系并存 —— 必须显式处理</h3>
+<table>
+  <thead><tr><th style="width:18%">来源</th><th style="width:22%">编号样式</th><th style="width:20%">实测样例</th><th>问题</th></tr></thead>
+  <tbody>
+    <tr><td>平面图（A102~A106）</td><td><b>连续序号</b></td><td>UNIT 2, 3, 4 / 8,9,10,11 / 28</td><td>同一层内唯一，但<b>跨层不连续</b>（GROUND 是 1-7，LEVEL 1 是 8-14…）</td></tr>
+    <tr><td>UNIT SCHEDULE（A008）</td><td><b>楼层编码</b></td><td>101~111 / 201~209 / 301~309 / 401~403</td><td><b>首位即楼层号</b>，语义清晰，但与平面图对不上</td></tr>
+    <tr><td>文本层抓取</td><td colspan="3">两套都出现了：<code>101/201/301/401</code>（表格）与 <code>UNIT 8</code>（平面图）</td></tr>
+  </tbody>
+</table>
+
+<div class="callout c-blue">
+  <div class="t">🔧 数据模型必须支持「编号体系」抽象</div>
+  <p style="margin:6px 0 0">不能把 unit number 存成单一字符串。建议拆成：</p>
+  <pre style="margin:8px 0 0">Unit
+  ├─ label          : "UNIT 8"          图上原始标注（照存，不解释）
+  ├─ label_scheme   : "sequential" | "floor_encoded"
+  ├─ seq            : 8                  连续序号（sequential 体系）
+  ├─ floor_code     : 101                楼层编码（floor_encoded 体系，如 101/201/301）
+  ├─ floor_ref      : → Floor (L1)       归属楼层
+  └─ confidence     : 0.0~1.0            抽取置信度</pre>
+  <p style="margin:6px 0 0"><b>关键设计：</b><code>floor_code</code> 的首位可作为<b>楼层归属的强信号</b>（<code>2xx → LEVEL 2</code>）。当两套体系同时存在时，系统可以互相校验：若 <code>UNIT 28</code> 出现在 LEVEL 4 平面图，而 schedule 表里 4xx 有 3 户但平面图只抓到 1 个 UNIT 标注 → 触发低置信告警。</p>
+</div>
+
+<h3>4.5 实测暴露的其他工程细节（对开发有直接影响）</h3>
+<div class="grid2">
+  <div class="mini"><div class="h">📐 页面是 A3 横向，混合比例</div><div class="d">平面图 1:400，场地分析 1:200 等。缩略图与正式图比例不同，<b>跨页比对尺寸必须先归一化到 mm</b>，不能直接用 PDF 点坐标</div></div>
+  <div class="mini"><div class="h">🏷️ 图纸编号是天然锚点</div><div class="d">A000~A015 / A101~A107 / A201~A204 / A301~A304 / A401~A404。解析时<b>优先用图纸编号定位页面</b>，比靠标题文字匹配稳健得多</div></div>
+  <div class="mini"><div class="h">📏 尺寸链完整可读</div><div class="d">实测可提取 <code>10,200mm@ 2,000mm@ 4,000mm@</code> 这类链式标注。<b>尺寸解析需要处理千分位与 <code>@</code> 分隔符</b></div></div>
+  <div class="mini"><div class="h">🗂️ 一个 PDF 含全项目</div><div class="d">35 页涵盖总图/平面/立面/剖面/详图/表。<b>系统需支持"按图纸分类浏览"</b>，不能把整份当单一文档处理</div></div>
+</div>
+
+<div class="callout c-violet">
+  <div class="t">📌 实测结论汇总：三级置信度模型</div>
+  <table style="margin:10px 0 0">
+    <thead><tr><th style="width:16%">信号</th><th style="width:14%">可靠性</th><th>用法</th></tr></thead>
+    <tbody>
+      <tr><td><b>UNIT 编号连号完整</b></td><td class="yes">高</td><td>编号连续无断号 → 直接采信，高置信度</td></tr>
+      <tr><td><b>floor_code 前缀</b></td><td class="yes">高</td><td><code>2xx→LEVEL 2</code>，作为楼层归属的独立校验</td></tr>
+      <tr><td>粉色连通域计数</td><td class="mid">中</td><td>需渲染位图，成本高，但适合作为交叉校验兜底</td></tr>
+      <tr><td>户型特征词计数</td><td class="mid">中</td><td>KITCHEN/LIVING/BEDROOM 出现次数可推断户数，作为辅助</td></tr>
+      <tr><td>视觉大模型</td><td class="no">兜底</td><td>仅用于矢量文本层缺失的扫描件，本图纸<b>不需要</b></td></tr>
+    </tbody>
+  </table>
+  <p style="margin:10px 0 0">当高置信信号之间<b>互相矛盾</b>（如文本 4 户 vs 粉色 12 个），系统<b>必须弹窗要求人工裁定</b>，而不是选一个输出。</p>
+</div>
+
+<div class="callout c-green">
+  <div class="t">✅ 对工期的修正：STAGE 1 风险显著下降</div>
+  <p style="margin:6px 0 0">实测证明「楼层平面图 + UNIT 标注 + 完整文本层」这条主路径<b>是通的</b>。P3 从「AI 视觉识别 + 大量人工确认」调整为「规则解析 + 置信度分诊」，风险等级由 🔴 降为 🟡。<b>建议工期从 64–93 人日下调至 58–86 人日</b>，且 STAGE 1 的成功率预期大幅提高。</p>
+  <p style="margin:0">仍然存在的难点：<b>漏数问题</b>（文本层不全导致计数偏少）。这需要用「编号连续性检查 + 粉色交叉校验 + 人工确认」三重机制解决，属于工程可控范围。</p>
+</div>
+
+<h2><span class="num">05</span>补充一：有没有可直接套用的成熟系统框架？</h2>
+
+<p>这是个非常合理的诉求—— reinvent 别人的轮子没有意义。但调研后的结论需要分层说清楚：<b>「图纸→楼层清单」这一段没有成熟框架可直接套用；但「系统底座」和「单项解析能力」都有大量现成轮子可用。</b></p>
+
+<h3>5.1 先纠正一个分类误区：三种「开源」不是一回事</h3>
+
+<p>讨论「有没有开源框架」时，最容易混淆的是下面三类东西。<b>它们的复用成本相差一到两个数量级</b>，必须分开评估：</p>
+<table>
+  <thead><tr><th style="width:16%">层级</th><th style="width:26%">是什么</th><th style="width:22%">本项目对应的例子</th><th>复用成本</th></tr></thead>
+  <tbody>
+    <tr><td><b>Tier A<br>函数库</b></td><td>只提供能力，不接管你的架构</td><td><code>ezdxf</code>、<code>pdfplumber</code>、<code>PyMuPDF</code>、<code>python-docx</code>、<code>LibreDWG</code></td><td class="yes">✅ <b>pip install 即用</b>，几小时到几天</td></tr>
+    <tr><td><b>Tier B<br>参考实现</b></td><td>完整的应用源码，逻辑值得读、结构值得抄，但代码不直接进我们的仓库</td><td><span class="tag t-green">OpenTakeoff</span>（量算+溯源+导出）、<span class="tag t-green">BidWright</span>（装配体+数量表达式）、<span class="tag t-blue">ERPNext CPQ</span>（规则引擎）</td><td class="mid">⚠ <b>读 1–2 天、设计上借鉴</b>，不引入依赖</td></tr>
+    <tr><td><b>Tier C<br>整系统底座</b></td><td>接管数据模型、权限、路由、任务队列乃至 UI</td><td>Frappe、NocoBase、Directus、ERPNext</td><td class="no">❌ <b>要么全盘接受其抽象，要么重写</b></td></tr>
+  </tbody>
+</table>
+
+<div class="callout c-blue">
+  <div class="t">💡 本轮调研最重要的发现</div>
+  <p style="margin:6px 0 0"><b>Tier B 这一层之前被完全忽略了，但它恰恰是本项目最该看的地方。</b>Tier A 的库人人都会用，但 Tier B 里有两个项目独立地解决了我方案里的核心难题，而且它们的解法互相印证—— 这比「找到一个能直接套用的框架」更有价值。下面 5.3 展开讲。</p>
+</div>
+
+<h3>5.2 逐项裁决：什么能套、什么不能套</h3>
+<table>
+  <thead><tr><th style="width:22%">需求环节</th><th style="width:14%">有无可直接套用的成熟框架</th><th>原因与替代方案</th></tr></thead>
+  <tbody>
+    <tr><td><b>系统底座</b><br>（登录/权限/数据库/文件管理/后台任务）</td><td class="mid">⚠ <b>有，但收益被高估</b></td><td>Frappe / NocoBase 都能做，但<b>它们节省的 8–10 人日全在 CRUD 与权限上，而本项目的 UI 是强定制的主从式三栏布局——这部分在所有底座里都要自建</b>。详见 5.4 决策矩阵</td></tr>
+    <tr><td><b>STAGE 1：图纸 → 每层 units 数</b></td><td class="no">❌ <b>无成品可套</b></td><td><b>但有高度对口的参考实现</b>：<span class="tag t-green">OpenTakeoff</span>（Apache-2.0）已实现「打开图纸→ 量算 → 导出 + 全程溯源」，可直接读源码借鉴。业务语义（UNIT 编号体系、两套标签方案）仍须自研</td></tr>
+    <tr><td><b>STAGE 2：units 数 → 匹配柜型变体</b></td><td class="mid">⚠ <b>无成品，有可借鉴模型</b></td><td><span class="tag t-green">BidWright</span> 的「参数化装配体 + 嵌套子装配 + 数量表达式」正是柜型变体的正确抽象；<span class="tag t-blue">ERPNext CPQ</span> 的 Super BOM + 条件规则是规则引擎范本。<b>都是 AGPL/GPL，不能直接引入</b></td></tr>
+    <tr><td><b>DWG 解析</b></td><td class="no">❌ 无成品</td><td>没有任何开源/商业库能"读完 DWG 就得到业务语义"。<b>但底层转换有成熟轮子</b>：ODA File Converter（免费注册）→ DXF → <code>ezdxf</code>（MIT）。业务语义仍需自己写规则</td></tr>
+    <tr><td><b>PDF 矢量文字抽取</b></td><td class="yes">✅ <b>有，直接用</b></td><td>实测已证明 74 KEELER ST 文本层完整。<code>pdftotext -layout</code> / <code>pdfplumber</code> / <code>PyMuPDF</code> 都是成熟轮子，<b>零成本零 AI</b></td></tr>
+    <tr><td><b>扫描件/JPG 识别</b></td><td class="no">❌ <b>无可靠自动方案</b></td><td>见 06 章：AECV-Bench 实测最强模型在「数门/数窗」上仅 <b>40–54%</b>。<b>注意：连最新的开源实现也放弃了这个思路</b>——见 5.3 的 OpenTakeoff</td></tr>
+    <tr><td><b>Word 解析</b></td><td class="yes">✅ 有，直接用</td><td><code>python-docx</code>（MIT）读文字/表格；<code>docx-preview</code> 前端预览。都是稳定轮子</td></tr>
+    <tr><td><b>建筑/图纸版本管理</b><br>（Module C）</td><td class="no">❌ <b>不建议引入 DMS</b></td><td>Mayan EDMS / Paperless-ngx / Alfresco / LogicalDOC 均为通用文档归档系统，<b>但我们需要的是「图纸挂到树节点 + 版本对比 + 解析任务关联」</b>。这是 10 张表的事，引入 DMS 等于多一个数据模型和一套认证要去适配。详见 5.6</td></tr>
+    <tr><td><b>「每层 units 数」这个业务概念</b></td><td class="no">❌ <b>没有任何框架有</b></td><td>这是澳洲计量柜业务的专有概念。BuildPass 有类似业务（PDF→levels/rooms→人工 review），但那是<b>商业产品不是可嵌入框架</b>。<b>这部分必须自研，是护城河所在</b></td></tr>
+    <tr><td><b>柜型库配置器</b></td><td class="no">❌ 无成品</td><td>ABN ecoreal 的 meter cabinet app 是最接近的，但也是商业产品。可以<b>照搬业务逻辑</b>（按表位数过滤→选排布→出 BOM），不能直接用代码</td></tr>
+  </tbody>
+</table>
+
+<div class="callout c-amber">
+  <div class="t">⚠ 关于「寻找并完整复刻一个成熟产品」的可行性判断</div>
+  <p style="margin:6px 0 0">需求第 4 条写「寻找一个成熟的商业产品并完整复刻」。调研了 usBIM、Procore、Trimble Connect、BuildPass、ABN ecoreal 之后，<b>结论是：没有一个产品同时覆盖 STAGE 1（图纸→每层 units）+ STAGE 2（匹配柜型）+ 计量柜选型清单导出这条完整链路。</b></p>
+  <p style="margin:0">最接近的三个产品各自缺一块：<b>BuildPass</b> 只做 STAGE 1（且是黑盒 SaaS）；<b>ABN ecoreal</b> 只做 STAGE 2（且只面向德国电网）；<b>usBIM/Procore</b> 做文档管理但不碰计量柜业务。<b>所以现实策略是「分模块照搬业务逻辑 + 自研中间层」，不是「复刻一个产品」。</b></p>
+</div>
+
+<h3>5.3 Tier B 深评：两个必须读源码的开源项目</h3>
+
+<p>这两个项目不是「可以直接套用的框架」，而是<b>「已经独立解决了我们最难的那部分问题」的参考实现</b>。认真读它们的代码，能省掉至少一周的方案推敲。</p>
+
+<h4 style="margin-top:20px">① OpenTakeoff —— 最接近 STAGE 1 的开源实现（Apache-2.0）</h4>
+<p>2026 年 7 月开源的浏览器端工程量算引擎（Kentucky AI，135 star），定位是「打开一张建筑平面图，量出工程量」。<b>它的功能列表与本项目 STAGE 1 高度重合：</b></p>
+<table>
+  <thead><tr><th style="width:26%">它的能力</th><th>对本项目的意义</th></tr></thead>
+  <tbody>
+    <tr><td>浏览器内直接打开 PDF 图纸，<b>零上传、零服务端</b></td><td>与我们的「本地部署 + 文件不出机器」约束完全一致。<b>可验证「纯前端图纸交互」这条路走得通</b></td></tr>
+    <tr><td>比例自动校准（公制 1:50 / 1:100）</td><td>我们做尺寸与净距校验时必需的能力，现成实现可参考</td></tr>
+    <tr><td>One-Click Area：<b>在填充图案上自动描出房间轮廓</b></td><td><b>这是关键。</b>见下方「重要旁证」</td></tr>
+    <tr><td>Count 模式（计数）、面积、线性、周长、体积</td><td>计数即我们要的 units 数；面积/线性可支撑未来的柜体表面积计算</td></tr>
+    <tr><td><b>Provenance（溯源）：每一个测量都记录比例、怎么测的（自动/手绘）、谁测的（人或 AI）</b></td><td><b>独立印证了我方案里「修正字典 + 置信度分诊」的设计。</b>它把「这个数字怎么来的」当成一等公民，而不是事后补log</td></tr>
+    <tr><td>导出 CSV / JSON / Excel / <b>带标注的图纸 PDF</b></td><td>导出格式可直接对齐需求里的 PDF/Excel 清单</td></tr>
+    <tr><td>支持整套图纸（plan set）：图册、<b>标题栏文字</b>、页面渲染</td><td><b>标题栏文字</b>正是我们识别图号与楼层名的可靠来源之一</td></tr>
+    <tr><td>附带 <b>MCP server</b>，AI Agent 可驱动同一套引擎并审计结果</td><td>提供了「AI 只做兜底、结果必须能被程序复核」的工程范式，与我们 06 章结论一致</td></tr>
+  </tbody>
+</table>
+
+<div class="callout c-green">
+  <div class="t">✅ 重要旁证：两个独立来源得出同一个结论</div>
+  <p style="margin:6px 0 0"><b>06 章的 AECV-Bench 实测结论是「视觉模型数符号不可靠，最强只有 40–54%，必须走文字/几何规则」。而 OpenTakeoff 这个 2026 年 7 月的最新开源实现，在「自动识别房间/单元」上选择的也不是视觉模型，而是基于填充图案的<b>连通域填充（flood fill）</b>—— 也就是几何算法。</b></p>
+  <p style="margin:6px 0 0">两个来源、方法完全不同、结论一致：<b>建筑图纸的自动计数应走几何与文本规则，AI 视觉只做兜底和异常提示。</b>这条交叉验证显著提升了我方技术路线的置信度，也说明我们方案里「粉色连通域分析」的方向是对的。</p>
+  <p style="margin:0"><b>动作项：把 OpenTakeoff 加入必读清单，半天读完它的 count 模式与 provenance 结构。</b></p>
+</div>
+
+<h4 style="margin-top:20px">② BidWright —— 最接近 STAGE 2/3 的开源实现（AGPL-3.0）</h4>
+<p>2026 年 3 月建库的 AI 原生工程估算平台（TypeScript，约 57 star，活跃维护中）。<b>它的数据模型正是柜型选型该用的形状</b>：</p>
+<table>
+  <thead><tr><th style="width:30%">它的模型</th><th>对应本项目的什么</th></tr></thead>
+  <tbody>
+    <tr><td><b>参数化装配体（Parameterized assembly）</b></td><td>一个柜型变体 = 一个装配体模板</td></tr>
+    <tr><td><b>嵌套子装配体</b>（sub-assemblies）</td><td>柜体本体 + 每个表位子组件 + 门/锁/支架，<b>正好对应我们 <code>positions_total</code> 与 <code>layout_rows/cols</code> 的组合结构</b></td></tr>
+    <tr><td><b>数量表达式</b>（quantity expressions）</td><td>「2 行 × 3 列 = 6 表位」这类<b>可计算而非硬编码</b>的排布表达</td></tr>
+    <tr><td>2D PDF 量算结果<b>直接挂到报价行项</b>（worksheet line items）</td><td>我们的「楼层行× 柜型」矩阵 —— <b>连交互形态都一样</b></td></tr>
+    <tr><td>报价评审带<b>证据链</b>（evidence tracking）</td><td>我们的置信度分诊 + 人工修正记录</td></tr>
+    <tr><td>多 LLM 供应商编排 + 本地 Ollama 向量 + pgvector</td><td>说明这类系统的 AI 组件确实是<b>可插拔的多供应商层</b>，不是单点依赖</td></tr>
+  </tbody>
+</table>
+
+<div class="callout c-red">
+  <div class="t">🚫 BidWright 为什么不能直接引入</div>
+  <p style="margin:6px 0 0"><b>AGPL-3.0</b> 是比 GPL 更严格的传染性许可：即使只通过网络提供服务，也必须向使用者提供完整源码。本项目是<b>要商业交付给澳洲客户的私有系统</b>，直接引入 AGPL 代码在合规上不可行。<b>正确用法是：读它的数据模型与交互设计，自己实现。</b></p>
+</div>
+
+<h3>5.4 可选底座：Frappe vs NocoBase vs 从零搭（修正版）</h3>
+
+<div class="callout c-amber">
+  <div class="t">⚠ 本节修正了上一版报告的一处错误结论</div>
+  <p style="margin:6px 0 0">上一版写「Frappe 是 GPLv3，存在传染性风险」，<b>这是错的</b>。经核实（GitHub 仓库 License badge 与官方文档）：<b>Frappe Framework 本身是 MIT 许可</b>；<b>GPLv3 是 ERPNext 这个上层应用</b>的许可。两者是不同的项目，只用 Frappe Framework 不触发 copyleft。<b>因此「许可风险」这一项应从Frappe 的劣势中移除。</b></p>
+  <p style="margin:0">另一处也需要更新：<b>Frappe v15 已支持 PostgreSQL，但仍标注为实验性</b>，官方与维护者均明确「生产环境仍推荐 MariaDB」。所以「完全不支持 PostgreSQL」的说法也需修正为「可跑但不建议用于生产」。</p>
+</div>
+
+<table>
+  <thead><tr><th style="width:20%">维度</th><th style="width:26%">Frappe Framework</th><th style="width:26%">NocoBase</th><th>从零搭（FastAPI + React）</th></tr></thead>
+  <tbody>
+    <tr><td>许可</td><td class="yes"><b>MIT</b>（仅 ERPNext 为 GPLv3）</td><td class="yes"><b>Apache-2.0</b>（2026-02 由 AGPLv3 改版）</td><td class="yes">自选，无约束</td></tr>
+    <tr><td>技术栈契合度</td><td class="yes">✅ Python，与解析层同语言</td><td class="mid">⚠ Node.js/React，解析层需跨语言</td><td class="yes">✅ Python + React，完全可控</td></tr>
+    <tr><td>数据库</td><td class="mid">MariaDB 为主；PG 实验性</td><td class="yes">PG / MySQL / SQLite</td><td class="yes">SQLite 起步，可后迁</td></tr>
+    <tr><td>主从式三栏 UI</td><td class="no">❌ Desk 不适合，须自建前端</td><td class="no">❌ 页面块虽可拼，但达不到要求</td><td class="mid">⚠ 全自建，但完全可控</td></tr>
+    <tr><td>CAD/PDF 原样预览</td><td class="no">❌ 须自建</td><td class="no">❌ 须自建</td><td class="mid">⚠ 须自建</td></tr>
+    <tr><td>规则引擎/配置器</td><td class="mid">需自研或引 CPQ</td><td class="mid">需自研</td><td class="mid">自研，但可控</td></tr>
+    <tr><td>可视化工作流</td><td class="yes">✅ 内置</td><td class="yes">✅ 7 类触发 + 24 类动作节点</td><td class="no">❌ 自研</td></tr>
+    <tr><td>学习曲线</td><td class="no">陡（DocType 元数据范式）</td><td class="mid">中（插件微内核）</td><td class="yes">无</td></tr>
+    <tr><td>隐性成本</td><td class="no">生态锁定，迁出痛苦</td><td class="no">社区版阉割（SSO/高级工作流在商业版）</td><td class="mid">权限/审计/队列全自写</td></tr>
+  </tbody>
+</table>
+
+<div class="callout c-green">
+  <div class="t">✅ 底座裁决：仍然推荐从零搭，理由变了</div>
+  <p style="margin:6px 0 0">上一版给Frappe 开的「省 8–10 人日」在修正后仍然成立，但<b>这笔省下的时间恰好是本项目不需要的时间</b>：它省的是 CRUD、表单、权限矩阵——而我们的前端 100% 是三栏主从式自定义布局 + CAD/PDF 原样预览 + 楼层×柜型矩阵，这些在任何底座里都是自建。<b>换来的是 DocType 范式学习成本、生态锁定、以及为了用它的 REST 层而不得不用它的前端构建方式。</b></p>
+  <p style="margin:6px 0 0"><b>因此：P0 用 FastAPI + SQLModel + SQLite 自己搭，但把「权限模型」和「审计日志」两个模块从第一天就设计成可替换的独立层</b>—— 这样未来若团队规模变大、或客户要求多租户，替换底座的成本可控。</p>
+  <p style="margin:0"><b>唯一例外情形：若客户明确要求「开箱即用的多租户 SaaS」或「强审计合规」，则改用 NocoBase</b>（Apache-2.0 + PG 支持，比 Frappe 更契合本项目，且许可最干净）。</p>
+</div>
+
+<h3>5.5 解析任务队列：Celery vs Temporal（附带裁决）</h3>
+<p>「上传图纸 → 异步解析 → 人工复核 → 入库」是一条带人工等待的长流程，有人会想到引入 Temporal。这里给出明确裁决，避免过度设计：</p>
+<table>
+  <thead><tr><th style="width:22%">方案</th><th style="width:30%">优势</th><th>对本项目的判断</th></tr></thead>
+  <tbody>
+    <tr><td><b>asyncio worker + DB 状态机</b><br>（原方案）</td><td>零依赖、单进程够用、状态可查</td><td class="yes">✅ <b>推荐。</b>单机部署、任务时长分钟级、无跨服务分布式需求</td></tr>
+    <tr><td><b>Celery + Redis</b></td><td>生态成熟、Python 原生、可水平扩展</td><td class="mid">⚠ 单机场景属于过度设计；若未来要 P0 多项目并行再引入</td></tr>
+    <tr><td><b>Temporal</b></td><td>持久化执行、跨天跨服务、人工审批原生支持</td><td class="no">❌ <b>不引入。</b>它的价值在于「跨天、跨服务、故障后精确恢复」，本项目单机部署无此需求，引入只会增加运维面和学习成本</td></tr>
+    <tr><td><b>Camunda（社区版）</b></td><td>BPMN 2.0 可视化建模</td><td class="no">❌ <b>不引入。</b>BPMN 对「解析→复核→入库」这种四步流程是杀鸡用牛刀</td></tr>
+  </tbody>
+</table>
+<p style="font-size:14px;color:var(--grey);margin-top:6px"><b>但有一点值得借鉴：</b>无论用哪个队列，<b>任务状态必须显式建模并可查询</b>（<code>queued / running / needs_review / confirmed / failed</code>），而不是靠日志推断。这正是 OpenTakeoff 把 provenance 作为一等公民的同一个道理。</p>
+
+<h3>5.6 为什么不建议引入 DMS / BIM 平台</h3>
+<table>
+  <thead><tr><th style="width:20%">候选</th><th style="width:22%">许可</th><th>不采用的理由</th></tr></thead>
+  <tbody>
+    <tr><td>Mayan EDMS</td><td>Apache-2.0</td><td>自动化与分类能力不错，但<b>没有真实的版本历史</b>（是「标签 + 工作流」模型），与我们要的「图纸 v1/v2 差异对比」正相反</td></tr>
+    <tr><td>Paperless-ngx</td><td>GPLv3</td><td>面向扫描件归档与消费级标签管理，不适合工程图纸</td></tr>
+    <tr><td>Alfresco Community</td><td>LGPLv3</td><td>企业级 records management，配置成本极高，与单机部署诉求背道而驰</td></tr>
+    <tr><td>Kimios</td><td>LGPL</td><td><b>headless（无 UI）</b>，适合做后端服务但需自建全部界面；本项目只需 10 张表，不值当</td></tr>
+    <tr><td>OpenProject</td><td>GPLv3</td><td><b>专为 BIM workflows 设计，值得作为流程设计参考</b>，但它是项目管理工具（甘特图、看板），不解决选型与解析</td></tr>
+    <tr><td>Speckle</td><td>Apache-2.0 + EE 条款</td><td><b>AEC 数据平台，设计质量高但方向不符</b>：面向 Revit/IFC 三维模型协同，不是 PDF/DWG 图纸解析。<span class="tag t-amber">值得借鉴</span>的是它的<b>内容寻址版本模型</b>（commit→version、branch→model）——可用于我们的 Drawing 版本设计。<b>注意其许可陷阱</b>：<code>workspaces</code> 与 <code>gatekeeper</code> 两个模块（135 个 TS 文件）属 Speckle 企业版许可，禁止 copy/merge/distribute</td></tr>
+  </tbody>
+</table>
+<div class="callout c-blue">
+  <div class="t">💡 Module C 的正确做法</div>
+  <p style="margin:0">「图纸版本管理」在需求里看着像 DMS，实际上它的本质是<b>我们自己的业务实体</b>：<code>Drawing</code>（文件哈希、图号、标题栏文字、页数）+ <code>DrawingVersion</code>（版本号、上传人、变更说明）+ <code>Building</code> 树节点挂载关系 + <code>ParseJob</code> 关联。<b>4 张表 + 一点乐观锁即可，约 3–5 人日。</b>引入任何外部 DMS 都会多出一个数据模型、一套认证和一套权限需要适配，收益为负。</p>
+</div>
+
+<h3>5.7 最终推荐：混合架构</h3>
+<div class="flow">
+  <div class="step"><div class="n">底座</div><div class="h">自建轻量后端</div><div class="d">FastAPI + SQLAlchemy + SQLite（保留许可自由与架构自由，权限/审计层做成可替换模块）</div></div>
+  <div class="step"><div class="n">轮子 1</div><div class="h">DWG → DXF</div><div class="d">ODA File Converter（外部进程，免费注册）—— 不自己写解析器</div></div>
+  <div class="step"><div class="n">轮子 2</div><div class="h">DXF 实体解析</div><div class="d"><code>ezdxf</code>（MIT）—— 社区活跃、文档完整、Python 原生</div></div>
+  <div class="step"><div class="n">轮子 3</div><div class="h">PDF 文字抽取</div><div class="d"><code>pdfplumber</code> / <code>PyMuPDF</code> / <code>pdftotext</code> —— 实测已验证</div></div>
+  <div class="step"><div class="n">轮子 4</div><div class="h">扫描件/位图</div><div class="d"><b>降级为兜底</b>：VLM API（见 06 章），因实测精度不足</div></div>
+  <div class="step"><div class="n">轮子 5</div><div class="h">DWG 预览</div><div class="d"><code>mlightcad/cad-viewer</code>（MIT，WASM 浏览器端）</div></div>
+  <div class="step"><div class="n">参考实现</div><div class="h">OpenTakeoff / BidWright</div><div class="d"><b>读源码借鉴设计，不引入代码</b>（见 5.3）</div></div>
+</div>
+
+<div class="callout c-green">
+  <div class="t">✅ 结论：没有「能直接套用的开源系统」，但有三层可复用的东西</div>
+  <p style="margin:6px 0 0"><b>① 可以直接依赖的库（Tier A）：</b><code>ezdxf</code>（DWG 实体）、<code>pdfplumber</code>/<code>PyMuPDF</code>（PDF 文字）、<code>mlightcad/cad-viewer</code>（DWG 预览）、<code>python-docx</code>（Word）、<code>LibreDWG</code>（兜底）。<b>另加一项</b>：<code>Shapely</code>（几何运算，用于连通域与面积计算）、<code>DuckDB</code>（对 74 KEELER ST 这类 1.57 MB 提取文本做结构化查询与分析，零运维单文件）。这些是<b>成熟、可直接依赖、不需要自己造</b>的。</p>
+  <p style="margin:6px 0 0"><b>② 必须读源码借鉴的参考实现（Tier B）：</b><span class="tag t-green">OpenTakeoff</span>（STAGE 1 的量算 + 溯源 + 导出结构）、<span class="tag t-green">BidWright</span>（STAGE 2/3 的装配体与数量表达式）、<span class="tag t-blue">ERPNext CPQ</span>（规则引擎范式）。<b>这三个能省约 5–8 人日的方案推敲，但代码不进仓库（AGPL/GPL 或架构不符）。</b></p>
+  <p style="margin:6px 0 0"><b>③ 必须自研的（约 25–35 人日）：</b>① 「每层 units 数」的业务抽取逻辑（含漏数检测与置信度分诊）；② 柜型库的几何分解规则 + 诊断模式；③ <code>label_scheme</code> 编号体系抽象；④ 选型匹配与澳洲规范尺寸校验引擎。<b>这四项恰好构成系统的核心竞争力—— 这也印证了需求方坚持「自研而非复刻」是正确判断。</b></p>
+  <p style="margin:0"><b>④ 关于系统底座（Tier C）：修正许可误判后仍不推荐 Frappe/NocoBase</b>，理由不是许可，而是「省下的都是我们不需要的 UI 时间，换来的是范式学习与生态锁定」。<b>把权限与审计做成可替换层，即可保留未来换底座的自由。</b></p>
+</div>
+
+<h2><span class="num">06</span>补充二：解析算法与 AI API 的选型（含实测精度数据）</h2>
+
+<p>这个补充问得非常对——<b>04 章的实测已经证明 STAGE 1 不需要 AI</b>，但我们仍需要一个明确的「什么场景该用什么算法」的决策表，以及各方案的真实精度。下面是有实测数据支撑的选型。</p>
+
+<h3>6.1 核心数据：AI 在建筑图纸上的真实精度（AECV-Bench 2026）</h3>
+<div class="callout c-red">
+  <div class="t">⚠ 这是本次调研最重要的发现，直接决定架构走向</div>
+  <p style="margin:6px 0 0"><b>AECV-Bench（UNSW 出品，2026年 6 月更新，12 个模型）</b>专门测多模态模型在真实建筑/工程图纸上的能力，结论非常清晰：<b>模型「读得懂文字」但「数不准东西」。</b></p>
+  <p style="margin:6px 0 0">• <b>OCR / 文字抽取 ≈ 95–98%</b>（房间名、尺寸标注、注释）—— 很强<br>
+  • <b>符号计数（数门/数窗/数卧室/数厕所）= 40–54%</b> —— 不可用<br>
+  • <b>空间推理 = 0.54–0.88</b> —— 中等，且模型间差异大</p>
+  <p style="margin:6px 0 0"><b>对本项目的直接含义：</b>「每层有几个 unit」本质上是<b>符号计数</b>问题。<b>直接问AI「这层有几套单元」会得到 40–50% 正确率 —— 在工程数据里这是灾难性的</b>，因为它会给出一个看起来合理的错误数字。所以 <b>AI 绝不能作为 STAGE 1 的主路径</b>，这与 04 章实测「纯文本抽取才是正道」完全一致，互为印证。</p>
+</div>
+
+<h4>AECV-Bench 符号计数实测排名（Exact Match Accuracy，越高越好）</h4>
+<table>
+  <thead><tr><th style="width:22%">模型</th><th style="width:10%">总分</th><th style="width:11%">卧室</th><th style="width:10%">门</th><th style="width:10%">厕所</th><th style="width:10%">窗</th><th>结论</th></tr></thead>
+  <tbody>
+    <tr><td>Gemini 3.5 Flash <span class="t-grey">Google</span></td><td class="mid">0.54</td><td class="yes">0.93</td><td class="no">0.43</td><td class="mid">0.82</td><td class="no">0.39</td><td>最强也只有 54%</td></tr>
+    <tr><td>Claude Fable 5 <span class="t-grey">Anthropic</span></td><td class="mid">0.52</td><td class="yes">0.93</td><td class="no">0.36</td><td class="mid">0.82</td><td class="no">0.29</td><td></td></tr>
+    <tr><td>GPT-5.5 <span class="t-grey">OpenAI</span></td><td class="mid">0.48</td><td class="yes">0.93</td><td class="no">0.30</td><td class="mid">0.77</td><td class="no">0.28</td><td></td></tr>
+    <tr><td>MiniMax M3 <span class="t-amber">开源</span></td><td class="mid">0.47</td><td class="yes">0.92</td><td class="no">0.23</td><td class="mid">0.84</td><td class="no">0.17</td><td>最佳开源仅 47%</td></tr>
+    <tr><td>Qwen 3.7 Plus <span class="t-amber">开源</span></td><td class="mid">0.46</td><td class="yes">0.89</td><td class="no">0.16</td><td class="mid">0.84</td><td class="no">0.14</td><td></td></tr>
+    <tr><td>GLM-4.6V <span class="t-amber">开源</span></td><td class="no">0.39</td><td class="mid">0.79</td><td class="no">0.09</td><td class="mid">0.82</td><td class="no">0.03</td><td></td></tr>
+  </tbody>
+</table>
+
+<div class="callout c-blue">
+  <div class="t">💡 但注意一个有规律的现象：卧室识别很高，门/窗很低</div>
+  <p style="margin:6px 0 0">所有模型的<b>卧室准确率都在 0.79–0.93</b>（因为卧室通常有明确的文字标注「BEDROOM 2」和固定位置），但<b>门只有 0.09–0.43、窗只有 0.03–0.39</b>（门是弧线符号、窗是图形符号，无文字锚点，模型只能「看图猜」）。</p>
+  <p style="margin:0"><b>这印证了一条关键工程原则：</b>凡是<b>有文字锚点</b>的识别任务（UNIT 8、KITCHEN、BEDROOM、尺寸链）→ 文字层抽取就能做到 95%+；凡是<b>纯图形符号</b>的识别任务（数门、数窗）→ 连最强 AI 都不可靠。<b>所以 STAGE 1 应该只依赖前者，完全避开后者。</b>这与 04 章「文本抽取 + 缺号检测」的方案完全一致。</p>
+</div>
+
+<h3>6.2 决策表：什么场景用什么算法</h3>
+<table>
+  <thead><tr><th style="width:16%">场景</th><th style="width:20%">主方案（首选）</th><th style="width:20%">交叉验证</th><th style="width:20%">兜底</th><th>理由</th></tr></thead>
+  <tbody>
+    <tr><td><b>DWG 图纸</b><br>柜型分解</td><td><b>几何规则解析</b><br><code>ezdxf</code> 读闭合多段线 + 子矩形 + DIMENSION</td><td>转换前后实体数校验</td><td>ODA SDK（付费）或 AutoCAD COM（Win）</td><td>柜型是规则矩形，几何 100% 确定，<b>不用 AI</b></td></tr>
+    <tr><td><b>DWG 高版本</b></td><td><b>ODA File Converter</b>（免费注册）转 DXF</td><td>—</td><td>LibreDWG（注意 GPLv3）</td><td>ODA 是高版本 DWG 支持最好的免费方案</td></tr>
+    <tr><td><b>矢量 PDF</b><br>每层 units 数</td><td><b><code>pdftotext -layout</code></b> 抽 UNIT 标注 + <b>缺号检测</b></td><td>① A008 粉色连通域<br>② 房间关键词计数<br>③ <code>floor_code</code> 前缀</td><td>VLM API（仅当文本层缺失）</td><td><b>04 章实测已验证主路径可行</b>；AECV-Bench 反证 AI 计数不可靠</td></tr>
+    <tr><td><b>矢量 PDF</b><br>户型/房间类型</td><td><b><code>pdfplumber</code></b> 抽 KITCHEN/BED/BATH 等词 + 坐标聚类</td><td>—</td><td>VLM API</td><td>房间名有文字锚点，准确率高</td></tr>
+    <tr><td><b>A008 单元表</b><br>（专有粉红表）</td><td><b>位图连通域分析</b>（渲染 → PIL → scipy.ndimage）</td><td>与平面图 UNIT 数互校</td><td>VLM API 读表格</td><td>实测粉色只在 A008 上（04 章），<b>仅在这类表页做</b></td></tr>
+    <tr><td><b>扫描 PDF / JPG</b><br>无文本层</td><td>⚠ <b>没有可靠的自动方案</b></td><td>人工确认为主</td><td>VLM API（Gemini 3.5 Flash 计数最好但仍仅 54%）</td><td><b>AECV-Bench 证明纯视觉计数不可靠</b>。扫描件场景必须以人工确认为主</td></tr>
+    <tr><td><b>Word</b></td><td><code>python-docx</code> 读表格/文字</td><td>—</td><td>LibreOffice headless 转 PDF</td><td>Word 只承载文字清单，不做图形识别</td></tr>
+  </tbody>
+</table>
+
+<h3>6.3 商业 Document AI API 对比（用于「表格/清单页」抽取）</h3>
+<p>虽然 STAGE 1 主路径是自研规则，但<b>A008 那种单元表</b>是典型的「多行多列表格」，如果要用 API，这几个可选：</p>
+<table>
+  <thead><tr><th style="width:18%">服务</th><th style="width:11%">表格精度</th><th style="width:11%">OCR</th><th style="width:13%">价格/千页</th><th style="width:11%">开源</th><th>备注</th></tr></thead>
+  <tbody>
+    <tr><td>Reducto r-1</td><td class="yes">90.2%</td><td class="yes">高</td><td class="mid">$15–30</td><td class="no">✗</td><td>精度最高，自带校验与溯源</td></tr>
+    <tr><td>Cohere Parse v5</td><td class="yes">87.0%*</td><td class="yes">高</td><td class="mid">按订阅</td><td class="no">✗</td><td>*不同 benchmark，仅供横向参考</td></tr>
+    <tr><td>Azure Document Intelligence</td><td class="mid">82.7%</td><td class="yes">97.3%</td><td class="mid">$10–15</td><td class="no">✗</td><td>可训练自定义模型（少样本即可）</td></tr>
+    <tr><td>AWS Textract</td><td class="mid">80.9%</td><td class="yes">96.8%</td><td class="mid">$15</td><td class="no">✗</td><td>合并单元格处理最稳</td></tr>
+    <tr><td>Google Document AI</td><td class="no">64.6%</td><td class="yes">96.5%</td><td class="mid">$10</td><td class="no">✗</td><td>两份 benchmark 都是末段</td></tr>
+    <tr style="background:var(--brand-soft)"><td><b>MinerU 2.5</b> <span class="t-green">开源</span></td><td class="yes">很高</td><td class="yes">✓</td><td class="yes">免费自托管</td><td class="yes">✓</td><td><b>12 维度评测通过 11 项</b>，4.7s/页 (GPU)</td></tr>
+    <tr style="background:var(--brand-soft)"><td><b>Granite-Docling</b> <span class="t-green">开源</span></td><td class="yes">高</td><td class="yes">✓</td><td class="yes">免费自托管</td><td class="yes">✓</td><td>最快 VLM（2.8s/页），Markdown 最干净</td></tr>
+    <tr style="background:var(--brand-soft)"><td><b>Docling</b> <span class="t-green">开源</span></td><td class="mid">中</td><td class="mid">✓</td><td class="yes">免费</td><td class="yes">✓ MIT</td><td>纯 CPU 可跑，适合本机部署</td></tr>
+    <tr style="background:var(--brand-soft)"><td><b>PaddleOCR-VL</b> <span class="t-green">开源</span></td><td class="no">弱</td><td class="yes">✓ 98%+</td><td class="yes">免费</td><td class="yes">✓</td><td>OCR 之王，但<b>表格结构解析不行</b>，纯 OCR 引擎</td></tr>
+  </tbody>
+</table>
+
+<div class="callout c-blue">
+  <div class="t">💡 关于用 AI API 的最终建议（针对本项目）</div>
+  <p style="margin:6px 0 0"><b>STAGE 1 不需要用 VLM API。</b>04 章实测证明矢量文本层可抽，AECV-Bench 反证 AI 计数不可靠（54%）。<b>最省钱的做法是：矢量 PDF 走文本规则解析（免费），只在「无文本层的扫描件」这个边缘场景，才启用 VLM API 作为兜底，并强制人工确认。</b></p>
+  <p style="margin:0">如果确实要用，建议<b>本地部署开源方案</b>（MinerU 或 Granite-Docling + GPU）以避免图纸数据出境和按页计费；<b>AECV-Bench 显示最佳开源模型 MiniMax M3 计数 47%</b>，虽然不如闭源但配合「只用于扫描件 + 人工确认」的定位是够的。<b>需求里提到「api key 也可以」—— 但就本项目而言，AI 只是一个兜底选项，不是核心依赖。</b></p>
+</div>
+
+<h3>6.4 关键判断：STAGE 1 的准确度其实不依赖 AI</h3>
+<div class="callout c-green">
+  <div class="t">✅ 准确度的真正来源（回应「需要保证准确度」的核心诉求）</div>
+  <p style="margin:6px 0 0">需求方最关心「保证准确度」。结合本次调研，准确度的来源按贡献排序是：</p>
+  <ol style="margin:8px 0 0">
+    <li><b>矢量文本层（免费，95–98%）</b> —— 主路径。UNIT 标注、房间名、尺寸链都有文字锚点，可靠。这是准确度的<b>主要贡献者</b>。</li>
+    <li><b>缺号检测 + 交叉验证（免费，100% 可靠）</b> —— 这是本系统的<b>核心创新</b>。04 章实测「文本抽全会漏数」，而 A008 粉色连通域 + 单元表<code>floor_code</code> + 封面声明可以互相校验。<b>三信号不一致就强制人工确认—— 这比任何 AI 都可靠，因为它不猜测。</b></li>
+    <li><b>A008 粉色填充位图分析（免费，90%+）</b> —— 仅在 A008 页面运行，作为户数权威视觉来源。</li>
+    <li><b>VLM API（付费，40–54% 计数）</b> —— <b>仅用于无文本层扫描件的兜底</b>，且强制人工确认。<b>不指望它做主要识别。</b></li>
+    <li><b>修正字典（免费，越用越准）</b> —— 每次人工改判沉淀为规则，系统自我校准。复利资产。</li>
+  </ol>
+  <p style="margin:8px 0 0"><b>结论：准确度不来自「更强的 AI」，而来自「多信号交叉验证 + 人工兜底 + 自我校准」的机制设计。</b>这正是 BuildPass（澳洲同类产品）验证过的产品形态—— <b>AI 出初稿 + 人工 review 后入库</b>，而不是「AI 全自动」。</p>
+</div>
+<h2><span class="num">07</span>商业产品溯源与「可复刻对象」判定</h2>
+
+<p>需求要求「寻找有没有成熟的商业产品，找到就完整复刻」。调研结论如下——<b>没有单一产品能覆盖全部需求，但有三类成熟产品可作为分模块参照</b>。</p>
+
+<h3>7.1 需求中那张参考截图</h3>
+<p>截图是一个 <b>CDE（通用数据环境）+ 图纸转换审查平台</b>，可辨识的功能特征包括：<code>Conversions Priority Review</code> 批次队列、<code>Batch scan</code> / <code>Retry deferred</code> / <code>To decide</code> 状态流转、PDF <b>Re-sync / 版本比对（Highlights · All content · Differences only）</b>、Markup 批注、右侧 <code>Shared with…</code> 共享范围与逐页计数。项目名为「The Cube」，内容是 NCC Volume Three（澳洲国家 Construction Code 管道规范），说明是<b>澳洲本地工程文档平台</b>。</p>
+<div class="callout c-amber">
+  <div class="t">需要你确认</div>
+  <p style="margin:6px 0 0">截图分辨率不足以确定具体产品名（我倾向于是某个澳洲 CDE 或 Autodesk 生态的图纸审查模块，但无法确证）。<b>如果这张图是指定要对标的产品，请补一张原图或直接给产品名</b>——这会直接影响模块 A 的交互设计要不要照搬它的批次队列 + 版本比对布局。</p>
+</div>
+
+<h3>7.2 三类可对标产品</h3>
+<table>
+  <thead><tr><th style="width:16%">类别</th><th style="width:22%">产品</th><th style="width:30%">可借鉴的具体能力</th><th>对本项目的价值</th></tr></thead>
+  <tbody>
+    <tr>
+      <td rowspan="3"><b>CDE / 图纸管理</b><br><span class="t-grey">对标需求 A、C</span></td>
+      <td><b>usBIM.platform</b>（ACCA）</td>
+      <td>文档树 + 多格式在线预览（DWG/DXF/PDF/RVT/IFC）+ Issue/Mark-Up 工作流 + 版本对比</td>
+      <td><span class="t-green">高</span> 交互与信息架构的成熟范本</td>
+    </tr>
+    <tr>
+      <td><b>Procore Drawings</b></td>
+      <td>OCR 排序上传文件、自动识别「这是不是某张图的新版本」而非新文档、跨版本保留 markup</td>
+      <td><span class="t-green">高</span> 「图纸版本判定」逻辑可直接复用</td>
+    </tr>
+    <tr>
+      <td><b>Trimble Connect</b></td>
+      <td>供应商中立、多格式、移动优先、图纸与问题绑定</td>
+      <td class="mid">中</td>
+    </tr>
+    <tr>
+      <td rowspan="2"><b>平面图自动结构化</b><br><span class="t-grey">对标 STAGE 1</span></td>
+      <td><b>BuildPass AI Floor Plan Scanner</b>（澳洲）</td>
+      <td>PDF → 抽出 levels + units/rooms → <b>人工 review 后 import</b></td>
+      <td><span class="t-green">极高</span> 业务形态几乎 1:1 对应，且已验证澳洲市场</td>
+    </tr>
+    <tr>
+      <td><b>Parseur / Infrrd 类视觉抽取</b></td>
+      <td>同步解析文字 + 视觉布局 + 符号/图例关联；公开准确率：墙体节点 94.7%、房间 84.5%</td>
+      <td class="mid">中</td> <td>参考其精度预期管理</td>
+    </tr>
+    <tr>
+      <td rowspan="2"><b>计量柜配置器</b><br><span class="t-grey">对标 STAGE 2</span></td>
+      <td><b>ABN ecoreal「meter cabinet app」</b>（德国）</td>
+      <td>按<b>位置/电网运营商</b>过滤合规柜型 → 选表计位与分电盘位 → <b>自动算出柜内配置与排布图</b> → 出 BOM（Excel）→ 对接 ELBRIDGE 接口下单</td>
+      <td><span class="t-green">极高</span> 这是全调研中<b>与本项目业务逻辑最接近的产品</b>，模块 B 的交互可近乎照搬</td>
+    </tr>
+    <tr>
+      <td><b>LANDIS+GYR Product Selection</b></td>
+      <td>按参数筛选产品、自动匹配规格书与图纸</td>
+      <td class="mid">中</td>
+    </tr>
+  </tbody>
+</table>
+
+<h4>关键行业规范（这些会决定尺寸字段怎么填，必须内置进系统）</h4>
+<p>澳洲中密度/高层住宅的计量表安装有明确规范，尺寸字段不是自由填写，而是<b>按规范算出来的</b>。调研中确认了可直接采用的尺寸基准：</p>
+<ul>
+  <li><b>Jemena</b>（NSW 燃气）ADG-002：单户热水表 长度 600mm（含前后 90° 弯头与隔离阀）、宽 100mm、深 100mm；表底离地 ≥100mm；表间水平/垂直净距 ≥100mm；<b>安装最高点 2200mm</b>；集中式热水表净距 150mm，最高点 1700mm。</li>
+  <li><b>Sydney Water</b> 多层分户计量指南：设独立表位（meter spacer）、管路间距、表位标识与朝向均有规定；4 层以上必须装 AMI 数据记录器。</li>
+  <li><b>Water Corporation</b>（西澳）：表前后各留 300mm 水平净距、上方 1200mm 垂直净距。</li>
+  <li><b>ATCO Gas</b>（气表箱）：箱体高度 300–1000mm（非嵌入式）/ 200–1500mm（嵌入式）。</li>
+</ul>
+<p>把 <b>规范 → 尺寸计算公式</b>做进系统，输入 units 数与柜型，自动算出 W×H×D 与所需净空，这才是这个产品的核心竞争力，而不是"识别出几个数字"。</p>
+
+<h2><span class="num">08</span>技术选型：逐项对比与推荐</h2>
+
+<h3>8.1 DWG 解析：四条路的硬对比</h3>
+<table>
+  <thead><tr><th style="width:17%">方案</th><th style="width:9%">费用</th><th style="width:10%">高版本 DWG</th><th style="width:10%">代理实体</th><th>结论</th></tr></thead>
+  <tbody>
+    <tr><td><b>ODA File Converter</b></td><td class="yes">免费<br><span style="font-size:11.5px">需注册</span></td><td class="yes">完整</td><td class="mid">部分保留<br><span style="font-size:11.5px">需校验</span></td><td><b>首选。</b>命令行可批量，是当前业界公认的性价比最优解</td></tr>
+    <tr><td><b>LibreDWG</b></td><td class="yes">免费<br>GPLv3</td><td class="no">支持不全</td><td class="no">常丢失</td><td>兜底 + <b>浏览器端预览</b>。GPLv3 传染性需注意：建议只作独立进程调用，不静态链接进闭源主程序</td></tr>
+    <tr><td><b>ODA SDK</b></td><td class="no">收费</td><td class="yes">完整</td><td class="yes">完整</td><td>预算充足时的正确答案，但与"轻便快速开发"冲突</td></tr>
+    <tr><td><b>AutoCAD COM 自动化</b></td><td class="mid">需装 AutoCAD</td><td class="yes">最准</td><td class="yes">完整</td><td>精度最高但只能在 Windows、依赖 CAD 环境，慢，仅适合作为小批量高精度补充</td></tr>
+  </tbody>
+</table>
+
+<div class="callout c-blue">
+  <div class="t">💡 决定性发现：浏览器里已经能直接看 DWG</div>
+  <p style="margin:6px 0 6px">开源项目 <code><b>mlightcad/cad-viewer</b></code>（MIT 协议）通过 WebAssembly 在<b>纯浏览器、无后端</b>环境解析并渲染 DWG/DXF，60+ FPS，支持图层控制、Paper Space、填充图案、测量、批注，<b>并自带 PDF / SVG / 自包含 HTML 导出插件</b>。</p>
+  <p style="margin:0">这直接解决了需求 1 中「左侧原样显示 DWG」和「导出 jpg/pdf」的诉求，<b>且整个预览层不需要写任何 CAD 解析代码</b>。推荐作为前端预览层方案（备选 <code>@x-viewer/core</code>）。注意其架构文档明确指出：最好用的 DWG 解析器其实就是 ODA——与上面 8.1 的结论一致。</p>
+</div>
+
+<h3>8.2 其余关键选型</h3>
+<table>
+  <thead><tr><th style="width:20%">层</th><th style="width:26%">推荐</th><th>理由与备选</th></tr></thead>
+  <tbody>
+    <tr><td>前端框架</td><td>React 18 + TypeScript + Vite + Tailwind</td><td>生态最厚、组件最全、后续维护最容易（需求要求"轻便、高效、快速开发"）</td></tr>
+    <tr><td>文档预览</td><td><code>pdf.js</code> / <code>docx-preview</code> / <code>@mlightcad/cad-viewer</code></td><td>PDF/Word/DWG 全覆盖，全前端实现，无需后端渲染</td></tr>
+    <tr><td>后端</td><td>Python 3.11 + FastAPI</td><td>CAD/几何生态在 Python（<code>ezdxf</code>、<code>pdfplumber</code>、<code>PyMuPDF</code>），不要为此造轮子</td></tr>
+    <tr style="background:var(--brand-soft)"><td><b>矢量 PDF 抽取</b><br><span class="tag t-green">实测后升为首选</span></td><td><code>pdfplumber</code> / <code>PyMuPDF</code> + <code>pdftotext -layout</code></td><td><b>04 章实测：74 KEELER ST 的文本层完整可抽（1.57 MB），UNIT 标注、房间名、图号、尺寸链全部可读。</b>这条路径<b>不需要 AI、成本为零、速度快</b>，应作为 STAGE 1 的<b>主路径</b>而非备选</td></tr>
+    <tr><td>几何/解析</td><td><code>ezdxf</code>（DWG）+ <code>pdfplumber</code>/<code>PyMuPDF</code>（PDF）+ 规则引擎</td><td>规则引擎先定高置信项，模糊项才交 AI，最后做几何一致性校验——行业验证过的混合路线。<b>视觉模型已降级为兜底</b>：仅扫描件（无文本层）或三信号全缺失时启用</td></tr>
+    <tr><td>数据库</td><td>SQLite + 本地文件存储</td><td>需求明确"本地使用"。零运维、单文件、便于备份。需多人协作时再上 PostgreSQL</td></tr>
+    <tr><td>异步任务</td><td>asyncio 后台 worker（解析耗时）</td><td>先不引入 Celery/Redis，保持轻量；解析任务带进度条</td></tr>
+    <tr><td>导出</td><td>PDF：WeasyPrint / ReportLab；Word：<code>python-docx</code>；JPG：Playwright 截图或 PyMuPDF 光栅化</td><td>纯本地生成，不依赖第三方服务</td></tr>
+    <tr><td>前端表格</td><td>TanStack Table</td><td>楼层 × 柜型矩阵需要排序/分组/编辑/虚拟滚动，这是最合适的</td></tr>
+    <tr><td><b>回归测试集</b><br><span class="tag t-amber">实测后新增</span></td><td><code>74 KEELER ST</code> 图纸集 + 断言文件</td><td>把各层抽到的 units 数与人工核对答案固化成断言。<b>任何解析改动都必须让这份基准继续通过</b>——这是防止"改好一处、弄坏三处"的唯一可靠手段</td></tr>
+  </tbody>
+</table>
+
+<h2><span class="num">09</span>系统架构与数据模型</h2>
+
+<pre>┌───────────────────────── 浏览器 ─────────────────────────┐
+│  React + TS + Vite                                        │
+│  ┌──────────┬──────────────────────┬───────────────────┐  │
+│  │ 树状导航 │  原文档预览器        │  选型结果工作区   │  │
+│  │ (Building│  pdf.js / docx-     │  TanStack Table   │  │
+│  │  /Floors/│  preview / cad-viewer│  楼层×柜型矩阵    │  │
+│  │  Types)  │  (DWG 原样渲染)      │  导出 PDF/Word/JPG│  │
+│  └──────────┴──────────────────────┴───────────────────┘  │
+└───────────────────────────┬───────────────────────────────┘
+                            │ REST / SSE
+┌───────────────────────────┴───────────────────────────────┐
+│                   FastAPI 后端                           │
+│  ┌────────────┐ ┌─────────────┐ ┌──────────────────────┐  │
+│  │ 项目/文档   │ │ 解析流水线   │ │ 柜库 & 选型引擎       │  │
+│  │ CRUD       │ │ (队列+进度)  │ │ 匹配算法+规范尺寸计算 │  │
+│  └────────────┘ └──────┬──────┘ └──────────────────────┘  │
+└─────────────────────────┼─────────────────────────────────┘
+                          ▼
+        ┌─────────────────────────────────────────┐
+        │  解析适配器层（可插拔）                    │
+        │  ┌─────────┐ ┌────────┐ ┌──────────┐    │
+        │  │DWG→DXF  │ │PDF矢量 │ │PDF位图/  │    │
+        │  │ODA优先  │ │文字抽取│ │JPG→视觉  │    │
+        │  │LibreDWG │ │+几何   │ │模型      │    │
+        │  └────┬────┘ └───┬────┘ └────┬─────┘    │
+        │       └──────────┴───────────┘              │
+        │            统一 → JSON 图元模型              │
+        └───────────────────┬─────────────────────────┘
+                            ▼
+        ┌─────────────────────────────────────────┐
+        │ SQLite + 本地图纸文件库（含原件与缩略图）  │
+        └─────────────────────────────────────────┘</pre>
+
+<h3>核心数据模型</h3>
+<pre>Building  1─n Floor  1─n Unit
+   │           │
+   │           └─ n:m ─ CupboardInstance ──→ CupboardVariant
+   │                                                  │
+   └─ n ─ Document (DWG/PDF/Word/JPG)          CupboardType
+        ├─ id, 原文件路径, 版本, SHA256              └─ water_meter_count
+        ├─ 图纸类型/来源（建筑/给排水/电气）              └─ gas_meter_count
+        └─ 缩略图 / 预渲染缓存                       └─ 计量位布局描述
+
+CupboardVariant（排布形式）
+  ├─ layout_code            如 4A / 4B / 4C（7套表可有4种排布）
+  ├─ positions_total        表位总数（= units 数）  ← 数子矩形得到
+  ├─ layout_rows / layout_cols   排布行列             ← 可穷举匹配
+  ├─ grid_aspect            "2x3" / "1x7" / "2x2+3"
+  ├─ w / h / d (mm)         柜体尺寸  ← 从 DIMENSION 实体读取
+  ├─ meter_spacing_h/v      表位间距（从标注读出）
+  ├─ arrangement_desc       排布文字描述（1×4 / 2×2 / 2+3+2 …）
+  ├─ thumbnail_svg / 缩略图
+  └─ source_doc_id + 源图框名 + bbox{x,y,w,h}   ← 可溯源回 DWG 原位置
+
+ParseJob
+  ├─ status        queued / parsing / needs_review / confirmed / failed
+  ├─ confidence    每项结果独立置信度
+  ├─ raw_result    原始识别输出（可复现、可审计）
+  └─ corrections   人工修正记录 → 沉淀为 block_name → meter_count 规则字典</pre>
+
+<div class="callout c-violet">
+  <div class="t">🔑 数据模型里最关键的两个设计</div>
+  <p style="margin:6px 0 0"><b>1）<code>CupboardVariant</code> 必须存 <code>source_doc_id + 源图框名</code>。</b>这样任何一个柜型都能一键跳回 DWG 原位置，用户才敢用系统给出的尺寸。<br>
+  <b>2）<code>ParseJob.corrections</code> 是整个系统的复利资产。</b>每次人工改判都变成一条规则，识别准确率随使用单调上升——这是把"100% 识别"这个不可能的目标，转成"越用越准"这个可达成的工程目标的关键机制。</p>
+</div>
+
+<h2><span class="num">10</span>核心难点与解法（按难度排序）</h2>
+
+<div class="grid2">
+  <div class="mini"><div class="h"><span class="tag t-amber">最难</span> 每层 units 数量识别 <span class="t-amber">← 唯一真难点（已实测，见 04）</span></div><div class="d">已在真实图纸（74 KEELER ST，35 页）上实测：<b>矢量文本层完整可抽</b>，UNIT 标注能直接读到，但<b>会漏数</b>——连续编号段抽全、有缺号的楼层漏抽（LEVEL 4 只读到 1 间）。<b>解法是三路信号交叉验证</b>：① 文本 UNIT 编号连续性 ② 房间关键词计数 ③ 粉红填充连通域（仅 A008 有）。<b>柜型库侧的几何确定性无法复用到建筑平面图</b>——建筑图没有闭合矩形网格</div></div>
+  <div class="mini"><div class="h"><span class="tag t-red">最难</span> DWG 代理实体丢失</div><div class="d">第三方插件生成的图元转 DXF 后可能变空。必须做<b>转换后完整性校验</b>：转换前后实体数/块数对比，差异超阈值直接告警而不是静默通过。<b>注：74 KEELER ST 是 PDF 出图，无此风险；风险来自建筑 DWG</b></div></div>
+  <div class="mini"><div class="h"><span class="tag t-green">已降级</span> 柜型自动分解入库 <span style="color:var(--brand)">（原「较难」）</span></div><div class="d">从截图看柜体是规则闭合矩形 + 内部子矩形分格，<b>几何解析即可，不必用 AI</b>。数子矩形个数 = units 数，按图层区分 water/gas，读取 DIMENSION 取尺寸。风险大幅下降</div></div>
+  <div class="mini"><div class="h"><span class="tag t-green">已降级</span> 选型匹配算法 <span style="color:var(--brand)">（原「中等」）</span></div><div class="d">有了 <code>layout_rows/cols/positions_total</code>，匹配变成<b>有限组合穷举</b>：某层 units=N → 找出所有满足 positions_total=N 的柜型（含 2×N1+N2 组合）。纯查表，无歧义</div></div>
+  <div class="mini"><div class="h"><span class="tag t-green">已降级</span> 楼层顺序与命名 <span style="color:var(--brand)">（原「较难」）</span></div><div class="d">实测遇到的命名是 <code>BASEMENT / GROUND / LEVEL 1–4 / ROOF</code>——已是主流规范，<b>归一化映射表一次写对即可</b>。真正要处理的只有地下层无 units 的跳过规则</div></div>
+  <div class="mini"><div class="h"><span class="tag t-blue">中等</span> 原样预览一致性</div><div class="d">需求强调"原样显示"。CAD 图纸存在字体缺失（SHX）、线型缺失问题，需做字体映射表与线型兜底，否则预览与原图不符。<b>PDF 侧实测无此问题</b>（Archicad 出图，字体已嵌入）</div></div>
+  <div class="mini"><div class="h"><span class="tag t-blue">中等</span> 两套编号体系并存 <span class="t-amber">新增</span></div><div class="d">平面图用连续序号（2–28），A008 单元表用楼层编码（101/201/301/401）。<b>不能混为一谈</b>，需在 <code>Unit</code> 模型里分开存 <code>seq</code> 与 <code>floor_code</code>，并以图号（A102→LEVEL 1）作为楼层锚点做交叉校验</div></div>
+  <div class="mini"><div class="h"><span class="tag t-blue">中等</span> 多图纸集与多比例 <span class="t-amber">新增</span></div><div class="d">单项目 PDF 常有 30+ 张图、混合 A3/A4 比例、含封面/目录/透视图。<b>必须靠图号前缀（A1xx 平面 / A3xx 立面 / A4xx 剖面）过滤</b>，否则会把立面图上的"层号"误当楼层</div></div>
+</div>
+
+<h2><span class="num">11</span>实施路线与工作量估算</h2>
+
+<table>
+  <thead><tr><th style="width:6%">阶段</th><th style="width:22%">交付内容</th><th style="width:10%">人日(估)</th><th>验收标准</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><b>P0</b></td>
+      <td>项目骨架 + 树状导航 + 三栏主从布局 + 数据模型 + SQLite<br><span class="t-grey">先跑通手动录入全流程，不碰解析</span></td>
+      <td class="mid">8–10</td>
+      <td>能手工建 Building→Floor→Unit→Cupboard 并导出 PDF/Word/JPG</td>
+    </tr>
+    <tr>
+      <td><b>P1</b></td>
+      <td>文档预览器打通（PDF/Word/DWG）+ 上传管理 + 版本管理<br><span class="t-grey">cad-viewer 集成与字体兜底是重点</span></td>
+      <td class="mid">8–12</td>
+      <td>三类格式均能"原样"预览，可缩放/分层/翻页</td>
+    </tr>
+    <tr>
+      <td><b>P2</b></td>
+      <td>DWG/PDF 解析流水线 + 图元 JSON 模型 + 完整性校验<br><span class="t-grey">ODA 注册与转换链路打通；<b>规则外置为配置文件</b></span></td>
+      <td class="mid">10–14</td>
+      <td>真实项目 DWG 能稳定产出结构化图元，转换损失可量化报告</td>
+    </tr>
+    <tr>
+      <td><b>P3</b></td>
+      <td>楼层/units 识别 + <b>人工确认 UI</b> + 置信度分诊+ 修正规则字典<br><span class="t-grey">已按真实图纸实测调整为<b>规则解析</b>；需求 2 的预览确认机制在此落地</span></td>
+      <td class="mid">10–15<br><span class="t-green">↓ 原 12–18</span></td>
+      <td>在 74 KEELER ST 图纸集上跑通：<b>连续编号不漏、缺号楼层能靠交叉信号补齐并标为低置信</b>，人工修正后准确率可追溯提升</td>
+    </tr>
+    <tr>
+      <td><b>P4</b> ⬆️</td>
+      <td>Cupboard 库入库（几何分解→预览→确认）+ 分类浏览 + 编辑删除<br><span class="t-grey">对标 ABN meter cabinet app 交互；<b>含诊断模式 + 规则配置界面</b></span></td>
+      <td class="mid">8–13<br><span class="t-amber">↑ 略增</span><br><span class="t-green">↓ 原 10–14</span></td>
+      <td>一个 DWG 能分解出按表计数分类的多个柜型并入库，<b>尺寸从 DIMENSION 自动读取</b>；解析不达标时有诊断报告可查</td>
+    </tr>
+    <tr>
+      <td><b>P5</b></td>
+      <td>选型匹配引擎 + 规范尺寸校验 + 楼层清单导出<br><span class="t-grey">组合穷举 + 内置 Jemena/Sydney Water 净空规则</span></td>
+      <td class="mid">6–10<br><span class="t-green">↓ 原 8–12</span></td>
+      <td>输入楼层 units，自动出全部候选柜型+尺寸+描述，可导出</td>
+    </tr>
+    <tr>
+      <td><b>P6</b></td>
+      <td>端到端测试 + 真实图纸回归 + 本地打包 + 使用文档</td>
+      <td class="mid">10–14</td>
+      <td>需求方用真实项目图纸完成一次完整闭环，无解析崩溃</td>
+    </tr>
+    <tr style="background:#f2f5f9">
+      <td colspan="2"><b>合计</b></td>
+      <td class="mid"><b>58–86 人日</b><br><span class="t-green">↓ 因真实图纸实测已下调（原 64–93）</span></td>
+      <td><b>单人全职约 13–17 周；两人并行约 7–10 周</b>。目标仓库已核实为空，<b>无需兼容既有代码，可直接从 P0 起建</b></td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout c-green">
+  <div class="t">✅ 工期已按真实图纸下调：64–93 → 58–86 人日</div>
+  <p style="margin:6px 0 0">下调的全部依据来自 04 章的实测：<b>①</b> 建筑 PDF 有完整矢量文本层，<code>pdftotext -layout</code> 直接可抽，<b>不需要 AI 视觉识别</b>（省下模型调用、标注与置信度建模的大量工作）；<b>②</b> 楼层命名已是规范写法，归一化映射一次到位；<b>③</b> 图号体系完整（A101–A107 平面 / A008 单元表），提供了天然的楼层锚点。</p>
+  <p style="margin:6px 0 0"><b>但有一项工作量是新增的：</b>必须处理「文本抽全会漏数」这个问题（4.2 / 4.3）。这不是 bug 修复，而是一套<b>三信号交叉验证 + 置信度分诊</b>的机制，这部分已计入 P3 的 10–15 人日。</p>
+</div>
+
+<div class="callout c-amber">
+  <div class="t">关于「开发好、完整测试、通过后再交付」的顺序建议</div>
+  <p style="margin:6px 0 0">同意这个原则，但建议改成<b>分阶段交付</b>：P0–P2（能上传、能预览、能解析出结构化数据）先交付一次，让你用真实图纸验证解析质量。<b>这是唯一能尽早暴露"DWG 到底能不能解析"风险的方式</b>——真实<b>建筑 DWG</b>的代理实体可能大量丢失（PDF 出图则无此问题，74 KEELER ST 已验证），越早知道越好。把 P6 的测试拆成"每阶段回归"+"最终端到端"两层。</p>
+  <p style="margin:6px 0 0"><b>阶段门禁建议：</b>P3 结束时用 <code>74 KEELER ST</code> 这份真实图纸做<b>回归基准</b>——把各层抽到的 units 数与人工核对的答案存成一份断言文件，后续改动只要让它通过才算不回归。<b>这份图纸已经从"样本"升级成了系统的测试资产。</b></p>
+</div>
+
+<h2><span class="num">12</span>风险登记册</h2>
+<table>
+  <thead><tr><th style="width:5%">级别</th><th style="width:24%">风险</th><th style="width:34%">影响</th><th>缓解措施</th></tr></thead>
+  <tbody>
+    <tr><td><span class="tag t-red">P0</span></td><td><b>GitHub Token 明文泄露</b></td><td>仓库被他人读写；凭据已进入不可控的文档流转</td><td><b>立即吊销并重签</b>（见文首）；改用 <code>gh auth login</code>；仓库加 secret scanning</td></tr>
+    <tr><td><span class="tag t-red">P0</span></td><td><b>"100% 识别"要求</b></td><td>项目验收标准无法达成，或上线后大面积返工</td><td>改写为「自动初稿+置信度+人工确认」；用修正字典逼近；先 P2 交付验证。<b>04 章实测已证明矢量文本可抽，识别质量可控，但"漏数"客观存在，必须保留人工确认环节</b></td></tr>
+    <tr><td><span class="tag t-red">P0</span></td><td><b>纯文本抽取漏数</b><br><span class="t-amber">实测新发现 · 升为 P0</span></td><td>某层 units 数被低估 → 选型少排柜位→ <b>清单少算工程量，直接造成采购与安装事故</b>。实测 LEVEL 4 只读到 1 间，而封面上明确写着 43+1 套</td><td>三信号交叉验证（文本连续性 + 房间关键词 + 填充连通域）+ <b>缺号即降置信并强制人工确认</b>；用 74 KEELER ST 建回归断言；<b>宁可多报给人确认，不可静默漏算</b></td></tr>
+    <tr><td><span class="tag t-amber">P1</span></td><td><b>建筑 DWG 代理实体丢失</b><br><span class="t-amber">范围已缩小</span></td><td>PDF 出图路径已验证无此问题（74 KEELER ST 为 Archicad 出图）；风险仅存在于<b>业主直接提供的 DWG</b></td><td>转换前后实体数/块数完整性校验，差异超阈值告警；ODA 优先，LibreDWG 兜底</td></tr>
+    <tr><td><span class="tag t-amber">P1</span></td><td><b>粉红填充不可作为主路径</b><br><span class="t-amber">实测新发现</span></td><td>该填充用非标准 RGB 色彩空间定义，<b>PDF 对象层取不到</b>，只能渲染成位图后靠像素连通域分析；且<b>只在 A008 单元表上有，平面图上完全没有</b>（实测占比 0.00%）</td><td>降级为<b>交叉验证信号</b>而非主提取路径；位图分析仅在 A008 类"单元表"页面上运行，不对平面图做连通域检测（避免 kernel 参数调参困境）</td></tr>
+    <tr><td><span class="tag t-amber">P1</span></td><td><b>解析规则过拟合到单张截图</b><br><span class="t-amber">因无法取样而升高</span></td><td>真实 DWG 遇非矩形柜体 / 异形表位 / 嵌套块时静默出错，用户拿到错数据却不知情</td><td>规则外置为配置文件 + <b>诊断模式</b>输出未归类图元与置信度 + 修正字典。<b>首次跑真实文件预留一轮规则调优</b></td></tr>
+    <tr><td><span class="tag t-amber">P1</span></td><td>ODA 注册未完成 / 转换链路未验证</td><td>P2 阶段直接阻塞</td><td>立即注册；同时用 LibreDWG 做兜底方案验证</td></tr>
+    <tr><td><span class="tag t-amber">P1</span></td><td>units 定义歧义<br><span class="t-green">已大幅收窄</span></td><td>曾担心整个 STAGE 1 逻辑跑偏</td><td><b>实测基本确认：1 个 unit = 1 套 water+gas = 1 个表位</b>，与柜型库口径一致。剩余不确定项已缩小到「co-living  communal 区域是否单独计入」</td></tr>
+    <tr><td><span class="tag t-amber">P1</span></td><td>两套编号体系不一致<br><span class="t-amber">实测新发现</span></td><td>平面图连续序号 2–28vs 单元表楼层编码 101/201/301/401；且与封面声明的 44 套对不上</td><td><code>Unit</code> 模型分存 <code>seq</code> / <code>floor_code</code> / <code>label_scheme</code>；以图号（A102→LEVEL 1）为锚点做两层对齐；<b>口径差异以人工确认为准，不自动合并</b></td></tr>
+    <tr><td><span class="tag t-blue">P2</span></td><td>LibreDWG GPLv3 传染性</td><td>闭源分发存在合规风险</td><td>独立进程调用 + 进程间通信，不静态链接</td></tr>
+    <tr><td><span class="tag t-blue">P2</span></td><td>跨平台</td><td>文档提到 Mac（<code>/Users/jadenfly/Desktop</code>），若目标含 Windows 则路径/进程调用需适配</td><td>P0 阶段确定目标 OS 矩阵</td></tr>
+    <tr><td><span class="tag t-blue">P2</span></td><td>CAD 字体缺失导致预览失真</td><td>违反"原样显示"要求</td><td>建 SHX 字体映射表；无法映射的做可视化告警。<b>PDF 侧实测无此问题</b></td></tr>
+    <tr><td><span class="tag t-blue">P2</span></td><td>混合图号被误当楼层<br><span class="t-amber">实测新发现</span></td><td>立面图/剖面图上的标高与楼层号可能被误读为楼层，产出幽灵楼层</td><td>按图号前缀过滤：<code>A1xx</code> 平面 / <code>A2xx</code> 平面 / <code>A3xx</code> 立面 / <code>A4xx</code> 剖面；只对平面类图号跑楼层解析</td></tr>
+  </tbody>
+</table>
+
+<h2><span class="num">13</span>待澄清问题（开工前必须确认）</h2>
+
+<div class="qa"><div class="q"><span class="n">Q1</span>「units」到底指什么？<span class="t-green" style="margin-left:6px">已基本解答</span></div><div class="a">从柜型库截图看，<b>一个表位 = 1 套 water + gas（冷热双表 + 1 气表）</b>，所以在这套库里 units ≈ 表位数。真实图纸实测进一步支持这个口径：<b>每个 UNIT 标注对应一套独立计量柜位</b>，单元表（A008）的表位数与平面图上的 UNIT 数应当一一对应。<br><br><b>剩余唯一需你确认的：</b>① 图纸封面上除 43 套 double + 1 套 single 之外，还有 <b>2 处 CO-LIVING  communal 共享区（S34）</b>——这些是否也要配柜、是否计入 units？<b>②</b> 是否有「1 个 unit 配 2 个柜位」或「2 个 unit 共享 1 套表」的情况？</div></div>
+
+<div class="qa"><div class="q"><span class="n">Q2</span>每层的 units 数据来源是什么图？<span class="t-green" style="margin-left:6px">已解答</span></div><div class="a"><b>已确认为建筑平面图，且实测给出了完整答案。</b>来源与信号如下：<br><br>① <b>主路径 — A1xx 平面图上的 <code>UNIT n</code> 文字标注</b>。74 KEELER ST 里 LEVEL 1 图上清晰可读 <code>UNIT 8 / 9 / 10 / 11</code>，同页还有 <code>ND.76-72 KEELER ST</code> 可作地址锚点。<b>矢量文本层完整可抽</b>（<code>pdftotext -layout</code> 抽出 1.57 MB 文本），无需 AI。<br>② <b>辅助 — A008 单元表</b>（专有粉红填充标每套单元），是全项目里唯一的"按单元着色"页面。<br>③ <b>校验 — 房间关键词计数</b>（KITCHEN / LIVING / BED / BATH / BALCONY 等）。<br><br><b>⚠ 实测发现的坑：单靠文本会漏数。</b>连续编号段能抽全，但有缺号的楼层会漏（LEVEL 4 只读到 1 间）。所以不能只做文本抽取，<b>必须做三信号交叉验证 + 置信度分诊</b>（详见 4.2 / 4.5）。</div></div>
+
+<div class="qa"><div class="q"><span class="n">Q2b</span>单元表与平面图数量对不上怎么办？<span class="t-green" style="margin-left:6px">已解答</span></div><div class="a">
+<b>权威口径 = 44 户</b>（GROUND 8 + L1 11 + L2 11 + L3 11 + L4 3，另加 2 处 CO-LIVING 集体区，空间总数 46）。<br><br>
+早前流传的三个口径均已查明来源，<b>全部作废</b>：<br>
+<table style="width:100%;border-collapse:collapse;margin:10px 0;font-size:13px">
+<tr style="background:#f1f5f9"><th style="border:1px solid #cbd5e1;padding:6px 8px;text-align:left">旧口径</th><th style="border:1px solid #cbd5e1;padding:6px 8px;text-align:left">真实来源</th><th style="border:1px solid #cbd5e1;padding:6px 8px;text-align:left">为什么错</th></tr>
+<tr><td style="border:1px solid #cbd5e1;padding:6px 8px"><b>28</b></td><td style="border:1px solid #cbd5e1;padding:6px 8px">平面图 <code>UNIT n</code> 连续序号的最大值</td><td style="border:1px solid #cbd5e1;padding:6px 8px"><code>UNIT n</code> 是全楼连续序号，不是户数</td></tr>
+<tr><td style="border:1px solid #cbd5e1;padding:6px 8px"><b>32</b></td><td style="border:1px solid #cbd5e1;padding:6px 8px">早期正则统计</td><td style="border:1px solid #cbd5e1;padding:6px 8px">漏了 GROUND 8 户，且每层漏 110/111</td></tr>
+<tr><td style="border:1px solid #cbd5e1;padding:6px 8px"><b>38</b></td><td style="border:1px solid #cbd5e1;padding:6px 8px">更早一轮统计</td><td style="border:1px solid #cbd5e1;padding:6px 8px">同上，且额外漏算 GROUND</td></tr>
+</table>
+<b>44 由三重独立证据锁定：</b><br>
+<ol>
+<li><b>A008 单元表</b>：GROUND <code>G01</code>–<code>G08</code> + <code>CLA1</code>；L1 <code>101</code>–<code>111</code>；L2 <code>201</code>–<code>211</code>；L3 <code>301</code>–<code>311</code>；L4 <code>401</code>–<code>403</code> + <code>CLA2</code> → 44 户 + 2 collective</li>
+<li><b>封面 ROOM MIX</b>：<code>43 DOUBLE ROOMS + 1 SINGLE ROOM + 2 COMMUNAL LIVING AREA</code> = 44 户</li>
+<li><b><code>MIN DRY AREA: SINGLE ROOM 12SQM, DOUBLE ROOM 16SQM</code> 规则</b>：仅 GROUND <code>G01</code> 的 DRY = 12.18m² &lt; 16m² → 全楼唯一 SINGLE；其余 43 户均 ≥ 16m² → 恰好对上「43 DOUBLE + 1 SINGLE」</li>
+</ol>
+<b>实测还发现三套编号体系并存</b>（原报告只预判了两套）：L1–L4 数字编码 <code>101/110/201…</code>、GROUND 字母编码 <code>G01</code>–<code>G08</code>（完全不用数字）、CO-LIVING 集体区 <code>CLA1</code>（GROUND）/ <code>CLA2</code>（LEVEL 4）。<br><br>
+<b>系统处理方式：</b>实现<b>双数据源逐户交叉验证</b>而非静默取最大值 —— 平面图坐标法解析（主信号）× A008 单元表（最硬证据），两侧逐户对账，只有 <code>verdict=AGREE</code> 才判通过。当前结果：一致率 <code>1.0</code>、面积矛盾 <code>0</code> 条、仅平面图 <code>0</code>、仅单元表 <code>0</code>。
+</div></div>
+
+<div class="qa"><div class="q"><span class="n">Q3</span>柜型库 DWG 的组织方式？<span class="t-green" style="margin-left:6px">已解答</span></div><div class="a"><b>已确认：单个 DWG 文件</b>（<code>Cold and hot water and gs meter cupboards detail 1.dwg</code>，AutoCAD 2024），内部并列排布 5+ 个柜型，靠<b>空间位置</b>区分而非 block 名。<br><br><b>⚠️ 该文件无法上传</b>，所以规则只能从截图推断。实现上已转化为三条硬约束：<b>①</b> 图层名/颜色/闭合容差等全部外置为配置文件；<b>②</b> 首次解析输出<b>诊断报告</b>（识别到几个柜体、各几个表位、哪些图元未归类）；<b>③</b> 修正字典记录每次人工改判。<b>你首次运行时看诊断报告就能知道哪里需要调规则</b>，不需要把文件给我。</div></div>
+
+<div class="qa"><div class="q"><span class="n">Q3b</span>截图里的 <code>CAMS</code> 命令是什么？<span class="t-red" style="margin-left:6px">新增 · 高优先级</span></div><div class="a">命令行显示 <code>Command: CAMS</code> 且有交互式追问，形态像 AutoLISP 自定义命令。<b>如果这是你已写的插件，请提供源码或插件文件</b>——系统可能只需读取它的输出即可，P4 阶段可从 6–10 人日降到 2–3 人日。这是目前<b>投入产出比最高的一个问题</b>。</div></div>
+
+<div class="qa"><div class="q"><span class="n">Q4</span>每层可以有多个 cupboard 吗？拆分规则是什么？</div><div class="a">需求里说"每层的 cupboard（可能有多个）"。那 8 units 是配 1 个 8 柜、2 个 4 柜、还是 4 个 2 柜？<b>需要一个明确的匹配与拆分规则</b>，或者由用户在 UI 上手动指定组合。</div></div>
+
+<div class="qa"><div class="q"><span class="n">Q5</span>是否需要多人协作与权限？</div><div class="a">决定是 SQLite 单机还是 PostgreSQL + 账号体系。这直接影响架构，工作量差异不小。需求读起来像单人本地使用，请确认。</div></div>
+
+<div class="qa"><div class="q"><span class="n">Q6</span>目标运行环境？</div><div class="a">需求提到 <code>/Users/jadenfly/Desktop</code>（macOS）。目标只有 Mac，还是需要 Mac + Windows 双平台？是否允许 Docker 交付（能大幅简化部署）？</div></div>
+
+<div class="qa"><div class="q"><span class="n">Q7</span>导出的模板格式？</div><div class="a">PDF/Word 是否有既定的公司模板或章节结构？导出 JPG 是导出「清单表格」还是「柜体排布图」？后者需要从 DWG 矢量渲染成图，是完全不同的工作量。</div></div>
+
+<div class="qa"><div class="q"><span class="n">Q8</span>参考截图是指定要对标的产品吗？</div><div class="a">若需要完整复刻，请提供产品名或更高清原图。截图中的批次队列 + 版本比对布局是否也要做进模块 A？</div></div>
+
+<div class="qa"><div class="q"><span class="n">Q9</span>是否接受引入 AI 视觉模型（会产生 API 费用）？</div><div class="a">扫描件与复杂图纸的处理离不开它。需求提到"api key 也可以"，请确认可用预算与是否接受数据出境（图纸上传第三方 API 的合规性）。</div></div>
+
+<div class="qa"><div class="q"><span class="n">Q10</span>柜体尺寸是"读取图纸标注"还是"按规范计算"？<span class="t-green" style="margin-left:6px">已解答</span></div><div class="a"><b>从截图看图纸已有完整尺寸标注链</b>（如 50/175/200/100/250/175/50 = 1000，总高 2200、总宽 1315 等）。<b>建议：读 DWG 的 DIMENSION 实体作为主数据源</b>，规范公式（Jemena 100mm 净距、2200mm 最高点等）仅作<b>校验与告警</b>，不一致时提示用户。既准确又保留合规检查能力。</div></div>
+
+<h2><span class="num">14</span>结论与建议的下一步</h2>
+
+<div class="grid3">
+  <div class="mini"><div class="h">✅ 需求质量</div><div class="d">业务目标清晰，三模块划分合理，「预览→确认→入库」的设计到位。需求方对流程有实际经验。</div></div>
+  <div class="mini"><div class="h">✅可行性已验证</div><div class="d"><b>74 KEELER ST 实测证明</b>：建筑 PDF 文本层完整、UNIT 标注可抽、图号体系规范 → <b>STAGE 1 主路径通</b>，不需要 AI 视觉识别</div></div>
+  <div class="mini"><div class="h">⚠️ 核心风险已定位</div><div class="d">不再是"能不能抽到"，而是<b>"抽到的是否全"</b>——文本抽取会漏数（LEVEL 4 实测只读到 1 间）。<b>三信号交叉验证 + 置信度分诊是必须做的一环</b></div></div>
+</div>
+
+<div class="callout c-green">
+  <div class="t">🎯 阶段结论：项目可行，方案已从"假设"变成"可施工"</div>
+  <p style="margin:6px 0 0">在拿到真实图纸之前，STAGE 1 一直是一个<b>基于假设的高风险项</b>。74 KEELER ST 这份图纸把三个关键未知量全部变成了已知：</p>
+  <ul style="margin:8px 0 0">
+    <li><b>图纸格式 → 已解</b>：Archicad + PDFTron 出图，A3 横向 35 页，<b>矢量文本层完整可抽</b>（1.57 MB）。<code>pdftotext -layout</code> 直接拿到UNIT 标注、房间名、图号、尺寸链。</li>
+    <li><b>识别难度 → 大幅下降</b>：主路径是<b>规则解析</b>而非 AI 视觉。风险等级由 🔴 降为 🟡，<b>工期由 64–93 下调到 58–86 人日</b>。</li>
+    <li><b>真正的难点已暴露且可解</b>：不是"找不到"，而是"漏数"。这个问题的解法（三信号交叉验证 + 缺号即降置信 + 强制人工确认）是<b>确定的工程方案，不是开放式探索</b>。</li>
+  </ul>
+  <p style="margin:8px 0 0"><b>这份图纸的额外价值：</b>它已经从"一份样本"升级为<b>系统的回归测试基准</b>——把各层抽到的 units 数与人工核对答案存成断言文件，后续任何改动都必须让这份基准继续通过。</p>
+</div>
+
+<div class="callout c-blue">
+  <div class="t">📌 策略调整建议：解析重心从「AI 视觉」转为「规则 + 置信度」</div>
+  <p style="margin:6px 0 0">原方案把 STAGE 1 的重心放在「AI 视觉识别图纸」上。结合实测，建议把顺序与重心调整为：</p>
+  <ol style="margin:8px 0 0">
+    <li><b>先做柜型库几何解析</b>（原 P4 提前）——确定性高、当天可验证、最容易出成果，产出的柜型库本身就是系统最有价值的资产。</li>
+    <li><b>再做建筑图的 units 识别</b>（P3）——但手段从"AI 读图"改为<b>"矢量文本规则抽取 + 三信号交叉验证 + 置信度分诊"</b>。AI 视觉<b>降级为兜底</b>：仅当扫描件（无文本层）或三信号全部缺失时才启用。</li>
+    <li>这个顺序还有个好处：<b>能尽早进入可演示状态</b>，避免前 5 周都在做拿不出东西的基础设施。</li>
+  </ol>
+</div>
+
+<h4>建议的行动顺序</h4>
+<ol>
+  <li><b>今天</b>：吊销泄露的 GitHub token（见文首）。</li>
+  <li><b>本周</b>：~~确认 Q1 / Q2b 口径~~ <b>已解决</b> —— 权威口径 = <b>44 户 + 2 处 CO-LIVING</b>（三重独立验证）。CO-LIVING 集体区配独立集中式柜型，单独标注不计入住宅 units。<b>剩余待确认</b>：Q3b（<code>CAMS</code> 命令源码）、Q8（对标产品名）、Q9（是否接受 AI 视觉模型及预算）</li>
+  <li><b>本周</b>：说明 <code>CAMS</code> 命令的来源与能力 —— 若已有 AutoLISP 插件，系统可直接读取其输出，P4 能再省 3–7 人日。</li>
+  <li><b>本周</b>：注册 ODA File Converter（免费），跑一次任意 DWG→DXF，确认转换链路可用。<span class="t-grey">注：PDF 路径已验证无此风险，DWG 路径仍需实测</span></li>
+  <li><b>本周</b>：再提供 <b>1 份不同形态的建筑图纸</b>（<span class="t-amber">最好是业主直接提供的 DWG，而非 Archicad/PDFTron 出图</span>）——当前实测样本全部来自同一出图工具链，跨工具链的泛化能力尚未验证。</li>
+  <li><b>两周内</b>：交付 <b>柜型库几何解析原型 + 诊断模式</b> —— 你用真实 DWG 跑一次，看诊断报告指出哪些图元未识别，据此调配置文件。</li>
+  <li><b>之后</b>：按修订路线推进，选型引擎与尺寸校验作为核心竞争力打磨。</li>
+</ol>
+
+<footer>
+  <p><b>本报告基于：</b>需求 PDF 全文（含参考截图）+ 柜型库 DWG 的 AutoCAD 实图分析（文件 <code>Cold and hot water and gs meter cupboards detail 1.dwg</code>）+ <b>真实建筑图纸实测（<code>COMBINED ARCHITECTURAL DRAWINGS - 74 KEELER ST CARLINGFORD</code>，35 页 A3，含逐页文本抽取与像素级填充分析）</b> + 公开商业产品与开源技术方案调研。</p>
+  <p><b>关于 GitHub 仓库：</b>已核实<code>Forrest-tech/au-cupboards</code> <b>存在但为空仓库</b>（无任何提交或文件），因此不存在需要兼容的既有代码，本报告架构可直接作为起点。<b>关于凭据：</b>本报告全程未使用、未记录该 token。</p>
+  <p><b>关于实测的局限：</b>本次仅验证了 1 份样本、1 种出图工具链（Archicad + PDFTron）、1 种图纸风格（澳洲 apartment / co-living）。<b>结论适用于"矢量 PDF 出图"这一主流场景</b>；扫描件、老式 DWG、非常规排布仍需额外样本验证。</p>
+</footer>
+
+</div>
+</body>
+</html>
