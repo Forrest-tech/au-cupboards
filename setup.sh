@@ -103,6 +103,31 @@ fi
 echo ""
 
 # ---- 启动 ----
+# 端口占用预检 —— 这一步能省掉一整轮「代码明明改了却不生效」的排查。
+#
+# 实测踩坑：用户 git pull 到新版后跑 setup.sh，末尾报
+#   ERROR: [Errno 48] address already in use
+# 但脚本前面所有自检都显示正常，脚本"看起来成功"地退出了，
+# 于是浏览器仍在访问**旧进程**—— 旧 JS 提交旧字段给新代码，
+# 界面报「入库失败 500」、柜型库点了没反应。
+# 根因就是旧进程占着端口，而提示语淹没在日志最后一行。
+# 这里提前到启动前，并明确告诉用户该杀哪个进程。
+if command -v lsof >/dev/null 2>&1; then
+  OCCUPIED="$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null || true)"
+  if [ -n "$OCCUPIED" ]; then
+    echo "✗ 端口 $PORT 已被占用（PID: $(echo "$OCCUPIED" | tr '\n' ' ' | sed 's/ $//')）"
+    echo ""
+    echo "  多半是上一轮的旧服务还在跑 —— 那样即使你刚 git pull，"
+    echo "  浏览器访问的仍是旧代码，会出现「入库 500 / 点了没反应」。"
+    echo ""
+    echo "  查是谁在占：  lsof -nP -iTCP:$PORT -sTCP:LISTEN"
+    echo "  停掉它：      kill $(echo "$OCCUPIED" | head -1)"
+    echo "  或换个端口：  PORT=8010 bash setup.sh"
+    echo ""
+    exit 1
+  fi
+fi
+
 echo "启动服务：http://127.0.0.1:$PORT"
 echo "按 Ctrl+C 停止"
 echo ""

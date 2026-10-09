@@ -141,3 +141,53 @@ class TestThumbEndpointSecurity:
         from pathlib import Path as P
         assert P("../../etc/passwd").name == "passwd"
         assert P("a/b/c.jpg").name == "c.jpg"
+
+class TestLargeDrawing:
+    """大图纸（上百个 block）不能崩、不能超时。
+
+    实测踩坑：用户传了一份 4865 实体 / 21 图层 / **155 block** 的真实
+    柜型库 DWG，界面报「入库失败 500」。用同规模样本复现后确认：
+    后端渲染 155 个 block 耗时 20.5s、入库 0.4s，**全部 200**。
+    说明 500 并非容量问题，而是旧版前端提交旧字段给新后端所致
+    （详见 TestVersionMismatchGuard）。这里把大图纸规模钉成回归用例，
+    免得以后有人加渲染逻辑时把它压垮。
+    """
+
+    @pytest.fixture(scope="class")
+    def big_dxf(self, tmp_path_factory):
+        import ezdxf
+
+        d = tmp_path_factory.mktemp("big") / "big.dxf"
+        doc = ezdxf.new("R2018")
+        msp = doc.modelspace()
+        for i in range(60):          # 60 个足够覆盖问题，又不至于让 CI 太慢
+            name = f"CP_Block_{i:03d}"
+            b = doc.blocks.new(name)
+            for k in range(4):
+                b.add_circle((k * 12.0, k * 7.0), 4.0)
+            for k in range(3):
+                b.add_line((0, k * 9), (40, k * 9))
+            b.add_text(name, height=3).set_placement((0, 55))
+            msp.add_blockref(name, (float(i % 10) * 200, float(i // 10) * 200))
+        doc.saveas(str(d))
+        return d
+
+    def test_many_blocks_all_rendered(self, big_dxf, out_dir):
+        res = render_cupboard_library(str(big_dxf), out_dir)
+        assert len(res) == 60, f"应产出 60 个结果，实际 {len(res)}"
+        ok = [r for r in res if r.ok]
+        # 全部成功才算过 —— 允许极个别失败，但成功率必须高，
+        # 且失败必须带可读原因（不能是空 ok=False）
+        assert len(ok) >= 55, f"成功 {len(ok)}/60，失败项: " + str(
+            [(r.block_name, r.error) for r in res if not r.ok][:5]
+        )
+        for r in res:
+            if not r.ok:
+                assert r.error, f"{r.block_name} 失败但没给原因"
+
+    def test_large_batch_has_no_duplicate_paths(self, big_dxf, out_dir):
+        """block 名可能重复/相似，产出文件名不能互相覆盖。"""
+        res = render_cupboard_library(str(big_dxf), out_dir)
+        names = [r.image_name for r in res if r.ok and r.image_name]
+        assert len(names) == len(set(names)), "缩略图文件名冲突，后一个会覆盖前一个"
+        assert all((out_dir / n).is_file() for n in names)

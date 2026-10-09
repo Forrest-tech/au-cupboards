@@ -19,13 +19,14 @@
 """
 from __future__ import annotations
 
+import logging
 import shutil
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -65,12 +66,46 @@ for d in (UPLOAD_DIR, EXPORT_DIR, THUMB_DIR_PATH):
 #: 缩略图渲染 dpi —— 与入库时记录的 image_dpi 保持一致
 DEFAULT_THUMB_DPI = 110
 
+#: **API 契约版本**。前端 index.html 里的 S.apiver 必须与这里一致。
+#:
+#: 存在的意义：前端是单文件 HTML，浏览器很容易缓存住旧版本，而用户
+#: 往往只记得「重启服务」，不记得强刷。于是出现最难查的一类故障：
+#:   旧 JS 提交旧字段→ 新后端反序列化失败 → 500，但界面完全看不出原因。
+#: 实测踩坑：用户 pull 到新版 + 重启后端，仍报「入库失败 500」，
+#:   根因就是浏览器还在跑旧 index.html。
+#: 改成显式版本号后，前端启动时能主动比对并给出「请强制刷新」，
+#: 而不是让用户对着 500 猜。
+API_VERSION = "2"
+
 app = FastAPI(title="AU Cupboards", version="1.0.0")
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 
 SUFFIXES = (".pdf", ".dwg", ".dxf", ".docx", ".doc", ".jpg", ".jpeg", ".png")
+
+log = logging.getLogger(__name__)
+
+
+@app.exception_handler(Exception)
+async def _unhandled(request, exc: Exception):  # noqa: ANN001
+    """兜底异常处理：把500 变成能读懂的话。
+
+    没有这个处理器时，FastAPI 只回`Internal Server Error`，
+    前端 toast 里就是干巴巴一句「入库失败 500」—— 用户完全无从下手。
+
+    实测踩坑：旧版前端提交旧字段给新版后端，反序列化直接抛
+    AttributeError，用户看到的是 500 +「点击没反应」。
+    带上异常类型和位置后，这类问题一眼可辨。
+    """
+    log.exception("未处理异常 %s %s", request.method, request.url.path)
+    detail = (
+        f"服务端内部错误：{type(exc).__name__}: {exc}\n"
+        f"位置：{request.method} {request.url.path}\n"
+        "若近期刚 git pull，请强制刷新浏览器（Cmd+Shift+R）"
+        "清掉缓存的旧页面再试。"
+    )
+    return JSONResponse(status_code=500, content={"detail": detail})
 
 
 def _pipeline() -> Pipeline:
@@ -87,6 +122,7 @@ def health() -> dict[str, Any]:
     out: dict[str, Any] = {
         "ok": True,
         "config_version": load_config().version,
+        "api_version": API_VERSION,
         "dwg_backends": backends,
         "dwg_ready": ready,
     }
@@ -942,5 +978,14 @@ def list_corrections(job_id: int) -> list[dict[str, Any]]:
 def index() -> FileResponse:
     fe = Path(__file__).resolve().parents[3] / "frontend/index.html"
     if fe.exists():
-        return FileResponse(str(fe))
+        #必须 no-cache —— 前端是**单文件 HTML**，浏览器一旦缓存就再也
+        # 拿不到新代码，用户看到的还是旧界面 + 新后端：
+        #   ·旧 JS 调旧字段 → 后端 500
+        #   · 旧弹窗布局 → 「点了没反应」
+        # 实测踩坑：用户 git pull 到新版、也重启了后端，但浏览器缓存的
+        # 还是旧 index.html，于是柜型库点不开、入库报 500。
+        resp = FileResponse(str(fe), media_type="text/html; charset=utf-8")
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        resp.headers["Pragma"] = "no-cache"
+        return resp
     raise HTTPException(404, "前端未构建")

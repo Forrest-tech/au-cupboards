@@ -487,6 +487,9 @@ function applyI18n() {
 
 const S = {          // 全局状态
   view: 'work', pane: 'matrix',
+  // 与后端 API_VERSION 一致。改后端契约时必须同步改这里，
+  // 否则启动会直接横幅提示「版本错配，请强制刷新」而不是等到入库才报 500。
+  apiver: '2',
   projects: [], job: null, curBuilding: null, curPage: 0,
   variants: [], treeSel: null,
   openDrawing: null, // 哪张图纸处于展开状态（drawing id）
@@ -511,11 +514,46 @@ async function api(path, opt = {}) {
   const r = await fetch('/api' + path, opt);
   if (!r.ok) {
     let d = ''; try { d = (await r.json()).detail || ''; } catch (e) {}
+    // 500 且后端已带可读原因 → 直接把原因摊开给用户，
+    // 不再显示干巴巴的「入库失败 500」让人猜。
     throw new Error(`${r.status} ${d || r.statusText}`);
   }
   return r.json();
 }
 function modal(html) { $('#modal').innerHTML = html; $('#mask').classList.add('on'); }
+
+/* ============================================================ 版本错配横幅
+ *  前端是单文件 HTML，浏览器缓存住旧版本是最难查的一类故障：
+ *  界面还是旧的（点了没反应），但后端已经是新的（入库直接 500）。
+ *  与其让用户对着 500 猜，不如启动时就把话说明白。 */
+const APIVER = '2';
+function showVerMismatch(serverVer) {
+  const bar = document.createElement('div');
+  bar.id = 'vermismatch';
+  bar.style.cssText = [
+    'position:fixed', 'left:0', 'right:0', 'top:0', 'z-index:9999',
+    'background:#b91c1c', 'color:#fff', 'padding:9px 14px',
+    'font-size:13px', 'line-height:1.5', 'text-align:center',
+    'box-shadow:0 2px 10px #0003'
+  ].join(';');
+  bar.innerHTML =
+    `<b>${LANGNOW === 'zh' ? '页面版本与后端不一致' : 'Page/backend version mismatch'}</b> · `
+    + (LANGNOW === 'zh'
+      ? `浏览器缓存了旧页面（页面 ${APIVER} / 后端 ${serverVer}）。`
+      : `Browser cached an old page (page ${APIVER} / server ${serverVer}). `)
+    + (LANGNOW === 'zh'
+      ? `请<b>强制刷新</b>：Mac 按 <kbd>Cmd+Shift+R</kbd>，Windows 按 <kbd>Ctrl+Shift+R</kbd>。`
+      : `<b>Hard-reload</b>: <kbd>Cmd+Shift+R</kbd> / <kbd>Ctrl+Shift+R</kbd>.`)
+    + ' ';
+  const btn = document.createElement('button');
+  btn.textContent = LANGNOW === 'zh' ? '立即刷新' : 'Reload now';
+  btn.style.cssText = 'margin-left:10px;padding:3px 12px;border:0;border-radius:5px;'
+    + 'cursor:pointer;font-weight:600';
+  btn.onclick = () => location.reload(true);
+  bar.appendChild(btn);
+  document.body.appendChild(bar);
+  setTimeout(() => bar.remove(), 30000);
+}
 function closeModal() {
   // 解析中禁止关闭 —— 否则用户一点就把进度弄丢了，
   // 而且后台仍在跑，前端却以为失败了
@@ -557,6 +595,14 @@ async function boot() {
   $('#mfn').textContent = t('mid.none');
   try {
     const h = await api('/health');
+    // 版本一致性校验 —— 前后端必须同步升级。
+    // 前端是单文件 HTML，浏览器极易缓存住旧版本，而用户往往只记得
+    // 「重启服务」，不记得强刷，于是旧 JS 提交旧字段给新后端 → 500。
+    // 实测踩坑：用户 pull 新版 + 重启后端，仍报「入库失败 500」，
+    // 根因就是浏览器还在跑旧 index.html。这里主动比对并横幅提示。
+    if (h.api_version && h.api_version !== APIVER) {
+      showVerMismatch(h.api_version);
+    }
     // 记住后端给的 dwg_hint，供徽章点击时展示
     S.dwgHint = h.dwg_hint || null;
     $('#hstat').innerHTML =

@@ -10,6 +10,7 @@ DWG 从「无法验证」变成「已用真实文件端到端验证」。
 """
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import tempfile
@@ -213,6 +214,27 @@ class TestMacosBackendDiscovery:
         assert "mktemp" not in code, \
             "工作目录不应每次新建，否则重跑要重下 20MB 源码"
         assert "-C -" in code, "curl 缺断点续传（-C -），中断后重跑要从头下"
+
+    def test_install_script_vars_have_explicit_braces(self):
+        """变量紧邻中文/全角标点时必须写成 ${VAR}。
+
+        实测：用户在 macOS 跑脚本 12 行后崩在
+          line99: TARBALL?: unbound variable
+        原因是 macOS 自带 bash 3.2 在中文 locale 下会把
+        `$TARBALL（` 里的全角（ 算进变量名，于是去找一个叫
+        `TARBALL（` 的变量 —— 自然 unbound。
+        `bash -n` 查不出这个错（语法合法），只有真跑才炸，
+        而真跑要先下 20MB，所以在 Linux CI 上完全测不出来。
+        """
+        p = (Path(__file__).resolve().parents[2] / "scripts" / "install_dwg_backend.sh")
+        code = "\n".join(
+            l for l in p.read_text().splitlines() if not l.lstrip().startswith("#")
+        )
+        bad = re.findall(r"\$[A-Za-z_][A-Za-z_0-9]*[^\x00-\x7f]", code)
+        assert not bad, (
+            "变量引用紧邻非 ASCII 字符，macOS bash 3.2 会把中文算进变量名"
+            f"（应改用 ${{VAR}} 显式边界）: {bad}"
+        )
 
 
 # ---------------------------------------------------------------- 完整性校验
@@ -521,3 +543,33 @@ def test_garbage_file_is_rejected_not_crashed(tmp_path):
     res = parse_dwg(junk, tmp_path / "wd")
     assert not res.ok
     assert res.integrity == "corrupt"
+
+
+class TestSetupScriptPortGuard:
+    """setup.sh 必须在启动前检出端口占用。
+
+    实测踩坑：用户 pull 到新版后跑 setup.sh，末尾报
+      ERROR: [Errno 48] address already in use
+    但脚本前面所有自检都正常、整体看起来"成功"退出了，
+    于是浏览器仍访问**旧进程** —— 旧 JS 提交旧字段给新代码，
+    表现为「入库 500」+「柜型库点了没反应」，
+    而真正的提示语淹没在日志最后一行，极难定位。
+    """
+    @staticmethod
+    def _setup() -> str:
+        return (Path(__file__).resolve().parents[2] / "setup.sh").read_text()
+
+    def test_setup_checks_port_before_start(self):
+        body = self._setup()
+        seg = body.split("# ---- 启动 ----")[-1]
+        assert "lsof" in seg, "启动段缺少端口占用检测"
+        i_check = seg.index("lsof")
+        i_start = seg.index("exec python -m uvicorn")
+        assert i_check < i_start, "端口检测必须发生在启动之前，否则仍会静默失败"
+
+    def test_setup_explains_how_to_fix(self):
+        """光说'被占用'没用，必须给出可执行的 kill 命令。"""
+        seg = self._setup().split("# ---- 启动 ----")[-1]
+        assert "kill" in seg, "未给出 kill 命令"
+        assert "lsof -nP" in seg, "未给出查询占用者的命令"
+        assert "PORT=" in seg, "未给出换端口的替代方案"

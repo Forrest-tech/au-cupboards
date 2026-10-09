@@ -96,15 +96,15 @@ step "准备构建目录 $WORK"
 mkdir -p "$WORK"
 cd "$WORK"
 if [ -s "$TARBALL" ]; then
-  ok "复用已下载的 $TARBALL（$(du -h "$TARBALL" | cut -f1)）"
+  ok "复用已下载的 ${TARBALL}（$(du -h "$TARBALL" | cut -f1)）"
 else
   say "  $URL"
   # GitHub release 资产走 release-assets.githubusercontent.com，
   # 慢是正常的。带断点续传，中断后重跑不用从头下。
   curl -fL -C - --connect-timeout 30 --retry 5 --retry-delay 3 \
        --progress-bar \
-       -o "$TARBALL.part" "$URL" || die "下载失败，检查网络后重试"
-  mv "$TARBALL.part" "$TARBALL"
+       -o "${TARBALL}.part" "$URL" || die "下载失败，检查网络后重试"
+  mv "${TARBALL}.part" "$TARBALL"
   ok "已下载 $(du -h "$TARBALL" | cut -f1)"
 fi
 
@@ -182,7 +182,7 @@ if ! make -j"$JOBS" \
     tail -40 "$WORK/make.log" >&2
     [ -f "$WORK/make2.log" ] && { say "--- 第二次尝试 ---"; tail -25 "$WORK/make2.log" >&2; }
     say ""
-    say "构建目录保留在 $WORK（改了参数可以直接重跑本脚本，不必重下源码）"
+    say "构建目录保留在 ${WORK}（改了参数可以直接重跑本脚本，不必重下源码）"
     die "make 未通过"
   fi
 fi

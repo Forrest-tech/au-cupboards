@@ -410,6 +410,100 @@ def _keys(block: str) -> set[str]:
 # ---------------------------------------------------------------- 白色基调
 
 
+class TestVersionMismatchGuard:
+    """前后端版本错配防护。
+
+    实测踩坑：用户 `git pull` 到新版、也重启了后端，但仍报
+    「入库失败 500」+「点了左边没反应」。两个决定性原因：
+      1. `setup.sh` 报address already in use —— 旧后端进程还占着 8000，
+         跑的其实是pull 之前的代码；
+      2. 浏览器缓存住旧 index.html —— 前端是**单文件 HTML**，
+         旧 JS 会提交旧字段给新后端，反序列化直接抛 → 500。
+    这类故障对用户是「完全看不出原因」的，所以必须在启动时就暴露。
+    """
+
+    def test_index_served_with_no_cache(self):
+        """GET / 必须带 no-store —— 否则改了代码用户还看不到。"""
+        from fastapi.testclient import TestClient
+        from app.api.server import app
+
+        r = TestClient(app).get("/")
+        assert r.status_code == 200
+        cc = r.headers.get("cache-control", "")
+        assert "no-store" in cc and "no-cache" in cc, \
+            f"首页缺 no-cache，浏览器会一直用旧页面: {cc!r}"
+
+    def test_health_exposes_api_version(self):
+        from fastapi.testclient import TestClient
+        from app.api.server import API_VERSION, app
+
+        d = TestClient(app).get("/api/health").json()
+        assert d.get("api_version") == API_VERSION, \
+            "/api/health 必须回报 api_version，前端据此判断是否错配"
+
+    def test_frontend_declares_matching_apiver(self, script: str):
+        """前端 APIVER 必须等于后端 API_VERSION —— 不等就等于没有防护。"""
+        from app.api.server import API_VERSION
+
+        m = re.search(r"const APIVER\s*=\s*'([^']+)'", script)
+        assert m, "前端缺少 APIVER 常量"
+        assert m.group(1) == API_VERSION, (
+            f"前端 APIVER={m.group(1)} 与后端 API_VERSION={API_VERSION} 不一致，"
+            "改了契约必须同步两边，否则用户启动就看到错配横幅"
+        )
+
+    def test_mismatch_banner_wired(self, script: str):
+        assert "function showVerMismatch(" in script
+        fn = re.search(
+            r"function showVerMismatch\(.*?\n(?=function |async function )", script, re.S
+        )
+        assert fn, "showVerMismatch 函数体解析失败"
+        body = fn.group(0)
+        assert "vermismatch" in body, "横幅没有 id，便于测试定位"
+        assert "Cmd+Shift+R" in body and "Ctrl+Shift+R" in body, \
+            "必须同时给出 Mac 与 Windows 的强刷快捷键"
+
+    def test_boot_checks_version(self, script: str):
+        """boot() 必须真的去比对 —— 定义了横幅但没调用等于没做。"""
+        fn = re.search(r"async function boot\(\).*?\n(?=async function |function )", script, re.S)
+        assert fn, "boot 函数体解析失败"
+        body = fn.group(0)
+        assert "api_version" in body, "boot 没读 /health 的 api_version"
+        assert "showVerMismatch" in body, "boot 未调用版本比对"
+
+    def test_index_has_api_version_in_state(self, script: str):
+        assert "apiver: '2'" in script, "S.apiver 应与 APIVER 保持一致"
+
+
+class TestServerErrorIsReadable:
+    """500 必须带可读原因，不能是空的 Internal Server Error。"""
+
+    def test_global_exception_handler_returns_detail(self):
+        from fastapi.testclient import TestClient
+        from app.api import server
+
+        assert any(
+            getattr(h, "__name__", "") == "_unhandled"
+            for h in server.app.exception_handlers.values()
+        ), "缺少全局异常兜底处理器"
+
+        @server.app.get("/__boom__")
+        def _boom():
+            raise RuntimeError("人为触发的测试异常")
+
+        try:
+            r = TestClient(server.app, raise_server_exceptions=False).get("/__boom__")
+            assert r.status_code == 500
+            detail = r.json().get("detail", "")
+            assert "RuntimeError" in detail, f"500 未带异常类型，用户无从判断: {detail!r}"
+            assert "__boom__" in detail, "500 未带出错路径"
+        finally:
+            server.app.router.routes[:] = [
+                r for r in server.app.router.routes
+                if getattr(r, "path", "") != "/__boom__"
+            ]
+
+
 class TestCupboardLibraryImages:
     """柜型库缩略图：需求「不同柜型导出成 jpg，放在 library 里，可点击查看」。"""
 
