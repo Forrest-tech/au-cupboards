@@ -8,21 +8,36 @@
 # 最低要求：Python 3.11+（本项目使用了 `X | None` 联合类型语法与
 # `list[str]` 泛型下标，Python 3.9 及以下无法解析）。
 #
-# macOS 注意：系统自带的 `python` 是 2.7，必须用 `python3` 或虚拟环境，
-# 详见 README「运行」章节。
+# ---- 关于 pdfplumber（重要）----
+# 报告第 08 章把 pdfplumber 列为 PDF 解析库，但实测**全库零引用** ——
+# STAGE 1 的 PDF 坐标提取全部走 PyMuPDF（import fitz）。
+#
+# 之所以从主清单移出：pdfplumber 会传递依赖 pypdfium2，而 pypdfium2
+# 在 **macOS 11+ Intel** 上没有预编译 wheel，必须源码编译；其构建脚本
+# 要从 GitHub 下载 pdfium 二进制，在 macOS 11 上会因SSL 证书链过期而
+# 失败（`CERTIFICATE_VERIFY_FAILED`），导致**整个 pip 安装回滚**，
+# 连 uvicorn 都装不上。
+#
+# 需要它时再装（会附带 pypdfium2）：
+#     pip install pdfplumber==0.11.9
+# 当前阶段不需要，解析功能不受任何影响。
 
 # ---- Web 框架 ----
 fastapi==0.128.2
 uvicorn==0.40.0
 pydantic==2.12.5           # pydantic_core 由其自动带入，无需显式声明
+# 文件上传依赖：server.py 的 /api/parse 与 /api/buildings 用 File()/Form()，
+# FastAPI 在**导入时**就会检查它，缺失则直接 RuntimeError 启动失败。
+# 实测踩坑：这个依赖曾漏在清单外，全局环境恰好有（测试全绿），
+# 干净环境却启动不了 —— 由 tests/test_dependencies.py 守卫。
+python-multipart==0.0.21
 
 # ---- 数据库 ----
 SQLAlchemy==2.1.4
 
 # ---- 图纸解析（Tier A 库，需求 4 指定）----
 ezdxf==1.4.4              # DWG/DXF 矢量解析
-PyMuPDF==1.26.7           # PDF 文本层与坐标提取（import fitz）
-pdfplumber==0.11.9        # PDF 表格与字符级定位
+PyMuPDF==1.26.7           # PDF 文本层与坐标提取（import fitz）—— PDF 解析主力
 
 # ---- 导出 ----
 reportlab==4.4.9          # PDF 导出
@@ -36,11 +51,22 @@ pandas==3.0.0
 
 # ---- 报告第 08 章技术选型中指定、当前 POC 阶段尚未实际调用----
 # 保留安装以符合选型契约；后续模块（空间拓扑分析、财务测算、
-# 批量数据源接入）落地时才会用到。
+# 批量数据源接入）落地时才会用到。全部有 macOS / Linux 预编译 wheel。
 shapely==2.1.2
 duckdb==1.5.6
 numpy-financial==1.0.0
-pandas-datareader==0.10.0
+
+# ---- 暂不安装：pandas-datareader ----
+# 报告第 08 章列了它，但实测与 pandas 3.0 **不兼容**，import 即崩：
+#     TypeError: deprecate_kwarg() missing 1 required positional argument
+# 且当前代码零引用。需要时用带pandas 2.x 的独立环境安装，或等其适配。
+# pandas-datareader==0.10.0
 
 # ---- 测试 ----
 pytest==9.0.2
+# 仅测试代码需要：tests/test_api_e2e.py 的 TestClient 走
+# starlette.testclient，而它**强制要求 httpx**，缺失时 21 个 E2E 用例
+# 在 fixture 阶段集体报RuntimeError（而不是失败）。
+# 与 python-multipart 同类问题：开发机全局环境恰好有，测试全绿，
+# 干净环境才暴露。由 tests/test_dependencies.py 的 TestTestDependencies 守卫。
+httpx==0.28.1

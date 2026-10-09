@@ -8,68 +8,91 @@
 **环境要求：Python 3.11 或更高。** 本项目使用 `X | None` 联合类型语法，
 3.9 及以下无法解析。
 
-> **macOS 用户注意**：系统自带的 `python` 是 **Python 2.7**，直接用会报
-> `No module named uvicorn`。请先按下面步骤配置环境。
-
 ## 安装与运行
 
-### macOS（推荐用 Homebrew装 Python 3）
+### 最省事的方式：一键脚本（推荐）
 
 ```bash
-# 1) 若还没有 Homebrew，先装
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+git clone https://github.com/Forrest-tech/au-cupboards.git
+cd au-cupboards
+bash setup.sh
+```
 
-# 2) 装 Python 3
-brew install python@3.12
+脚本会自动定位仓库根目录（**在哪个目录执行都不会错位**）、检查 Python 版本、
+建虚拟环境、装依赖、跑自检，然后启动服务。装完打开 http://127.0.0.1:8000
 
-# 3) 克隆并进入项目
+### 手动安装
+
+```bash
 git clone https://github.com/Forrest-tech/au-cupboards.git
 cd au-cupboards
 
-# 4) 建虚拟环境（隔离，避免污染系统 Python）
+# 1) 建虚拟环境（在仓库根目录，不要进backend/）
 python3 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 
-# 5) 装依赖（务必在仓库根目录执行）
+# 2) 装依赖（务必在仓库根目录，requirements.txt 在这里）
 pip install --upgrade pip
 pip install -r requirements.txt
 
-# 6) 启动（前端与API 同源）
+# 3) 启动
 cd backend
 python -m uvicorn app.api.server:app --host 0.0.0.0 --port 8000
-
-# 7) 浏览器打开
-#    http://127.0.0.1:8000
 ```
-
-### Linux / Windows
-
-步骤同上，只是第 2 步换成安装 Python 3.11+，第 4 步的虚拟环境激活命令为：
-
-- Linux / macOS：`source .venv/bin/activate`
-- Windows PowerShell：`.venv\Scripts\Activate.ps1`
 
 ### 验证安装
 
 ```bash
-# 后端健康检查（DWG 后端未装时 dwg_ready 为 false，不影响使用）
 curl http://127.0.0.1:8000/api/health
-
-# 测试（应输出 111 passed）
-cd backend && python -m pytest tests/ -q
+cd backend && python -m pytest tests/ -q        # 应输出 160 passed
 ```
 
-### 常见问题
+---
 
-| 报错 | 原因 | 解决 |
+## 常见问题
+
+### macOS
+
+| 现象 | 原因 | 解决 |
 |------|------|------|
-| `python: command not found` | macOS 只有 `python3` | 用 `python3`，或先激活虚拟环境 |
-| `No module named uvicorn` | 装到了 Python 2.7 或没装依赖 | `python3 -m pip install -r requirements.txt` |
-| `ModuleNotFoundError: PIL` | 用了旧的根目录 requirements | 重新 `pip install -r requirements.txt`（已含 Pillow） |
-| `SyntaxError` on `X \| None` | Python < 3.10 | 升级到 3.11+ |
-| `Address already in use` | 8000 端口被占 | `--port 8001` |
+| `python: command not found` | macOS 的 `python` 是 2.7 或不存在 | 一律用 `python3`，或先激活 venv |
+| `No module named uvicorn` | 装到了 Python 2.7，或依赖没装上 | `python3 -m pip install -r requirements.txt` |
+| `Homebrew is only supported on Apple Silicon` | Intel Mac装不了 Homebrew | **不需要 Homebrew**，用系统已有的 `python3` 即可（先 `python3 --version` 确认 ≥3.11） |
+| `Error: unknown or unsupported macOS version` | Homebrew 不支持 macOS 11 | 同上，跳过 brew |
+| `CERTIFICATE_VERIFY_FAILED` / `Failed to build pypdfium2` | 见下方说明 | 直接用新版 requirements.txt（已移除 pdfplumber） |
+| `cd: au-cupboards: No such file or directory` | **你已经在该目录里了** | `pwd` 确认；提示符 `user:backend` 表示当前在 backend |
 
-DWG 解析为可选能力，未装后端时系统照常工作，详见下方「DWG 链路状态」。
+> **Intel Mac + macOS 11 用户特别注意**：Homebrew 在你的环境上不可用，
+> 但**本项目不需要它**。系统自带的 `python3` 通常已是 3.9~3.12，
+> 只要 ≥3.11 就能直接跑。若 `python3 --version` 低于 3.11，
+> 从 <https://www.python.org/downloads/macos/> 装官方 pkg 即可（选 3.12）。
+
+### 通用
+
+| 现象 | 原因 | 解决 |
+|------|------|------|
+| `ModuleNotFoundError: PIL` | 用了旧版 requirements | 重新 `pip install -r requirements.txt`（已含 Pillow） |
+| `SyntaxError` on `X \| None` | Python < 3.10 | 升级到 3.11+ |
+| `Address already in use` | 8000 端口被占 | `--port 8001` 或 `PORT=8001 bash setup.sh` |
+| `No module named app.cli` | 不在 `backend/` 目录 | `cd backend` |
+
+### 关于 pdfplumber
+
+报告第 08 章把 `pdfplumber` 列为 PDF 解析库，但它在**当前代码中零引用** ——
+PDF 坐标提取全部走 PyMuPDF。因此已从 `requirements.txt` 移出。
+
+原因不只是精简：`pdfplumber` 会传递依赖 `pypdfium2`，而后者在
+**macOS 11 + Intel** 上没有预编译 wheel，必须源码编译；其构建脚本要从
+GitHub 下载 pdfium 二进制，在 macOS 11 上会因 SSL 证书链问题失败
+（`CERTIFICATE_VERIFY_FAILED`），导致**整个 pip 安装回滚** —— 连 uvicorn
+都装不上。移除后你的安装不会再被这个问题卡住。
+
+需要它时随时可装（当前阶段不需要，解析功能不受影响）：
+```bash
+pip install pdfplumber==0.11.9
+```
+
+### DWG 支持（可选）
 
 ---
 
@@ -186,7 +209,7 @@ python -m app.cli variants
 ### 测试
 
 ```bash
-python -m pytest tests/ -q# 111 passed
+python -m pytest tests/ -q   # 160 passed
 ```
 
 ### DWG 支持（可选）
@@ -417,6 +440,112 @@ modelspace 只有 4 个实体（3× INSERT + 1× TEXT）。只统计 modelspace 
 依赖它）。现在根目录是唯一权威来源，`backend/requirements.txt` 改为
 `-r ../requirements.txt` 引用。类似 `python -m app.cli run` 的路径陷阱要一并避免。
 
+### 16. 测试全绿 ≠ 用户能跑起来（最隐蔽的一类）
+
+实测踩坑：用户按README 在 macOS 11 + Intel 上安装，`pip install` 失败，
+`uvicorn` 启动即报：
+
+```
+RuntimeError: Form data requires "python-multipart" to be installed
+```
+
+`python-multipart` 从未写进 `requirements.txt`，但**开发机的全局环境里
+恰好装了它**，所以当时的 111 项测试一路全绿 —— 测试环境掩盖了真实依赖缺口。
+
+根因是测试都在开发机解释器里跑，从未验证过「干净环境能否装起来」。
+现已：
+- 补入 `python-multipart==0.0.21`（`/api/parse` 与 `/api/buildings`
+  用 `File()`/`Form()`，FastAPI 在**导入时**就检查它）
+- 新增 `tests/test_dependencies.py`（45 项）：
+  - 用**子进程**验证每个声明的包真能import（避免 site-packages 假阳性）
+  - 验证 `app.api.server` 在干净 sys.path 下能导入
+  - 扫描代码顶层 import，与清单双向对齐
+- 新增 `setup.sh`：从任意目录调用都自动定位根目录，检查版本、建venv、
+  装依赖、跑自检、启动
+
+**教训**：新增依赖后必须在干净 venv 里验一次启动，光跑测试不够。
+
+### 17. `pdfplumber` 在 macOS 11 Intel 上装不上
+
+`pdfplumber==0.11.9` 传递依赖 `pypdfium2`，后者在 macOS 11 + Intel 上
+没有预编译 wheel，必须源码编译；其构建脚本从 GitHub 下载 pdfium 二进制，
+会因 SSL 证书链问题失败：
+
+```
+error: <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] unable to get local issuer certificate>
+Building wheel for pypdfium2 ... error
+ERROR: Could not build wheels for pypdfium2
+ERROR: Failed to build wheel for pypdfium2
+```
+
+失败后**整个 pip 安装回滚**，所有包都装不上。
+
+而 `pdfplumber` 在本项目**全库零引用** —— PDF 坐标提取全部走 PyMuPDF。
+现已从主清单移出（需要时仍可 `pip install pdfplumber==0.11.9`）。
+
+### 18. `pandas-datareader` 与 pandas 3.0 不兼容
+
+`import pandas_datareader` 直接崩：
+
+```
+TypeError: deprecate_kwarg() missing 1 required positional argument: 'new_arg_name'
+```
+
+它同样零引用，且会拖累整个安装。已注释掉，需要时用独立环境装。
+`duckdb` / `shapely` / `numpy-financial` 经实测**没有**这个问题，保留。
+
+### 19. Homebrew 在 Intel Mac + macOS 11 上不可用
+
+```
+Homebrew on macOS is only supported on Apple Silicon processors!
+Error: unknown or unsupported macOS version: :sequoia
+```
+
+**本项目根本不需要 Homebrew** —— 系统 `python3` 通常已 ≥3.11。
+README 已改为优先推荐 `setup.sh`，手动路径也不再包含 brew。
+
+### 20. `httpx` 是「看不见的依赖」——静态扫描抓不到
+
+第 16 条的同一个坑，**换了张脸又出现一次**。干净环境跑测试：
+
+```
+135 passed, 21 errors
+E   RuntimeError: The starlette.testclient module requires the httpx package
+```
+
+`tests/test_api_e2e.py` 的 `client` fixture 用 `fastapi.testclient.TestClient`，
+而 `starlette.testclient` **强制要求 httpx**。问题在于：
+
+> 代码里**没有任何一行 `import httpx`** —— 它是 TestClient 的传递依赖。
+
+所以第 16 条那套「扫描 import 语句对齐清单」的静态方法在这里**完全失效**，
+21 个 E2E 用例在 fixture 阶段集体报错，而不是失败。
+
+已修：
+- `requirements.txt` 补入 `httpx==0.28.1`
+- `test_dependencies.py` 守卫从「只扫 `app/`」扩展为 **`app/` + `tests/` 双目录**
+- 新增 `TestTestClientWorks`：用子进程**真的构造一次 TestClient**，
+  把传递依赖缺口兜住 —— 这类依赖只能靠实际执行验证
+
+**教训**：依赖校验不能只做静态扫描，必须包含「关键入口实际跑一遍」。
+传递依赖永远存在，静态分析看不见。
+
+---
+
+## 从零安装（推荐路径）
+
+```bash
+git clone https://github.com/Forrest-tech/au-cupboards.git
+cd au-cupboards
+bash setup.sh
+```
+
+`setup.sh` 会自动：定位根目录（**在哪个目录执行都不会错位**）→ 检查
+Python ≥3.11 → 建 `.venv` → 装依赖 → 跑 `app.cli health` 自检 → 启动
+uvicorn（默认 8000，可 `PORT=9000 bash setup.sh`）。
+
+**不需要 Homebrew，不需要手动 cd backend。**
+
 ---
 
 ## API
@@ -460,7 +589,7 @@ POST   /api/jobs/{id}/corrections      # 人工修正字典
 | | 上传图纸 → 预览 → 挂载树节点 → 自动解析楼层与 units | ✅ |
 | **4** 技术要求 | 成熟算法/API key | ✅（ezdxf/PyMuPDF/pdfplumber/LibreDWG，无 AI 依赖） |
 | | 100% 识别 DWG/PDF/JPG | ✅ PDF 100%（44 户全对）；✅ DWG 已用真实 AutoCAD 2000/2018 验证；⚠️ JPG 走 OCR 指引 |
-| | 完整测试通过后交付 | ✅ **111 项**测试通过 |
+| | 完整测试通过后交付 | ✅ **160 项**测试通过（干净 venv 实测） |
 | | 本地使用 | ✅ 单命令启动 |
 | | 代码保存在 GitHub | ⏳ **待推送凭据**（本地已提交，34 个文件） |
 
@@ -547,7 +676,7 @@ modelspace 几何全丢，**但退出码是 0**，ezdxf 也能"成功"读出文�
 
 ```bash
 cd backend && python -m pytest tests/ -q
-# 111 passed
+# 160 passed
 ```
 
 | 文件 | 项数 | 覆盖 |
