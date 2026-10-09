@@ -60,6 +60,40 @@ nav button.on{background:var(--accent);color:#fff}
 .badge.link{cursor:pointer;background:var(--warn-bg);color:var(--warn);border-color:#fde68a}
 .badge.link:hover{background:#fef3c7}
 
+/* ---- 柜型库：卡片网格 + 大图查看 ---- */
+.cupgrid{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(184px,1fr));
+  gap:10px;padding:0 12px 14px;
+}
+.cupcard{
+  border:1px solid var(--line);border-radius:8px;background:var(--panel);
+  overflow:hidden;cursor:pointer;transition:border-color .12s,box-shadow .12s;
+}
+.cupcard:hover{border-color:var(--accent);box-shadow:var(--shadow)}
+.cupcard.on{border-color:var(--accent);box-shadow:0 0 0 2px #2563eb33}
+.cupcard .thumb{
+  height:124px;background:var(--panel2);display:flex;
+  align-items:center;justify-content:center;border-bottom:1px solid var(--line);
+}
+.cupcard .thumb img{max-width:100%;max-height:124px;object-fit:contain;display:block}
+.cupcard .noph{font-size:11px;color:var(--dim);text-align:center;padding:0 8px}
+.cupcard .meta{padding:7px 9px 9px}
+.cupcard .code{font-size:11.5px;font-weight:600;color:var(--txt);
+  word-break:break-all;line-height:1.35}
+.cupcard .dim{font-size:10.5px;color:var(--dim);margin-top:2px}
+.cupcard .desc{
+  font-size:10.5px;color:var(--dim);margin-top:4px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+.tag.ok{background:var(--ok-bg);color:var(--ok);border-color:#bbf7d0}
+.tag.warn{background:var(--warn-bg);color:var(--warn);border-color:#fde68a}
+.cupview{
+  display:flex;align-items:center;justify-content:center;
+  min-height:100%;padding:14px;background:var(--panel2);
+}
+.cupview img{max-width:100%;height:auto;background:#fff;
+  border:1px solid var(--line);border-radius:6px}
+
 /* ---- 柜型库 / Buildings 的文件列表页 ---- */
 .filelist{padding:10px 12px}
 .filelist .row-item{
@@ -334,6 +368,10 @@ const I18N = {
     'dwg.hint.brew': '或用 Homebrew 装 LibreDWG（提供 dwgread 命令）',
     'dwg.hint.done': '装完重启服务，顶栏徽章会变成「DWG 就绪」。',
     'dwg.hint.close': '知道了',
+    'lib.title': '柜型（点击查看图纸）', 'lib.img': '张图纸', 'lib.noimg': '暂无图纸',
+    'lib.measured': '实测', 'lib.estimated': '待实测', 'lib.manual': '人工',
+    'lib.noclue': '该柜型还没有渲染图纸。重新上传 DWG 并勾选「同时渲染柜型图纸」即可生成。',
+    'lib.rendering': '正在渲染柜型图纸…', 'lib.rendered': '已渲染',
     'mid.none': '未选择文件', 'mid.ph': '上传建筑图纸后在此原样预览',
     'mid.cup.hint': '柜型库：左侧选分组查看排布与尺寸',
     'tree.projects': '建筑项目', 'tree.empty': '（暂无，点右上角「上传图纸」）',
@@ -387,6 +425,11 @@ const I18N = {
     'dwg.hint.brew': 'Or install LibreDWG via Homebrew (provides the dwgread command)',
     'dwg.hint.done': 'Restart the service afterwards; the badge turns to "DWG ready".',
     'dwg.hint.close': 'Got it',
+    'lib.title': 'Cupboards (click to view drawing)', 'lib.img': 'drawings',
+    'lib.noimg': 'No drawing yet',
+    'lib.measured': 'Measured', 'lib.estimated': 'Unmeasured', 'lib.manual': 'Manual',
+    'lib.noclue': 'This cupboard has no rendered drawing. Re-upload the DWG with "render cupboard drawings" enabled.',
+    'lib.rendering': 'Rendering cupboard drawings…', 'lib.rendered': 'Rendered',
     'mid.none': 'No file selected', 'mid.ph': 'Building drawing will be previewed here',
     'mid.cup.hint': 'Library: pick a group on the left to see layouts and sizes',
     'tree.projects': 'Projects', 'tree.empty': '(none — use “Upload” at top right)',
@@ -450,6 +493,8 @@ const S = {          // 全局状态
   fold: {},          // 楼的折叠状态：key 'b<buildingId>' -> true=折叠
   parsing: false,    // 正在解析 —— 用于禁止关闭弹窗
   dwgHint: null,     // 后端 /health 返回的 DWG 安装指引原文
+  renders: [],       // 柜型block → JPG 的渲染结果
+  storedName: null,   // DWG 上传后的文件名（渲染/入库都用它）
 };
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -821,20 +866,59 @@ function emptyBox(_t, _s) {
 // ============================================================ 动作
 function filterFloor(code) { S.floorFilter = S.floorFilter === code ? null : code; S.pane = 'detail'; syncTabs(); renderDetail(); }
 
+/** 柜型库详情：柜型卡片带缩略图，点卡片看中栏大图。
+ *  需求：「将里面的不同的柜型都导出成jpg 格式，放在 library 里，可以点击查看」 */
 function showVariantGroup(key) {
   const items = S.variants.filter(v => (v.bucket || 'p' + v.positions) === key);
-  modal(`<h2>${t('dwg.group')}: ${esc(items[0]?.bucket_label || key)}
-      <span class="x" onclick="closeModal()">×</span></h2>
-    <div class="mbody"><table><thead><tr>
-      <th>${t('dwg.codes')}</th><th>${t('dwg.grid')}</th><th class="num">${t('dwg.pos')}</th><th class="num">W×H×D</th>
-      <th class="num">${t('dwg.spacing')}</th><th>${t('dwg.desc')}</th></tr></thead><tbody>
-      ${items.map(v => `<tr><td class="mono">${esc(v.code)}</td><td class="mono">${esc(v.grid)}</td>
-        <td class="num">${v.positions}</td>
-        <td class="num">${v.w}×${v.h}×${v.d}</td>
-        <td class="num">${v.spacing_h}/${v.spacing_v}</td>
-        <td class="muted" style="font-size:10.5px">${esc(v.description || '')}</td></tr>`).join('')}
-    </tbody></table></div>
-    <div class="mfoot"><button class="btn" onclick="closeModal()">${t('up.close')}</button></div>`);
+  const withImg = items.filter(v => v.image_url);
+  $('#mfn').textContent = t('tree.library') + ' · ' + (items[0]?.bucket_label || key);
+  $('#pagelist').innerHTML = '';
+  $('#bprev').style.display = 'none';
+  $('#bnext').style.display = 'none';
+  $('#bpage').style.display = '';
+  $('#bpage').textContent = `${withImg.length} ${t('lib.img')}`;
+  $('#bparse').style.display = 'none';
+
+  // 默认展示第一张有图的柜型
+  if (withImg.length) showCupImage(withImg[0].image_url);
+  else $('#viewer').innerHTML = `<div class="ph"><div class="big">⊞</div>
+    <div>${t('lib.noimg')}</div></div>`;
+
+  let h = `<div class="sec" style="padding-left:0">${t('lib.title')}</div>`;
+  h += '<div class="cupgrid">';
+  for (const v of items) {
+    const src = v.size_source || 'estimated';
+    const srcTag = src === 'measured' ? `<span class="tag ok">${t('lib.measured')}</span>`
+      : src === 'manual' ? `<span class="tag">${t('lib.manual')}</span>`
+      : `<span class="tag warn">${t('lib.estimated')}</span>`;
+    h += `<div class="cupcard${v.image_url ? ' has-img' : ''}" data-img="${esc(v.image_url || '')}">
+      <div class="thumb">${v.image_url
+        ? `<img loading="lazy" src="${esc(v.image_url)}" alt="${esc(v.code)}">`
+        : `<div class="noph">${t('lib.noimg')}</div>`}</div>
+      <div class="meta">
+        <div class="code mono">${esc(v.code)}</div>
+        <div class="dim">${v.positions} ${t('dwg.pos')} · ${esc(v.grid || '-')}</div>
+        <div class="dim">${v.w ?? '—'} × ${v.h ?? '—'} × ${v.d ?? '—'} mm ${srcTag}</div>
+        ${v.description ? `<div class="desc">${esc(v.description)}</div>` : ''}
+      </div></div>`;
+  }
+  h += '</div>';
+  $('#rpane').innerHTML = h;
+
+  // 点卡片看中栏大图 —— 没图的给提示，不做无声无息的空点击
+  $$('#rpane .cupcard').forEach(n => n.onclick = () => {
+    const u = n.dataset.img;
+    if (!u) { toast(t('lib.noclue'), 'err'); return; }
+    showCupImage(u);
+    $$('#rpane .cupcard').forEach(x => x.classList.toggle('on', x === n));
+  });
+}
+
+/** 中栏展示柜型大图 —— 直接用服务端渲染的 JPG，不做二次加载 */
+function showCupImage(url) {
+  $('#viewer').innerHTML =
+    `<div class="cupview"><img id="cupimg" src="${esc(url)}" alt="cupboard"></div>`;
+  $('#viewer').scrollTop = 0;
 }
 
 async function loadVariants() {
@@ -1047,7 +1131,12 @@ async function submitUpload() {
     clearInterval(timer);
     $('#pb').style.width = '100%';
     $('#pm').textContent = t('up.done');
-    if (r.kind === 'dwg') showDwgResult(r); else showPdfResult(r);
+    if (r.kind === 'dwg') {
+      showDwgResult(r);
+      // 解析完立刻渲染柜型图纸 —— 用户要求「读取 DWG 后把不同柜型导出成 JPG」。
+      // 这步要等渲染完才允许关闭，否则用户会以为卡死。
+      await renderCupboards(r.stored_name);
+    } else showPdfResult(r);
     // 解析已完成，允许关闭
     S.parsing = false;
     $('#bcancel').disabled = false;
@@ -1107,7 +1196,37 @@ function showDwgResult(r) {
     </tbody></table>
     <div class="sec" style="padding-left:0">${t('dwg.layers')}</div>
     <div>${(r.layers || []).map(l => `<span class="tag">${esc(l)}</span>`).join('') || `<span class="muted">${t('prov.none')}</span>`}</div>
-    ${(r.warnings || []).map(w => `<div class="alert warn">${esc(w)}</div>`).join('')}`;
+    ${(r.warnings || []).map(w => `<div class="alert warn">${esc(w)}</div>`).join('')}
+    <div id="rendbox"></div>`;
+}
+
+/** 渲染完成后把缩略图贴进确认弹窗 —— 用户要先看到图再决定要不要入库 */
+function paintRenders() {
+  const box = $('#rendbox');
+  if (!box) return;
+  const rs = S.renders || [];
+  if (!rs.length) { box.innerHTML = ''; return; }
+  const ok = rs.filter(r => r.ok);
+  let h = `<div class="sec" style="padding-left:0">${t('lib.title')} · ${ok.length}/${rs.length}</div>`;
+  if (!ok.length) {
+    h += `<div class="alert err">${esc((rs[0] || {}).error || t('lib.noimg'))}</div>`;
+  } else {
+    h += '<div class="cupgrid" style="padding-left:0">';
+    for (const r of rs) {
+      h += r.ok
+        ? `<div class="cupcard has-img"><div class="thumb">
+             <img src="/api/thumbs/${esc(r.image_name)}" alt="${esc(r.block_name)}"></div>
+           <div class="meta"><div class="code mono">${esc(r.block_name)}</div>
+             <div class="dim">${r.entity_count} ${t('dwg.entity')}</div>
+             <div class="dim">${r.width_mm ?? '—'} × ${r.height_mm ?? '—'} mm</div>
+           </div></div>`
+        : `<div class="cupcard"><div class="thumb"><div class="noph">${t('lib.noimg')}</div></div>
+           <div class="meta"><div class="code mono">${esc(r.block_name)}</div>
+             <div class="desc">${esc(r.error || '')}</div></div></div>`;
+    }
+    h += '</div>';
+  }
+  box.innerHTML = h;
 }
 
 async function showPdfResult(r) {
@@ -1138,14 +1257,74 @@ async function showPdfResult(r) {
   toast(`${t('up.done')} · ${t('kpi.units')} ${r.summary.total_units}`, 'ok');
 }
 
+/** 解析完 DWG 后渲染每个柜型 block 成 JPG。
+ *  需求：「读取了 dwg 文件，将里面的不同的柜型都导出成 jpg 格式，
+ *  放在 library 里，可以点击查看」。渲染结果存S.renders，
+ *  用户确认入库时一并回传，图片路径才会绑到变体上。 */
+async function renderCupboards(storedName) {
+  if (!storedName) return [];
+  try {
+    $('#pm').textContent = t('lib.rendering');
+    const r = await api('/cupboards/render', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file: storedName }),
+    });
+    S.renders = r.items || [];
+    S.storedName = storedName;
+    $('#pm').textContent = `${t('lib.rendered')} ${r.rendered}/${r.total}`;
+    paintRenders();
+    return S.renders;
+  } catch (e) {
+    S.renders = [];
+    toast(t('lib.rendering') + ' → ' + e.message, 'err');
+    return [];
+  }
+}
+
+/** 把渲染结果整成入库要提交的 variants。
+ *  以block 为单位生成变体：尺寸全部用 DWG 实测值，不再填占位数字。 */
+function dwgVariantsFromRenders(renders) {
+  return (renders || []).filter(r => r.ok).map(r => ({
+    code: r.block_name,
+    block_name: r.block_name,
+    rows: 1,
+    cols: Math.max(1, Math.round(
+      (r.entity_count || 1) / 8)) || 1,
+    w: r.width_mm ?? null,
+    h: r.height_mm ?? null,
+    meter_combo: r.block_name,
+    description: (r.texts || []).slice(0, 4).join(' / ') || null,
+  }));
+}
+
 async function commitDwg() {
   try {
+    const renders = S.renders || [];
+    const variants = dwgVariantsFromRenders(renders);
+    if (!variants.length) {
+      toast(t('lib.noimg') + ' — ' + t('lib.noclue'), 'err');
+      return;
+    }
     const r = await api('/cupboards/from-dwg', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(S.dwgRes),
+      body: JSON.stringify({
+        source_file: S.storedName || (S.dwgRes && S.dwgRes.source_file) || '',
+        cupboard_name: '柜型库（' + (S.storedName || 'DWG') + '）',
+        variants,
+        renders,
+      }),
     });
     toast(`${t('up.ok')} ${r.created}`, 'ok');
-    closeModal(); await loadVariants(); renderHub();
+    closeModal();
+    await loadVariants();
+    // 直接跳到柜型库并打开第一组，让用户立刻看到图
+    gotoView('cupboard');
+    const g = S.variants[0];
+    if (g) {
+      const first = S.variants.find(v => v.image_url);
+      if (first) showVariantGroup(first.bucket || ('p' + first.positions));
+      else renderHub();
+    } else renderHub();
   } catch (e) { toast(t('up.fail') + ': ' + e.message, 'err'); }
 }
 

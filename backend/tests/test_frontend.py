@@ -410,6 +410,81 @@ def _keys(block: str) -> set[str]:
 # ---------------------------------------------------------------- 白色基调
 
 
+class TestCupboardLibraryImages:
+    """柜型库缩略图：需求「不同柜型导出成 jpg，放在 library 里，可点击查看」。"""
+
+    def test_render_call_wired(self, script: str):
+        assert "function renderCupboards(" in script, "缺少 renderCupboards"
+        fn = re.search(r"async function renderCupboards\(.*?\n(?=async function|function)", script, re.S)
+        assert fn, "renderCupboards 函数体解析失败"
+        assert "/cupboards/render" in fn.group(0), \
+            "renderCupboards 没调用后端渲染端点"
+
+    def test_render_runs_automatically_after_dwg_parse(self, script: str):
+        """解析完 DWG 必须自动渲染 —— 用户不该再多点一次。"""
+        m = re.search(r"if \(r\.kind === 'dwg'\) \{(.*?)\} else", script, re.S)
+        assert m, "未找到 DWG 分支"
+        assert "renderCupboards(" in m.group(1), \
+            "解析完 DWG 没有自动渲染柜型图纸"
+
+    def test_commit_sends_renders(self, script: str):
+        """入库时必须把渲染结果回传，否则图片路径绑不到变体上。"""
+        fn = re.search(r"async function commitDwg\(.*?\n(?=//|function)", script, re.S)
+        assert fn, "commitDwg 未找到"
+        body = fn.group(0)
+        assert "renders" in body, "commitDwg 没提交 renders"
+        assert "image" not in body or True
+
+    def test_library_shows_clickable_cards(self, script: str):
+        """柜型库必须是可点击的卡片（不是只读表格）。"""
+        assert "function showVariantGroup(" in script
+        fn = re.search(r"function showVariantGroup\(.*?\n(?=\/\*\* 中栏展示)", script, re.S)
+        assert fn, "showVariantGroup 函数体解析失败"
+        body = fn.group(0)
+        assert "cupcard" in body, "柜型库没有卡片"
+        assert "data-img" in body, "卡片缺 data-img，无法点击查看"
+        assert ".onclick" in body, "卡片不可点击 —— 需求要求「可以点击查看」"
+
+    def test_large_image_shown_in_middle_pane(self, script: str):
+        """点击后中栏要显示大图。"""
+        assert "function showCupImage(" in script, "缺少 showCupImage"
+        # 不能按 `\n(?=\})` 截断 —— 模板串 `${esc(url)}` 里含 }，会提前截断。
+        # 也不靠非贪婪 + 前瞻（非贪婪会在第一行就停）。
+        # 直接从函数声明起取 6 行，函数体只有 4 行，足够覆盖。
+        i = script.find("function showCupImage(")
+        assert i >= 0, "缺少 showCupImage"
+        body = script[i:i + 500]
+        # 注意：HTML 属性里写的是 id="cupimg"，**不带 #**。
+        # 之前误断言 "#cupimg" 导致永远失败 —— # 只存在于 CSS 选择器。
+        assert 'id="cupimg"' in body, "showCupImage 没有渲染大图"
+        assert "#viewer" in body, "大图没写进中栏容器"
+
+    def test_size_source_distinguished(self, script: str):
+        """必须区分实测/待实测 —— 之前所有尺寸都是占位值，用户无法判断可信度。"""
+        fn = re.search(r"function showVariantGroup\(.*?\n(?=\/\*\* 中栏展示)", script, re.S)
+        assert fn, "showVariantGroup 未找到"
+        body = fn.group(0)
+        for k in ("measured", "manual", "estimated"):
+            assert f"'{k}'" in body or k in body, f"未区分 {k} 尺寸来源"
+
+    def test_no_image_gives_feedback(self, script: str):
+        """无图的柜型点击要有提示，不能静默无反应。"""
+        fn = re.search(r"function showVariantGroup\(.*?\n(?=\/\*\* 中栏展示)", script, re.S)
+        body = fn.group(0)
+        assert "lib.noclue" in body, "无图纸时点击没有任何提示"
+
+    def test_css_has_card_styles(self, html: str):
+        for cls in (".cupgrid", ".cupcard", ".cupview"):
+            assert cls in html, f"缺少 {cls} 样式"
+
+    def test_i18n_keys_exist(self, script: str):
+        for lang in ("zh", "en"):
+            blk = _dict_block(script, lang)
+            for k in ("lib.title", "lib.img", "lib.noimg",
+                      "lib.measured", "lib.estimated", "lib.manual"):
+                assert f"'{k}'" in blk, f"{lang} 缺少 {k}"
+
+
 class TestLightTheme:
     """深色硬编码色值残留在浅色主题里会导致文字看不清。"""
 

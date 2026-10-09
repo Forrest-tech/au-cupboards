@@ -11,6 +11,8 @@
   /api/units                 单元清单
   /api/cupboards             柜型分组（需求 2 左侧按 meter 组合分组）
   /api/cupboards/from-dwg    DWG 解析结果确认入库
+  /api/cupboards/render      DWG/DXF → 每个柜型 block 渲染成 JPG
+  /api/thumbs/{name}柜型缩略图（柜型库点击查看）
   /api/variants              柜型变体 CRUD
   /api/jobs/{id}/corrections 人工修正字典
   /api/download              导出文件下载
@@ -41,15 +43,27 @@ from app.models.entities import (
     Selection,
     Unit,
 )
+from app.parsers.cupboard_render import (
+    DEFAULT_WIDTH as THUMB_WIDTH,
+)
+from app.parsers.cupboard_render import (
+    THUMB_DIR,
+    render_cupboard_library,
+)
 from app.parsers.dwg import detect_backends, parse_dwg
 from app.services.pipeline import Pipeline, file_hash
 
 VAR_DIR = Path(__file__).resolve().parents[3] / "var"
 UPLOAD_DIR = VAR_DIR / "uploads"
 EXPORT_DIR = VAR_DIR / "export"
+THUMB_DIR_PATH = VAR_DIR / THUMB_DIR
+THUMB_DIR_PATH.mkdir(parents=True, exist_ok=True)
 DB_PATH = VAR_DIR / "aucup.db"
-for d in (UPLOAD_DIR, EXPORT_DIR):
+for d in (UPLOAD_DIR, EXPORT_DIR, THUMB_DIR_PATH):
     d.mkdir(parents=True, exist_ok=True)
+
+#: 缩略图渲染 dpi —— 与入库时记录的 image_dpi 保持一致
+DEFAULT_THUMB_DPI = 110
 
 app = FastAPI(title="AU Cupboards", version="1.0.0")
 app.add_middleware(
@@ -156,6 +170,10 @@ async def upload_and_parse(
 
     h = file_hash_of(file)
     safe = Path(file.filename or "f").name.replace("/", "_")
+    # 幂等：若客户端把上次的 stored_name（hash-xxx.dwg）又传了回来，
+    # 去掉已存在的前缀，避免变成 hash-hash-xxx.dwg 无限增长。
+    if safe.startswith(f"{h}-"):
+        safe = safe[len(h) + 1:]
     dest = UPLOAD_DIR / f"{h}-{safe}"
     with dest.open("wb") as f:
         shutil.copyfileobj(file.file, f)
@@ -179,6 +197,10 @@ async def upload_and_parse(
             "warnings": res.warnings,
             "error": res.error,
             "stats": res.stats,
+            # 只回文件名，不回绝对路径 ——
+            # 前端后续调 /api/cupboards/render 只需要这个，
+            # 泄露服务器目录结构没有任何好处。
+            "stored_name": dest.name,
             "source_file": str(dest),
         }
 
@@ -518,6 +540,10 @@ def list_cupboards() -> list[dict[str, Any]]:
                     "spacing_v": v.meter_spacing_v,
                     "description": v.description,
                     "source": v.source,
+                    "image_path": v.image_path,
+                    "image_url": (f"/api/thumbs/{Path(v.image_path).name}"
+                                  if v.image_path else None),
+                    "size_source": v.size_source,
                 }
             )
         out = []
@@ -554,6 +580,14 @@ def list_variants() -> list[dict[str, Any]]:
                 "description": v.description,
                 "source": v.source,
                 "meter_combo": v.meter_combo,
+                # 柜型缩略图（需求 2：柜型库可点击查看）
+                # image_url 是给 <img src> 直接用的完整路径，
+                # image_path 保留库里的相对值便于排查
+                "image_path": v.image_path,
+                "image_url": (f"/api/thumbs/{Path(v.image_path).name}"
+                              if v.image_path else None),
+                "image_dpi": v.image_dpi,
+                "size_source": v.size_source,
             }
             for v in vs
         ]
@@ -570,6 +604,11 @@ class VariantIn(BaseModel):
     spacing_v: float | None = None
     description: str | None = None
     supported_meters: list[str] | None = None
+    #: 柜型分组键，如「2 套 water+gas」。需求 2：同一个组合可能有多种排布形式，
+    #: 所以分组靠 meter_combo，排布形式是组内第二层维度。
+    meter_combo: str | None = None
+    #: 对应 DWG 里的 block 名 —— 用于把渲染图关联到变体
+    block_name: str | None = None
 
 
 @app.post("/api/variants")
@@ -680,6 +719,87 @@ def compare_variants(body: CompareIn) -> list[dict[str, Any]]:
         return out
 
 
+class RenderOut(BaseModel):
+    """单个柜型 block 的渲染结果（前端确认时原样回传）。"""
+
+    block_name: str
+    ok: bool
+    image_name: str | None = None
+    width_mm: float | None = None
+    height_mm: float | None = None
+    depth_mm: float | None = None
+    entity_count: int = 0
+    layers: list[str] = []
+    layer_counts: dict[str, int] = {}
+    texts: list[str] = []
+    error: str | None = None
+
+
+class RenderRequest(BaseModel):
+    """对已上传的 DWG/DXF 做柜型渲染。
+
+    ``file`` 用上传时返回的 stored_name，而不是让前端再传一遍路径 ——
+    前端能改参数，服务端必须自己从库里取路径，否则就是任意文件读取漏洞。
+    """
+
+    file: str
+    width: int = Query(1400, ge=400, le=3000)
+    only_blocks: list[str] = []
+
+
+@app.post("/api/cupboards/render")
+def render_cupboards(body: RenderRequest) -> dict[str, Any]:
+    """把 DWG/DXF 里的每个柜型 block 渲染成 JPG，供柜型库点击查看。
+
+    需求：「读取了 dwg 文件，将里面的不同的柜型都导出成 jpg 格式，
+    放在 library 里，可以点击查看」。
+    """
+    # 路径只能来自上传目录，不接受外部路径
+    src = (UPLOAD_DIR / Path(body.file).name).resolve()
+    if not str(src).startswith(str(UPLOAD_DIR.resolve())) or not src.is_file():
+        raise HTTPException(404, "文件不存在或不在上传目录内")
+
+    if src.suffix.lower() not in (".dwg", ".dxf"):
+        raise HTTPException(400, "只支持 DWG / DXF")
+
+    # DWG 要先转 DXF 才能用 ezdxf 渲染
+    work = VAR_DIR / "render_work"
+    work.mkdir(parents=True, exist_ok=True)
+    dxf = src
+    if src.suffix.lower() == ".dwg":
+        from app.parsers.dwg import convert_with_libredwg, convert_with_oda
+
+        dxf, err = convert_with_oda(src, work)
+        if dxf is None:
+            dxf, err = convert_with_libredwg(src, work)
+        if dxf is None:
+            raise HTTPException(422, f"DWG 转换失败：{err}")
+
+    results = render_cupboard_library(
+        dxf, THUMB_DIR_PATH, only_blocks=body.only_blocks or None, width=body.width
+    )
+    ok = [r for r in results if r.ok]
+    return {
+        "total": len(results),
+        "rendered": len(ok),
+        "failed": len(results) - len(ok),
+        "source": src.name,
+        "items": [RenderOut(**r.__dict__) for r in results],
+    }
+
+
+@app.get("/api/thumbs/{name}")
+def get_thumb(name: str):
+    """柜型缩略图。前端柜型库点击时用 <img src="/api/thumbs/xxx.jpg">。"""
+    p = (THUMB_DIR_PATH / Path(name).name).resolve()
+    if not str(p).startswith(str(THUMB_DIR_PATH.resolve())):
+        raise HTTPException(403, "非法路径")
+    if not p.is_file():
+        raise HTTPException(404, "缩略图不存在")
+    return FileResponse(p, media_type="image/jpeg",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+
 class DwgCommitIn(BaseModel):
     """需求 2：用户在预览确认后提交入库。"""
 
@@ -687,6 +807,8 @@ class DwgCommitIn(BaseModel):
     variants: list[VariantIn] = []
     cupboard_name: str | None = None
     note: str | None = None
+    #: 柜型 block 名 → 渲染结果。解析阶段产出，前端原样回传。
+    renders: list[RenderOut] = []
 
 
 @app.post("/api/cupboards/from-dwg")
@@ -701,9 +823,33 @@ def commit_from_dwg(body: DwgCommitIn) -> dict[str, Any]:
                          description=body.note, meter_types=["water", "hot_water", "gas"])
             s.add(c)
             s.flush()
+        # block 名 → 渲染结果。尺寸优先用 DWG 实测值，不再是 POC 占位。
+        rmap = {r.block_name: r for r in body.renders if r.ok and r.image_name}
         for v in body.variants:
             if s.scalar(select(CupboardVariant).where(CupboardVariant.variant_code == v.code)):
                 continue
+            # 先按 block_name 精确匹配，再退回 code（多数情况两者相同）
+            r = rmap.get(v.block_name or "") or rmap.get(v.code)
+            # 实测优先：v.w/v.h 若用户没填（None）就用 DWG 量出来的
+            w = v.w if v.w is not None else (r.width_mm if r else None)
+            h = v.h if v.h is not None else (r.height_mm if r else None)
+            # 尺寸来源判定：
+            #   有渲染来源 → measured（DWG 实测）。前端会把实测值回填到
+            #     w/h 再提交，所以**不能只看「w/h 有没有值」**——
+            #     那会把 DWG 实测误标成 manual（实测踩坑）。
+            #   无渲染但填了值 → manual（真人工录入）
+            #   都没有         → estimated（POC 占位，必须显式标出）
+            if r is not None and (r.width_mm is not None or r.height_mm is not None):
+                size_src = "measured"
+            elif v.w is not None or v.h is not None:
+                size_src = "manual"
+            else:
+                size_src = "estimated"
+            lc = r.layer_counts if r else {}
+            # 图纸里的标注文字就是最准确的「介绍」——
+            # 比让用户手填「2套 water+gas 排布」有价值得多
+            desc = v.description or (
+                " / ".join(r.texts[:4]) if r and r.texts else None)
             s.add(
                 CupboardVariant(
                     cupboard_id=c.id,
@@ -712,17 +858,26 @@ def commit_from_dwg(body: DwgCommitIn) -> dict[str, Any]:
                     layout_cols=v.cols,
                     positions_total=v.rows * v.cols,
                     grid_aspect=f"{v.rows}x{v.cols}",
-                    w=v.w, h=v.h, d=v.d,
+                    w=w, h=h, d=v.d,
                     meter_spacing_h=v.spacing_h,
                     meter_spacing_v=v.spacing_v,
-                    description=v.description,
+                    description=desc,
                     source="dwg",
-                    meter_combo=f"{v.rows * v.cols} 套 water+gas",
+                    meter_combo=v.meter_combo or v.code,
+                    meter_counts={"layers": lc} if lc else {},
+                    image_path=(f"{THUMB_DIR}/{r.image_name}"
+                                if r and r.image_name else None),
+                    image_dpi=DEFAULT_THUMB_DPI,
+                    size_source=size_src,
                 )
             )
             created += 1
+        # 先commit 再取 id —— commit 会让 session 里所有对象过期，
+        # 此后访问 c.id 会抛 DetachedInstanceError。
+        # 原代码在 Cupboard 已存在时不 commit 前访问，侥幸没触发。
         s.commit()
-    return {"created": created, "cupboard_id": c.id}
+        cid = c.id
+    return {"created": created, "cupboard_id": cid}
 
 
 # ---------------------------------------------------------------- 修正字典

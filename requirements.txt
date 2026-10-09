@@ -38,6 +38,12 @@ SQLAlchemy==2.1.4
 # ---- 图纸解析（Tier A 库，需求 4 指定）----
 ezdxf==1.4.4              # DWG/DXF 矢量解析
 PyMuPDF==1.26.7           # PDF 文本层与坐标提取（import fitz）—— PDF 解析主力
+matplotlib==3.10.8# 柜型block → JPG 渲染
+# 需求：读取 DWG 后把每个柜型导出成 JPG 放进柜型库供点击查看。
+# 实现走 ezdxf.addons.drawing 的 MatplotlibBackend（Agg），
+# 所以 matplotlib 是**运行时必需**，不是可选。
+# 纯 Python + 有macOS/Linux 全平台 wheel，不会重现 pypdfium2 那类
+# 「源码编译失败导致整个 pip 回滚」的问题。
 
 # ---- 导出 ----
 reportlab==4.4.9          # PDF 导出

@@ -298,6 +298,15 @@ class CupboardVariant(Base):
     meter_combo: Mapped[str | None] = mapped_column(String(64), index=True)
     meter_counts: Mapped[dict] = mapped_column(JSON, default=dict)
 
+    # ---- 柜型缩略图（需求 2：柜型库可点击查看图纸）----
+    # DWG 解析时渲染 block 得到的 JPG 相对路径，相对于 var/thumbs/
+    image_path: Mapped[str | None] = mapped_column(String(255))
+    # 渲染时用的 dpi —— 用户放大看细节时可据此请求更高分辨率
+    image_dpi: Mapped[int] = mapped_column(Integer, default=110)
+    # 尺寸来源：measured=DWG 实测 / estimated=POC 占位 / manual=人工录入
+    # 必须区分 —— 之前所有尺寸都是 estimated，用户无法判断可信度
+    size_source: Mapped[str] = mapped_column(String(16), default="estimated")
+
     cupboard: Mapped["Cupboard"] = relationship(back_populates="variants")
 
 

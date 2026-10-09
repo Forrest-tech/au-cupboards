@@ -193,14 +193,26 @@ def cmd_variants(_args: argparse.Namespace) -> int:
         if not vs:
             print("柜型库为空 —— 运行一次 `run` 后会自动灌入种子数据。")
             return 0
-        print(f"{'编码':<20}{'表位':<6}{'排布':<8}{'尺寸 mm':<20}{'分组'}")
-        print("-" * 86)
+        print(f"{'编码':<20}{'表位':<6}{'排布':<8}{'尺寸 mm':<20}{'来源':<8}{'分组'}")
+        print("-" * 96)
         for v in vs:
-            size = f"{v.w:.0f}×{v.h:.0f}×{v.d:.0f}"
+            # 尺寸可能缺项 —— 新接入的 DWG 柜型只量到 W/H，D 靠人工填。
+            # 原代码直接 f"{v.w:.0f}"，遇到 None 会抛
+            # TypeError: unsupported format string passed to NoneType.__format__,
+            # 让整个 CLI 命令崩掉（实测踩坑）。
+            def _n(x: float | None) -> str:
+                return "—" if x is None else f"{x:.0f}"
+            size = f"{_n(v.w)}×{_n(v.h)}×{_n(v.d)}"
+            # 尺寸来源必须展示出来 —— measured(实测) / manual(人工) /
+            # estimated(待实测) 三者可信度完全不同，混在一起会误导选型。
+            src = {"measured": "实测", "manual": "人工"}.get(
+                v.size_source or "estimated", "待实测")
             print(f"{v.variant_code:<20}{v.positions_total:<6}"
-                  f"{f'{v.layout_cols}×{v.layout_rows}':<8}{size:<20}"
-                  f"{v.meter_combo or '—'}")
-        print(f"\n  共 {len(vs)} 个变体")
+                  f"{f'{v.layout_cols}×{v.layout_rows}':<8}{size:<20}{src:<8}"
+                  f"{v.meter_combo or '—'}"
+                  f"{'  [图]' if v.image_path else ''}")
+        print(f"\n  共 {len(vs)} 个变体"
+              f"（{sum(1 for v in vs if v.image_path)} 个带图纸）")
     return 0
 
 

@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.orm import Session
 
 from app.config import load_config
@@ -56,6 +56,47 @@ class PipelineResult:
     out_files: dict[str, str]
 
 
+#: 模型里新增列时同步登记。
+#:
+#: 为什么需要：``Base.metadata.create_all()`` 只建**新表**，
+#: 对已存在的表**不会加列**。老用户的 var/aucup.db 里 cupboard_variants
+#: 早就建好了，之后往模型里加字段，create_all 会安静地跳过 ——
+#: 结果是代码里读 image_path 报 "no such column"，
+#: 而 create_all 明明「成功」了。这类问题极难定位。
+_ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    # (表名, 列名, 列定义)
+    ("cupboard_variants", "image_path", "TEXT"),
+    ("cupboard_variants", "image_dpi", "INTEGER DEFAULT 110"),
+    ("cupboard_variants", "size_source", "TEXT DEFAULT 'estimated'"),
+)
+
+
+def _migrate_add_columns(engine) -> list[str]:
+    """给已存在的表补上新增列。幂等 —— 已有列直接跳过。"""
+    added: list[str] = []
+    insp = inspect(engine)
+    try:
+        tables = set(insp.get_table_names())
+    except Exception:
+        return added
+    with engine.begin() as conn:
+        for table, col, ddl in _ADDED_COLUMNS:
+            if table not in tables:
+                continue          # 表本身还不存在，create_all 会按模型建全
+            try:
+                have = {c["name"] for c in insp.get_columns(table)}
+            except Exception:
+                continue
+            if col in have:
+                continue
+            try:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"))
+                added.append(f"{table}.{col}")
+            except Exception:
+                continue          # 并发/已存在等，忽略
+    return added
+
+
 class Pipeline:
     def __init__(self, db_path: str | Path, out_dir: str | Path) -> None:
         self.db_path = f"sqlite:///{db_path}"
@@ -63,6 +104,7 @@ class Pipeline:
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.engine = create_engine(self.db_path, future=True)
         Base.metadata.create_all(self.engine)
+        _migrate_add_columns(self.engine)
         self.cfg = load_config()
         self.parser = Stage1Parser(self.cfg)
         self.matcher = Stage2Matcher(seed_variants())
