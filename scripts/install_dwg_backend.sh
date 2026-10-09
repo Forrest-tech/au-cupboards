@@ -22,7 +22,7 @@ set -euo pipefail
 
 LIBREDWG_VER="${LIBREDWG_VER:-0.13.3}"
 PREFIX="${PREFIX:-$HOME/.local}"
-WORK="${WORK:-$(mktemp -d /tmp/libredwg-build.XXXXXX)}"
+# WORK 固定而非 mktemp —— 编译失败重跑时要复用已下载的源码（20MB）
 
 say()  { printf '%s\n' "$*"; }
 step() { printf '\n\033[1;34m▸ %s\033[0m\n' "$*"; }
@@ -89,21 +89,32 @@ TARBALL="libredwg-$LIBREDWG_VER.tar.gz"
 URL="https://github.com/LibreDWG/libredwg/releases/download/$LIBREDWG_VER/$TARBALL"
 
 # ---------- 3. 下载 ----------
-step "下载源码$WORK"
+# 默认把工作目录固定下来：编译失败重跑时不必重下20MB。
+# 传 WORK=/tmp/xxx 可用完即弃。
+WORK="${WORK:-${TMPDIR:-/tmp}/libredwg-build}"
+step "准备构建目录 $WORK"
 mkdir -p "$WORK"
 cd "$WORK"
-if [ ! -s "$TARBALL" ]; then
+if [ -s "$TARBALL" ]; then
+  ok "复用已下载的 $TARBALL（$(du -h "$TARBALL" | cut -f1)）"
+else
   say "  $URL"
   # GitHub release 资产走 release-assets.githubusercontent.com，
-  # 慢是正常的；给足超时并显示进度
-  curl -fL --connect-timeout 30 --retry 3 --retry-delay 3 \
+  # 慢是正常的。带断点续传，中断后重跑不用从头下。
+  curl -fL -C - --connect-timeout 30 --retry 5 --retry-delay 3 \
+       --progress-bar \
        -o "$TARBALL.part" "$URL" || die "下载失败，检查网络后重试"
   mv "$TARBALL.part" "$TARBALL"
+  ok "已下载 $(du -h "$TARBALL" | cut -f1)"
 fi
-ok "已下载 $(du -h "$TARBALL" | cut -f1)"
 
 step "解包"
-tar xzf "$TARBALL"
+# 已解包且configure 在就别重复解
+if [ ! -x "$WORK/libredwg-$LIBREDWG_VER/configure" ]; then
+  tar xzf "$TARBALL"
+else
+  say "  已解包，跳过"
+fi
 SRC="$WORK/libredwg-$LIBREDWG_VER"
 [ -d "$SRC" ] || die "解包异常，期望目录 $SRC 不存在"
 ok "$SRC"
@@ -131,27 +142,50 @@ if [ ! -x ./configure ]; then
   exit 1
 fi
 
+# --disable-werror 是**必须的**：LibreDWG 默认开 -Werror，而 Apple clang
+# 的 -Wformat 检查比 GCC 严格，会把
+#   "format specifies type 'unsigned short' but the argument has type
+#    'BITCODE_BL'"（print.c / dwg.spec 里的宏展开）
+# 这类格式串警告升级成错误，5 个文件直接编不过。Linux 上 gcc 没这问题，
+# 所以这是纯 macOS 专属坑。官方 configure 本身就提供该开关。
 ./configure \
   --prefix="$PREFIX" \
   --disable-bindings \
   --disable-shared \
   --disable-dependency-tracking \
+  --disable-werror \
   --with-cxx=no \
+  CFLAGS="-O2 -Wno-format -Wno-format-extra-args -Wno-implicit-function-declaration" \
   > "$WORK/configure.log" 2>&1 || {
     warn "configure 失败，日志尾部："
     tail -25 "$WORK/configure.log" >&2
     die "configure 未通过"
   }
-ok "configure 通过"
+ok "configure 通过（已关 -Werror 与 -Wformat）"
 
 # ---------- 5. make ----------
 step "编译（Intel Mac 大约 3-8 分钟，别中断）"
-make -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 2)" \
-  > "$WORK/make.log" 2>&1 || {
+JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 2)"
+
+# 兜底：即使 configure 已关 -Werror，Makefile 里也可能另有追加。
+# 再传一次 CFLAGS 强制 -Wno-error，且放在命令行（优先级高于 Makefile 变量）。
+if ! make -j"$JOBS" \
+     CFLAGS="-O2 -Wno-error -Wno-format -Wno-format-extra-args" \
+     > "$WORK/make.log" 2>&1; then
+  # 再兜一次：清掉可能的 -Werror 硬编码
+  say "  首次编译失败，尝试完全禁用警告后重试 ..."
+  if make -j"$JOBS" CFLAGS="-O2 -Wno-error" \
+       > "$WORK/make2.log" 2>&1; then
+    warn "第二次编译通过（已关闭全部警告）—— 这通常是 Apple clang 过于严格所致"
+  else
     warn "编译失败，日志尾部："
     tail -40 "$WORK/make.log" >&2
+    [ -f "$WORK/make2.log" ] && { say "--- 第二次尝试 ---"; tail -25 "$WORK/make2.log" >&2; }
+    say ""
+    say "构建目录保留在 $WORK（改了参数可以直接重跑本脚本，不必重下源码）"
     die "make 未通过"
-}
+  fi
+fi
 ok "编译完成"
 
 step "安装到 $PREFIX"

@@ -182,6 +182,38 @@ class TestMacosBackendDiscovery:
         assert "libredwg" in body.lower()
         assert "ODAFileConverter.app" in body, "脚本没处理 macOS .app 已装的情况"
 
+    def test_install_script_disables_werror(self):
+        """必须关掉 -Werror —— 这是 macOS 专属坑。
+
+        实测：用户在 macOS 11 编译 LibreDWG 0.13.3 报
+          error: format specifies type 'unsigned short' but the
+          argument has type 'BITCODE_BL' (aka 'unsigned int')
+          [-Werror,-Wformat]      ← src/dwg.spec 的宏展开导致
+        Apple clang 的 -Wformat 比 GCC 严格，LibreDWG 默认又开
+        -Werror，于是警告升级为错误，print.c 直接编不过。
+        Linux/gcc 上不报，所以开发机测不出来。
+        """
+        p = (Path(__file__).resolve().parents[2] / "scripts" / "install_dwg_backend.sh")
+        body = p.read_text()
+        assert "--disable-werror" in body, \
+            "configure 没加 --disable-werror —— Apple clang 上必然编译失败"
+        # make 阶段还要再兜一层，因为 Makefile 可能另行追加 -Werror
+        assert "-Wno-error" in body, \
+            "make 阶段没有 -Wno-error 兜底"
+        assert "-Wno-format" in body, \
+            "没有 -Wno-format —— 报错全是 printf 格式串类型不匹配"
+
+    def test_install_script_reuses_download(self):
+        """重跑不应重新下载 20MB —— 编译失败时用户最烦的是重下。"""
+        p = (Path(__file__).resolve().parents[2] / "scripts" / "install_dwg_backend.sh")
+        body = p.read_text()
+        # 只看代码行 —— 注释里解释「为什么不用 mktemp」也会命中关键词
+        code = "\n".join(l for l in body.splitlines()
+                         if not l.lstrip().startswith("#"))
+        assert "mktemp" not in code, \
+            "工作目录不应每次新建，否则重跑要重下 20MB 源码"
+        assert "-C -" in code, "curl 缺断点续传（-C -），中断后重跑要从头下"
+
 
 # ---------------------------------------------------------------- 完整性校验
 
