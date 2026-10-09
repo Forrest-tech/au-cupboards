@@ -4,7 +4,8 @@
   /api/health                健康检查
   /api/projects              Building 列表（需求 3）
   /api/parse                 上传并解析（建筑图纸 / 柜型DWG）
-  /api/file/{job_id}         原图预览（需求 1 中栏「原样显示」）
+  /api/file/{job_id}         原图下载（整份 PDF）
+  /api/page/{job_id}/{n}     单页渲染成PNG —— 大图纸翻页走这个，别用整份
   /api/jobs/{id}             任务详情（楼层矩阵 / 单元明细 / 溯源）
   /api/jobs/{id}/exports     导出文件路径（PDF/Word/JPG/Excel/JSON）
   /api/units                 单元清单
@@ -22,7 +23,7 @@ from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -68,12 +69,25 @@ def _pipeline() -> Pipeline:
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     backends = detect_backends()
-    return {
+    ready = any(backends.values())
+    out: dict[str, Any] = {
         "ok": True,
         "config_version": load_config().version,
         "dwg_backends": backends,
-        "dwg_ready": any(backends.values()),
+        "dwg_ready": ready,
     }
+    # DWG 不可用时给出**可执行**的下一步 —— 只说「未安装后端」用户无从下手
+    if not ready:
+        out["dwg_hint"] = (
+            "DWG 解析后端缺失。PDF 解析不受影响，仅 DWG 上传不可用。\n"
+            "装 ODA File Converter（推荐，免费注册下载）：\n"
+            "  https://www.opendesign.com/guestfiles/oda_file_converter\n"
+            "装完在系统 PATH 里能看到 oda_file_converter 或 ODAFileConverter 即可。\n"
+            "或用 Homebrew 装 LibreDWG（提供 dwgread 命令）：\n"
+            "  brew install libredwg\n"
+            "装完重启服务，顶栏徽章会变成「DWG 就绪」。"
+        )
+    return out
 
 
 # ---------------------------------------------------------------- 需求 3：Building 管理
@@ -225,7 +239,12 @@ def file_hash_of(f: UploadFile) -> str:
 
 @app.get("/api/file/{job_id}")
 def raw_file(job_id: int):
-    """需求 1 中栏「原样显示 PDF」—— 直接回传原始 PDF 字节。"""
+    """需求 1 中栏「原样显示 PDF」—— 直接回传原始 PDF 字节。
+
+    注意：前端**不再**用它翻页。大图纸（实测 37MB/35 页）用
+    `iframe#page=N` 换页等于重新下载整份 PDF，会把浏览器卡死。
+    翻页请走 /api/page/{job_id}/{n} 单页渲染。
+    """
     with Session(_pipeline().engine) as s:
         j = s.get(ParseJob, job_id)
         if not j:
@@ -234,6 +253,66 @@ def raw_file(job_id: int):
         if not v or not Path(v.file_path).exists():
             raise HTTPException(404, "原始文件缺失")
         return FileResponse(v.file_path, media_type="application/pdf")
+
+
+# 单页渲染缓存：job_id -> (mtime, dpi) -> {page: bytes}
+# 翻页会反复请求同一页，不缓存等于每次都重新栅格化整页
+_PAGE_CACHE: dict[int, tuple[float, int, dict[int, bytes]]] = {}
+_PAGE_CACHE_MAX = 400  # 约 35 页 × 若干dpi，超了整批丢弃
+
+
+@app.get("/api/page/{job_id}/{page}")
+def page_image(job_id: int, page: int, dpi: int = Query(110, ge=40, le=300)):
+    """把 PDF 的**单页**渲染成 PNG。
+
+    为什么必须有这个接口：
+    用 `<iframe src="整份.pdf#page=N">` 翻页时，浏览器会重新拉取
+    整份 PDF。实测 37MB / 35 页的图纸每翻一页就是一次 37MB 下载，
+    页面直接卡死、点页码无响应。
+
+    改成服务端按需渲染单页后，每次翻页只传一张位图（约 100-400KB），
+    缩放交给前端 CSS，翻页是瞬时的。
+    """
+    import fitz  # PyMuPDF
+
+    with Session(_pipeline().engine) as s:
+        j = s.get(ParseJob, job_id)
+        if not j:
+            raise HTTPException(404, "任务不存在")
+        v = s.get(DrawingVersion, j.drawing_version_id)
+        if not v or not Path(v.file_path).exists():
+            raise HTTPException(404, "原始文件缺失")
+        src = Path(v.file_path)
+
+    mtime = src.stat().st_mtime
+    cached = _PAGE_CACHE.get(job_id)
+    if not cached or cached[0] != mtime or cached[1] != dpi:
+        if len(_PAGE_CACHE) >= _PAGE_CACHE_MAX // max(1, dpi // 10):
+            _PAGE_CACHE.clear()
+        cached = (mtime, dpi, {})
+        _PAGE_CACHE[job_id] = cached
+
+    pages = cached[2]
+    if page in pages:
+        return Response(pages[page], media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+    try:
+        doc = fitz.open(src)
+    except Exception as e:  # 损坏文件不应让整个预览崩掉
+        raise HTTPException(422, f"无法打开 PDF: {e}") from e
+    try:
+        if page < 1 or page > doc.page_count:
+            raise HTTPException(404, f"页码越界（共 {doc.page_count} 页）")
+        pix = doc[page - 1].get_pixmap(dpi=dpi)
+        data = pix.tobytes("png")
+        # 内存保护：超大页只缓存小图，避免 35 页高DPI 撑爆内存
+        if len(data) < 4_000_000:
+            pages[page] = data
+        return Response(data, media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
+    finally:
+        doc.close()
 
 
 @app.get("/api/jobs/{job_id}/exports")

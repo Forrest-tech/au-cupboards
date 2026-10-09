@@ -89,6 +89,12 @@ main{display:flex;height:calc(100% - 52px)}
 .node:hover{background:var(--panel2)}
 .node.on{background:var(--panel2);border-left-color:var(--accent)}
 .node .ico{width:14px;text-align:center;opacity:.75;font-size:11px}
+/* 折叠箭头 */
+.node .tw{
+  width:11px;flex-shrink:0;font-size:9px;color:var(--dim);
+  cursor:pointer;text-align:center;transition:.1s;
+}
+.node .tw:hover{color:var(--accent)}
 .node .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .node .ct{font-size:10px;color:var(--dim);font-variant-numeric:tabular-nums}
 .node.lv1{padding-left:26px}
@@ -113,8 +119,11 @@ main{display:flex;height:calc(100% - 52px)}
 .btn.ok{background:var(--ok);color:#fff}
 .btn:disabled{opacity:.4;cursor:not-allowed}
 .viewer{flex:1;overflow:auto;position:relative;background:#e8edf3}
-.viewer iframe,.viewer embed{width:100%;height:100%;border:none;display:block}
-.viewer img{display:block;max-width:100%;margin:0 auto}
+.viewer img{
+  display:block;margin:0 auto;transition:width .15s;
+  image-rendering:-webkit-optimize-contrast;
+}
+.viewer.loading{position:relative}
 .viewer .ph{display:flex;height:100%;align-items:center;justify-content:center;color:var(--dim);flex-direction:column;gap:10px}
 .page-list{
   width:120px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--line);
@@ -256,7 +265,8 @@ tr.floor-row td{background:#eef2f7;font-weight:700;border-top:2px solid var(--li
     <button data-view="cupboard" data-i18n="nav.cupboard">柜型库</button>
     <button data-view="building" data-i18n="nav.building">建筑图纸</button>
   </nav>
-  <button class="hupload" id="bup" data-i18n="btn.upload">⬆ 上传图纸</button>
+  <!-- 工作台不放上传入口，默认隐藏，由 gotoView 按 tab 控制 -->
+  <button class="hupload" id="bup" data-i18n="btn.upload" style="display:none">⬆ 上传图纸</button>
   <div class="langsw">
     <button id="lzh" class="on">中文</button>
     <button id="len">EN</button>
@@ -272,15 +282,21 @@ tr.floor-row td{background:#eef2f7;font-weight:700;border-top:2px solid var(--li
   <div id="mid">
     <div class="mid-bar">
       <span class="fn" id="mfn"></span>
-      <button class="btn" id="bprev">◀</button>
+      <button class="btn" id="bprev" title="◀">◀</button>
       <span class="badge" id="bpage">– / –</span>
-      <button class="btn" id="bnext">▶</button>
+      <button class="btn" id="bnext" title="▶">▶</button>
+      <span style="width:6px"></span>
+      <button class="btn" id="bzout" title="zoom out">−</button>
+      <span class="badge" id="bzoom">100%</span>
+      <button class="btn" id="bzin" title="zoom in">+</button>
       <button class="btn pri" id="bparse" data-i18n="btn.reparse">重新解析</button>
     </div>
     <div style="display:flex;flex:1;min-height:0">
       <div class="page-list" id="pagelist"></div>
       <div class="viewer" id="viewer">
-        <div class="ph"><div class="big">▤</div><div>${t('mid.ph')}</div></div>
+        <!-- 静态 HTML 里的 ${...} 不会被求值，必须给真实文本，
+             boot() 会用 t('mid.ph') 覆盖 -->
+        <div class="ph"><div class="big">▤</div><div>上传建筑图纸后在此原样预览</div></div>
       </div>
     </div>
   </div>
@@ -311,6 +327,7 @@ const I18N = {
     'hstat.connecting': '连接中…', 'hstat.offline': '后端未连接',
     'dwg.ready': 'DWG 就绪', 'dwg.none': 'DWG 未装后端',
     'mid.none': '未选择文件', 'mid.ph': '上传建筑图纸后在此原样预览',
+    'mid.cup.hint': '柜型库：左侧选分组查看排布与尺寸',
     'tree.projects': '建筑项目', 'tree.empty': '（暂无，点右上角「上传图纸」）',
     'tree.library': '柜型库', 'tree.drawings': '图', 'tree.floors': '楼层 × units',
     'kpi.units': '住宅 units', 'kpi.floor': '楼层数', 'kpi.compliance': '合规 错误/警告',
@@ -337,6 +354,8 @@ const I18N = {
     'up.nogo': '不可入库', 'up.close': '关闭', 'up.picked': '已选择',
     'up.clickgo': '点击「解析并确认入库」开始。', 'up.imgprev': '图片预览',
     'up.ok': '已入库', 'up.fail': '入库失败', 'up.parsefail': '解析失败',
+    'up.done': '解析完成', 'up.hint': '大图纸需10-30 秒，请勿关闭窗口',
+    'up.busy': '正在解析，请等待完成',
     'dwg.backend': '解析后端', 'dwg.integ': '完整性', 'dwg.iok': '完整性通过',
     'dwg.ideg': '可用但存疑', 'dwg.icor': '数据损坏', 'dwg.un': '未知',
     'dwg.layer': '图层', 'dwg.block': '块定义', 'dwg.entity': '实体总数',
@@ -356,6 +375,7 @@ const I18N = {
     'hstat.connecting': 'Connecting…', 'hstat.offline': 'Backend offline',
     'dwg.ready': 'DWG ready', 'dwg.none': 'DWG backend missing',
     'mid.none': 'No file selected', 'mid.ph': 'Building drawing will be previewed here',
+    'mid.cup.hint': 'Library: pick a group on the left to see layouts and sizes',
     'tree.projects': 'Projects', 'tree.empty': '(none — use “Upload” at top right)',
     'tree.library': 'Cupboard Library', 'tree.drawings': ' dwg', 'tree.floors': 'Floor × units',
     'kpi.units': 'Dwelling units', 'kpi.floor': 'Floors', 'kpi.compliance': 'Errors / Warnings',
@@ -383,6 +403,8 @@ const I18N = {
     'up.nogo': 'Cannot import', 'up.close': 'Close', 'up.picked': 'Selected',
     'up.clickgo': 'Click “Parse & Confirm Import” to start.', 'up.imgprev': 'Image preview',
     'up.ok': 'Imported', 'up.fail': 'Import failed', 'up.parsefail': 'Parse failed',
+    'up.done': 'Parse complete', 'up.hint': 'Large drawings take 10-30s — keep this window open',
+    'up.busy': 'Parsing in progress, please wait',
     'dwg.backend': 'Backend', 'dwg.integ': 'Integrity', 'dwg.iok': 'Passed',
     'dwg.ideg': 'Usable with doubts', 'dwg.icor': 'Corrupted', 'dwg.un': 'Unknown',
     'dwg.layer': 'Layers', 'dwg.block': 'Block defs', 'dwg.entity': 'Entities',
@@ -404,15 +426,16 @@ function applyI18n() {
   $$('[data-i18n]').forEach(e => { e.textContent = t(e.dataset.i18n); });
   $('#lzh').classList.toggle('on', LANGNOW === 'zh');
   $('#len').classList.toggle('on', LANGNOW === 'en');
-  if (S.job) { renderTree(); renderPane(); }
-  else { renderTree(); }
-  if (S.view !== 'work') renderHub();
+  gotoView(S.view);
 }
 
 const S = {          // 全局状态
   view: 'work', pane: 'matrix',
   projects: [], job: null, curBuilding: null, curPage: 0,
   variants: [], treeSel: null,
+  openDrawing: null, // 哪张图纸处于展开状态（drawing id）
+  fold: {},          // 楼的折叠状态：key 'b<buildingId>' -> true=折叠
+  parsing: false,    // 正在解析 —— 用于禁止关闭弹窗
 };
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -434,7 +457,15 @@ async function api(path, opt = {}) {
   return r.json();
 }
 function modal(html) { $('#modal').innerHTML = html; $('#mask').classList.add('on'); }
-function closeModal() { $('#mask').classList.remove('on'); }
+function closeModal() {
+  // 解析中禁止关闭 —— 否则用户一点就把进度弄丢了，
+  // 而且后台仍在跑，前端却以为失败了
+  if (S.parsing) {
+    toast(t('up.busy'), 'err');
+    return;
+  }
+  $('#mask').classList.remove('on');
+}
 
 // ============================================================ 启动
 async function boot() {
@@ -461,6 +492,9 @@ async function boot() {
       showPdf(jobs[0].id, S.pages?.length ? S.pages : []);
     }
   } catch (e) {}
+  // 统一走 gotoView 归位：首屏也必须把上传按钮、树、中栏按 tab 摆对，
+  // 否则默认可见 #bup（工作台不该有上传入口）
+  gotoView(S.view);
 }
 
 async function loadTree() {
@@ -471,6 +505,10 @@ async function loadTree() {
 }
 
 function renderTree() {
+  // 柜型库 tab：树里**只**显示柜型分组，不再混入楼栋（用户诉求：
+  //「切换到柜型库，还是显示的楼栋的内容」）
+  if (S.view === 'cupboard') { renderTreeLibrary(); return; }
+
   let h = `<div class="sec">${t('tree.projects')}</div>`;
   if (!S.projects.length) {
     h += `<div class="node lv1" style="color:var(--dim)">${t('tree.empty')}</div>`;
@@ -478,20 +516,31 @@ function renderTree() {
   for (const p of S.projects) {
     const on = S.curBuilding === p.id ? ' on' : '';
     const job = S.job;
+    const dw = p.drawings || [];
+    // 楼栋节点上的箭头：折叠/展开。展开后每张图纸各占一个 item
+    const open = !S.fold['b' + p.id];
     h += `<div class="node${on}" data-b="${p.id}">
+      <span class="tw" data-fold="b${p.id}">${open ? '▾' : '▸'}</span>
       <span class="ico">▦</span><span class="nm">${esc(p.name)}</span>
-      <span class="ct">${(p.drawings || []).length}${t('tree.drawings')}</span></div>`;
-    if (S.curBuilding === p.id) {
-      const d = (p.drawings || [])[0];
-      if (d) {
-        h += `<div class="node lv1${S.treeSel === 'drawing' ? ' on' : ''}" data-sel="drawing">
-          <span class="ico">▤</span><span class="nm">${esc(d.title || t('nav.building'))}</span>
-          <span class="ct">${d.page_count || 0}p</span></div>`;
-        if (job) {
-          h += `<div class="node lv1${S.treeSel === 'floors' ? ' on' : ''}" data-sel="floors">
-            <span class="ico">≡</span><span class="nm">${t('tree.floors')}</span>
-            <span class="ct">${job.floors?.length || 0}</span></div>`;
-          for (const f of (job.floors || [])) {
+      <span class="ct">${dw.length}${t('tree.drawings')}</span></div>`;
+    if (!open) continue;
+    // ---- 每张图纸一个 item ----
+    for (const d of dw) {
+      const sel = S.treeSel === 'floors' && S.openDrawing === d.id ? ' on' : '';
+      const dopen = S.openDrawing === d.id;
+      h += `<div class="node lv1${sel}" data-sel="d${d.id}">
+        <span class="tw">${d.latest_job_id ? (dopen ? '▾' : '▸') : '·'}</span>
+        <span class="ico">▤</span><span class="nm">${esc(d.title || t('nav.building'))}</span>
+        <span class="ct">${d.page_count || 0}p</span></div>`;
+      // 图纸展开 -> 该图纸自己的楼层（按 latest_job_id 过滤）
+      const djob = (d.latest_job_id === S.jobId) ? job : null;
+      if (dopen && djob) {
+        h += `<div class="node lv1${S.treeSel === 'floors' ? ' on' : ''}" data-sel="floors">
+          <span class="tw">▸</span>
+          <span class="ico">≡</span><span class="nm">${t('tree.floors')}</span>
+          <span class="ct">${djob.floors?.length || 0}</span></div>`;
+        if (S.treeSel === 'floors') {
+          for (const f of (djob.floors || [])) {
             h += `<div class="node lv2" data-floor="${esc(f.floor_code)}">
               <span class="nm">${esc(f.floor_code)}</span>
               <span class="ct">${f.unit_count}${LANGNOW==='zh'?'户':' u'}${f.communal_count ? '+' + f.communal_count : ''}</span></div>`;
@@ -499,19 +548,73 @@ function renderTree() {
         }
       }
     }
-  }
-  h += `<div class="sec">${t('tree.library')}</div>`;
-  for (const g of variantGroups()) {
-    h += `<div class="node lv1${S.treeSel === 'vg:' + g.key ? ' on' : ''}" data-vg="${esc(g.key)}">
-      <span class="ico">⊞</span><span class="nm">${esc(g.title)}</span>
-      <span class="ct">${g.count} ${t('mtx.kind')}</span></div>`;
+    if (!dw.length && job) {
+      // 兼容：老数据只有 job 没有 drawing 记录
+      h += `<div class="node lv1${S.treeSel === 'floors' ? ' on' : ''}" data-sel="floors">
+        <span class="tw">▸</span><span class="ico">≡</span>
+        <span class="nm">${t('tree.floors')}</span>
+        <span class="ct">${job.floors?.length || 0}</span></div>`;
+    }
   }
   $('#tree').innerHTML = h;
-  $$('#tree .node').forEach(n => n.onclick = () => {
+  bindTree();
+}
+
+/** 柜型库 tab 的树：只列柜型分组 */
+function renderTreeLibrary() {
+  let h = `<div class="sec">${t('tree.library')}</div>`;
+  const groups = variantGroups();
+  if (!groups.length) {
+    h += `<div class="node lv1" style="color:var(--dim)">${t('dwg.empty')}</div>`;
+  }
+  for (const g of groups) {
+    const sel = S.treeSel === 'vg:' + g.key ? ' on' : '';
+    const open = S.treeSel === 'vg:' + g.key;
+    h += `<div class="node lv1${sel}" data-vg="${esc(g.key)}">
+      <span class="tw">▸</span>
+      <span class="ico">⊞</span><span class="nm">${esc(g.title)}</span>
+      <span class="ct">${g.count} ${t('mtx.kind')}</span></div>`;
+    if (open) {
+      for (const v of S.variants.filter(x => (x.bucket || 'p' + x.positions) === g.key)) {
+        h += `<div class="node lv2"><span class="nm mono">${esc(v.code)}</span>
+          <span class="ct">${v.positions}${t('dwg.pos')}</span></div>`;
+      }
+    }
+  }
+  $('#tree').innerHTML = h;
+  bindTree();
+}
+
+function bindTree() {
+  $$('#tree .node').forEach(n => n.onclick = ev => {
+    // 点箭头只折叠/展开，不触发选中
+    const tw = ev.target.closest('.tw');
+    if (tw && tw.dataset.fold) {
+      const k = tw.dataset.fold;
+      S.fold[k] = !S.fold[k];
+      renderTree();
+      return;
+    }
     if (n.dataset.b) { S.curBuilding = +n.dataset.b; S.treeSel = null; renderTree(); }
-    else if (n.dataset.sel) { S.treeSel = n.dataset.sel; renderTree(); }
+    else if (n.dataset.sel) {
+      const k = n.dataset.sel;
+      if (k.startsWith('d')) {
+        const did = +k.slice(1);
+        // 再次点同一张图纸 -> 收起
+        S.openDrawing = S.openDrawing === did ? null : did;
+        S.treeSel = S.openDrawing ? 'floors' : null;
+        renderTree();
+        return;
+      }
+      S.treeSel = S.treeSel === k ? null : k;
+      renderTree();
+    }
     else if (n.dataset.floor) filterFloor(n.dataset.floor);
-    else if (n.dataset.vg) { S.treeSel = n.dataset.vg; showVariantGroup(n.dataset.vg); }
+    else if (n.dataset.vg) {
+      S.treeSel = S.treeSel === n.dataset.vg ? null : n.dataset.vg;
+      renderTree();
+      if (S.treeSel) showVariantGroup(n.dataset.vg);
+    }
   });
 }
 
@@ -739,8 +842,7 @@ function showPlaceholder() {
   $('#pagelist').innerHTML = '';
 }
 function showPdf(jobId, pages) {
-  // /api/file/{job_id} 直接回传原始 PDF 字节（需求 1「原样显示」）
-  S.curPage = 0; S.pdfUrl = '/api/file/' + jobId;
+  S.curPage = 0; S.jobId = jobId; S.zoom = 1;
   renderPages(pages);
   gotoPage(0);
 }
@@ -750,17 +852,41 @@ function renderPages(pages) {
     `<div class="pg" data-p="${i}">${i + 1}. ${esc((p.title || '').slice(0, 14) || 'p' + (i + 1))}</div>`).join('');
   $$('#pagelist .pg').forEach(e => e.onclick = () => gotoPage(+e.dataset.p));
 }
+/** 单页图片 URL —— 走服务端渲染，不加载整份 PDF */
+function pageUrl(n, dpi) { return `/api/page/${S.jobId}/${n}?dpi=${dpi || 110}`; }
+
+/** 翻页。
+ *  曾经的实现：<iframe src="整份.pdf#page=N">，改src 等于重下整个 37MB PDF，
+ *  实测直接卡死、点页码无响应。现在改为服务端按需渲染单页 PNG。 */
 function gotoPage(i) {
-  if (!S.pdfUrl || !S.pages?.length) return;
+  if (!S.jobId || !S.pages?.length) return;
   S.curPage = Math.max(0, Math.min(i, S.pages.length - 1));
+  const n = S.curPage + 1;
   const p = S.pages[S.curPage];
-  $('#viewer').innerHTML = `<iframe src="${S.pdfUrl}#page=${S.curPage + 1}"></iframe>`;
-  $('#bpage').textContent = `${S.curPage + 1} / ${S.pages.length}`;
+  const z = S.zoom || 1;
+  // 用 img 而非 iframe：img 只加载这一页，且浏览器能边下边显示
+  $('#viewer').innerHTML =
+    `<img id="pgimg" src="${pageUrl(n)}" alt="p${n}"
+          style="width:${Math.round(100 * z)}%;max-width:none" />`;
+  $('#bpage').textContent = `${n} / ${S.pages.length}`;
   $$('#pagelist .pg').forEach((e, k) => e.classList.toggle('on', k === S.curPage));
-  // S.curFile 可能为 undefined（从柜型库视图进来时没走过上传），
-  // 否则会渲染出 "undefined — undefined"
   const fn = [S.curFile, p?.title || p?.drawing_no].filter(Boolean).join(' — ');
   $('#mfn').textContent = fn || t('mid.none');
+  // 邻页预取：连续翻页几乎无等待
+  [n + 1, n - 1, n + 2].forEach(k => {
+    if (k >= 1 && k <= S.pages.length) {
+      const im = new Image(); im.src = pageUrl(k);
+    }
+  });
+  // 滚动回顶，否则停在上一页的偏移位置像是没换页
+  $('#viewer').scrollTop = 0;
+}
+
+function setZoom(z) {
+  S.zoom = Math.max(0.5, Math.min(4, z));
+  const img = $('#pgimg');
+  if (img) img.style.width = `${Math.round(100 * S.zoom)}%`;
+  $('#bzoom').textContent = `${Math.round(S.zoom * 100)}%`;
 }
 
 // ============================================================ 导出
@@ -802,9 +928,18 @@ function openUpload(kind) {
       <input type="file" id="fi" style="display:none" accept="${cfg.accept}">
       <div id="upbox"></div>
       <div id="preview"></div>
+      <div id="prog" style="display:none">
+        <div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:5px">
+          <span id="pm">${t('up.parsing')}</span><span id="pe" class="muted"></span>
+        </div>
+        <div class="bar" style="height:8px">
+          <i id="pb" style="width:0%;background:var(--accent)"></i>
+        </div>
+        <div class="muted" style="font-size:11px;margin-top:6px">${t('up.hint')}</div>
+      </div>
     </div>
     <div class="mfoot">
-      <button class="btn" onclick="closeModal()">${t('up.cancel')}</button>
+      <button class="btn" id="bcancel">${t('up.cancel')}</button>
       <button class="btn pri" id="bgo" disabled>${t('up.go')}</button>
     </div>`);
   const dz = $('#dz'), fi = $('#fi');
@@ -820,6 +955,7 @@ function openUpload(kind) {
   btn.onclick = submitUpload;
   btn.disabled = true;
   btn.textContent = t('up.go');
+  $('#bcancel').onclick = closeModal;
 }
 
 async function doFile(f, kind) {
@@ -840,19 +976,45 @@ async function doFile(f, kind) {
 }
 
 async function submitUpload() {
-  if (!S.uploadFile) return;
+  if (!S.uploadFile || S.parsing) return;
   const btn = $('#bgo');
+  S.parsing = true;                       // 期间禁止关闭弹窗
   btn.disabled = true; btn.innerHTML = `<span class="spin"></span> ${t('up.parsing')}`;
+  $('#bcancel').disabled = true;
+  // 大文件解析要十几秒以上（实测 37MB/35页 = 18.5 秒），
+  // 没有进度条用户会以为卡死并去点关闭 —— 于是「点一下就跳出去」
+  const mb = S.uploadFile.size / 1024 / 1024;
+  $('#prog').style.display = 'block';
+  $('#pm').textContent = t('up.parsing');
+  $('#pe').textContent = `${mb.toFixed(1)} MB`;
+  let fake = 8;
+  const t0 = Date.now();
+  // 假进度：真实进度需要后端配合SSE/轮询，这里先给一个不会卡死的递增指示
+  const timer = setInterval(() => {
+    fake = Math.min(92, fake + Math.max(1, (95 - fake) / 8));
+    $('#pb').style.width = fake + '%';
+    $('#pe').textContent = `${mb.toFixed(1)} MB · ${Math.round((Date.now() - t0) / 1000)}s`;
+  }, 700);
+
   const fd = new FormData();
   fd.append('file', S.uploadFile);
   fd.append('project', document.querySelector('#pname')?.value || '74 KEELER ST CARLINGFORD');
   try {
     const r = await api(`/parse?kind=${S.uploadKind}`, { method: 'POST', body: fd });
+    clearInterval(timer);
+    $('#pb').style.width = '100%';
+    $('#pm').textContent = t('up.done');
     if (r.kind === 'dwg') showDwgResult(r); else showPdfResult(r);
+    // 解析已完成，允许关闭
+    S.parsing = false;
+    $('#bcancel').disabled = false;
   } catch (e) {
-    btn.disabled = false; btn.textContent = '解析并确认入库';
-    toast(t('up.parsefail') + ': ' + e.message, 'err');
+    clearInterval(timer);
+    S.parsing = false;                   // 失败才允许关闭，否则用户被困住
+    $('#prog').style.display = 'none';
+    $('#bcancel').disabled = false;
     btn.disabled = false; btn.textContent = t('up.go'); btn.onclick = submitUpload;
+    toast(t('up.parsefail') + ': ' + e.message, 'err');
   }
 }
 
@@ -921,11 +1083,16 @@ async function showPdfResult(r) {
     ｜${LANGNOW==='zh'?'平均置信度':'avg confidence'} ${r.summary.avg_confidence}<br>
     ${t('cv.title')}: ${esc(S.job.cross_validation.verdict || 'n/a')}, ${t('cv.rate')} ${S.job.cross_validation.consistency ?? '—'}
   </div>`;
-  closeModal();
+  // 先解锁再关闭 —— closeModal 在S.parsing 时会拒绝执行
+  S.parsing = false;
+  $('#mask').classList.remove('on');
+  // 解析完自动回到工作台看结果（保持在建筑图纸 tab 会让人以为没生效）
+  gotoView('work');
   await loadTree();
   await loadJob(r.job_id);
   showPdf(r.job_id, r.pages || []);
   renderPane();
+  toast(`${t('up.done')} · ${t('kpi.units')} ${r.summary.total_units}`, 'ok');
 }
 
 async function commitDwg() {
@@ -940,13 +1107,31 @@ async function commitDwg() {
 }
 
 // ============================================================ 绑定
-/** 柜型库/ 建筑图纸 两个视图：展示**已有内容**，上传走顶部按钮。
-    用户诉求：不要一点顶栏就弹窗，要能先进去看已存在的文件。 */
+/** 三个 tab 各自独立：**每个 tab 有自己的树、自己的主区域、自己的上传入口。
+    用户原话：切到柜型库还是显示楼栋的内容 —— 根因是以前只换右栏 #rpane，
+    左侧树和中栏始终是楼栋的。现在按view 整体切换。 */
 function renderHub() {
   const isCup = S.view === 'cupboard';
+
+  if (isCup) {
+    // 柜型库：中栏不该再预览楼栋图纸，改为展示分组说明
+    $('#mfn').textContent = t('tree.library');
+    $('#pagelist').innerHTML = '';
+    $('#viewer').innerHTML = `<div class="ph"><div class="big">⊞</div>
+      <div>${t('mid.cup.hint')}</div></div>`;
+    $('#bprev').style.display = 'none';
+    $('#bnext').style.display = 'none';
+    $('#bpage').style.display = 'none';
+    $('#bparse').style.display = 'none';
+  } else {
+    $('#bprev').style.display = '';
+    $('#bnext').style.display = '';
+    $('#bpage').style.display = '';
+    $('#bparse').style.display = '';
+  }
+
   let h = '';
   if (isCup) {
-    // 柜型库：按 water+gas 表位分组列出（需求 2）
     const groups = variantGroups();
     h += `<div class="sec" style="padding-left:0">${t('tree.library')}</div>`;
     if (!groups.length) {
@@ -958,12 +1143,11 @@ function renderHub() {
           <div class="ico">⊞</div>
           <div class="nm"><div class="t">${esc(g.title)}</div>
             <div class="s">${g.count} ${t('mtx.kind')}</div></div>
-          <span class="badge">${LANGNOW==='zh'?'查看':'Open'} ›</span></div>`;
+          <span class="badge">${t('bld.open')} ›</span></div>`;
       }
       h += '</div>';
     }
   } else {
-    // 建筑图纸：列出已有 project
     h += `<div class="sec" style="padding-left:0">${t('tree.projects')}</div>`;
     if (!S.projects.length) {
       h += `<div class="empty"><div class="big">▦</div><b>${t('bld.empty')}</b></div>`;
@@ -983,12 +1167,10 @@ function renderHub() {
   $('#rpane').innerHTML = h;
   $$('#rpane .row-item').forEach(n => n.onclick = () => {
     if (n.dataset.vg) { showVariantGroup(n.dataset.vg); return; }
-    // 打开项目：回到工作台视图并加载该building 的解析结果
-    S.view = 'work';
-    $$('nav button').forEach(x => x.classList.toggle('on', x.dataset.view === 'work'));
+    // 打开项目：回到工作台视图并加载该 building 的解析结果
+    gotoView('work');
     S.curBuilding = +n.dataset.b; S.treeSel = 'floors';
     renderTree();
-    // 找到该项目最近一次解析并载入
     (async () => {
       try {
         const jobs = await api('/jobs?limit=30');
@@ -1000,19 +1182,53 @@ function renderHub() {
   });
 }
 
-$$('nav button').forEach(b => b.onclick = () => {
-  $$('nav button').forEach(x => x.classList.remove('on'));
-  b.classList.add('on'); S.view = b.dataset.view;
-  if (S.view === 'work') { renderTree(); renderPane(); }
-  else renderHub();          // 只切换视图，不弹窗
-});
+/** 右栏 tab 也按 tab 切换 —— 「楼层×柜型」这类标签对柜型库毫无意义 */
+function syncTabsForView() {
+  const tabs =$$('.rtabs button');
+  if (S.view === 'cupboard') {
+    tabs.forEach(b => b.classList.remove('on'));
+    $('#rpane').innerHTML = '';   // 由 renderHub 填充
+    return;
+  }
+  if (S.view === 'building') {
+    // 建筑图纸 tab：没有解析结果可看，隐藏三个结果页
+    tabs.forEach(b => b.style.display = 'none');
+    return;
+  }
+  tabs.forEach(b => { b.style.display = ''; b.classList.toggle('on', b.dataset.pane === S.pane); });
+}
+
+/** 统一切换 tab：三个 tab 的树/ 中栏 / 右栏整体切换，避免串内容 */
+function gotoView(v) {
+  S.view = v;
+  $$('nav button').forEach(x => x.classList.toggle('on', x.dataset.view === v));
+  // 上传按钮只在「柜型库」「建筑图纸」两个 tab 出现 ——
+  // 工作台是看解析结果的，不该摆上传入口
+  $('#bup').style.display = v === 'work' ? 'none' : 'inline-block';
+  syncTabsForView();
+  if (v === 'work') {
+    renderTree();
+    // 恢复楼栋预览
+    if (S.jobId && S.pages?.length) gotoPage(S.curPage);
+    else { $('#mfn').textContent = t('mid.none'); }
+    renderPane();
+  } else {
+    renderTree();     // 树也切：柜型库时只显示柜型分组
+    renderHub();
+  }
+}
+
+$$('nav button').forEach(b => b.onclick = () => gotoView(b.dataset.view));
 $('#bup').onclick = () => openUpload(S.view === 'cupboard' ? 'cupboard' : 'building');
 $('#lzh').onclick = () => { LANGNOW = 'zh'; applyI18n(); };
 $('#len').onclick = () => { LANGNOW = 'en'; applyI18n(); };
 $$('.rtabs button').forEach(b => b.onclick = () => { S.pane = b.dataset.pane; syncTabs(); renderPane(); });
 $('#bprev').onclick = () => gotoPage(S.curPage - 1);
 $('#bnext').onclick = () => gotoPage(S.curPage + 1);
+$('#bzin').onclick = () => setZoom((S.zoom || 1) * 1.25);
+$('#bzout').onclick = () => setZoom((S.zoom || 1) / 1.25);
 $('#bparse').onclick = () => openUpload('building');
+// 点遮罩关闭 —— 但解析中closeModal 自身会拒绝，这里只拦住冒泡
 $('#mask').onclick = e => { if (e.target.id === 'mask') closeModal(); };
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeModal();
