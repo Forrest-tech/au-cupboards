@@ -54,7 +54,12 @@ echo "检查依赖 ..."
 if ! python - <<'PY' 2>/dev/null
 import importlib, sys
 mods = ["uvicorn", "fastapi", "multipart", "fitz", "ezdxf", "PIL",
-        "docx", "reportlab", "openpyxl", "httpx"]
+        "docx", "reportlab", "openpyxl", "httpx",
+        # 柜型 JPG 渲染必需（app/parsers/cupboard_render.py）。
+        # 曾漏在这里，导致 requirements.txt 里有、校验却跳过，
+        # 用户装完直接撞「No module named 'matplotlib'」+ 渲染 0/141。
+        # 注意 ezdxf.addons.drawing 是 matplotlib 的插件，必须一起验。
+        "matplotlib", "matplotlib.pyplot"]
 missing = []
 for m in mods:
     try:

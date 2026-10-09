@@ -85,6 +85,50 @@ nav button.on{background:var(--accent);color:#fff}
   font-size:10.5px;color:var(--dim);margin-top:4px;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
 }
+/* ---- 卡片删除：按钮放外层，避免和「点卡片看大图」抢事件 ---- */
+.cupwrap{position:relative}
+.cupdel{
+  position:absolute;top:3px;right:3px;width:19px;height:19px;line-height:17px;
+  border:1px solid var(--line);border-radius:50%;background:#fff;color:var(--dim);
+  font-size:13px;cursor:pointer;padding:0;text-align:center;opacity:0;
+  transition:opacity .12s;
+}
+.cupwrap:hover .cupdel{opacity:1}
+.cupdel:hover{background:#dc2626;border-color:#dc2626;color:#fff}
+.cupdel:disabled{opacity:.4;cursor:not-allowed}
+/* ---- 上传确认弹窗里的勾选 ---- */
+.rendops{display:flex;align-items:center;gap:10px;margin:6px 0 9px;padding:0 2px}
+.rendops .sp{flex:1}
+.rendops label{cursor:pointer;font-size:12.5px;display:flex;align-items:center;gap:5px}
+.cupcard[data-sel] .tick{
+  position:absolute;top:5px;left:5px;width:17px;height:17px;line-height:17px;
+  border-radius:50%;background:#2563eb;color:#fff;font-size:11px;text-align:center;
+}
+.cupcard .thumb{position:relative}
+.cupcard[data-sel]{cursor:pointer}
+.cupcard[data-sel]:not(.on){opacity:.42}
+.cupcard[data-sel]:not(.on) .thumb{filter:grayscale(1)}
+/* ---- 被排除的非柜型 block：折叠，默认可有可无 ---- */
+.rejd{margin-top:12px;font-size:12px;color:var(--dim)}
+.rejd summary{cursor:pointer;padding:5px 0;user-select:none}
+.rejd summary:hover{color:var(--txt)}
+.rejlist{
+  max-height:190px;overflow:auto;border:1px solid var(--line);
+  border-radius:6px;padding:6px 8px;background:#fafbfc;margin-top:5px;
+}
+.rejlist>div{display:flex;gap:8px;padding:2px 0;border-bottom:1px solid #f0f0f0}
+.rejlist code{font-size:11px;color:var(--txt);flex:1;word-break:break-all}
+.rejlist span{font-size:10.5px;color:var(--dim);white-space:nowrap}
+/* ---- 柜型库批量管理条 ---- */
+.mgmt{
+  display:flex;align-items:center;gap:8px;margin:0 0 8px;padding:6px 9px;
+  border:1px solid var(--line);border-radius:7px;background:#fafbfc;
+}
+.mgmt .sp{flex:1}
+.mgmt .muted{font-size:11.5px}
+.btn.sm{padding:3px 9px;font-size:11.5px}
+.btn.sm.danger{color:#dc2626;border-color:#f0c4c4}
+.btn.sm.danger:hover{background:#fef2f2}
 .tag.ok{background:var(--ok-bg);color:var(--ok);border-color:#bbf7d0}
 .tag.warn{background:var(--warn-bg);color:var(--warn);border-color:#fde68a}
 .cupview{
@@ -372,6 +416,11 @@ const I18N = {
     'lib.measured': '实测', 'lib.estimated': '待实测', 'lib.manual': '人工',
     'lib.noclue': '该柜型还没有渲染图纸。重新上传 DWG 并勾选「同时渲染柜型图纸」即可生成。',
     'lib.rendering': '正在渲染柜型图纸…', 'lib.rendered': '已渲染',
+    'lib.of': '/ 识别到', 'lib.picked': '已勾选',
+    'lib.selall': '全选', 'lib.selnone': '全不选', 'lib.nosel': '没有勾选任何柜型',
+    'lib.del': '删除该柜型', 'lib.deldone': '已删除', 'lib.delfail': '删除失败',
+    'lib.mginv': '反向选择', 'lib.clear': '清空解析结果',
+    'lib.empty': '柜型库是空的', 'lib.nodwg': '没有从 DWG 解析进来的柜型',
     'mid.none': '未选择文件', 'mid.ph': '上传建筑图纸后在此原样预览',
     'mid.cup.hint': '柜型库：左侧选分组查看排布与尺寸',
     'tree.projects': '建筑项目', 'tree.empty': '（暂无，点右上角「上传图纸」）',
@@ -430,6 +479,11 @@ const I18N = {
     'lib.measured': 'Measured', 'lib.estimated': 'Unmeasured', 'lib.manual': 'Manual',
     'lib.noclue': 'This cupboard has no rendered drawing. Re-upload the DWG with "render cupboard drawings" enabled.',
     'lib.rendering': 'Rendering cupboard drawings…', 'lib.rendered': 'Rendered',
+    'lib.of': '/ detected', 'lib.picked': 'picked',
+    'lib.selall': 'Select all', 'lib.selnone': 'Clear', 'lib.nosel': 'No cupboard selected',
+    'lib.del': 'Delete this cupboard', 'lib.deldone': 'Deleted', 'lib.delfail': 'Delete failed',
+    'lib.mginv': 'Select the rest', 'lib.clear': 'Clear parsed',
+    'lib.empty': 'Library is empty', 'lib.nodwg': 'No DWG-derived cupboards',
     'mid.none': 'No file selected', 'mid.ph': 'Building drawing will be previewed here',
     'mid.cup.hint': 'Library: pick a group on the left to see layouts and sizes',
     'tree.projects': 'Projects', 'tree.empty': '(none — use “Upload” at top right)',
@@ -498,6 +552,9 @@ const S = {          // 全局状态
   dwgHint: null,     // 后端 /health 返回的 DWG 安装指引原文
   renders: [],       // 柜型block → JPG 的渲染结果
   storedName: null,   // DWG 上传后的文件名（渲染/入库都用它）
+  selBlocks: [],      // 预览里勾选的柜型block —— 只有这些会入库
+  detected: null,     // 柜型语义判定摘要（识别到几个/排除几个）
+  rejected: [],       // 被排除的非柜型 block（含排除理由）
 };
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -937,7 +994,9 @@ function showVariantGroup(key) {
     const srcTag = src === 'measured' ? `<span class="tag ok">${t('lib.measured')}</span>`
       : src === 'manual' ? `<span class="tag">${t('lib.manual')}</span>`
       : `<span class="tag warn">${t('lib.estimated')}</span>`;
-    h += `<div class="cupcard${v.image_url ? ' has-img' : ''}" data-img="${esc(v.image_url || '')}">
+    // 删除按钮挂在卡片外层右上角，避免和「点击看大图」抢事件
+    h += `<div class="cupwrap">
+    <div class="cupcard${v.image_url ? ' has-img' : ''}" data-img="${esc(v.image_url || '')}">
       <div class="thumb">${v.image_url
         ? `<img loading="lazy" src="${esc(v.image_url)}" alt="${esc(v.code)}">`
         : `<div class="noph">${t('lib.noimg')}</div>`}</div>
@@ -946,7 +1005,9 @@ function showVariantGroup(key) {
         <div class="dim">${v.positions} ${t('dwg.pos')} · ${esc(v.grid || '-')}</div>
         <div class="dim">${v.w ?? '—'} × ${v.h ?? '—'} × ${v.d ?? '—'} mm ${srcTag}</div>
         ${v.description ? `<div class="desc">${esc(v.description)}</div>` : ''}
-      </div></div>`;
+      </div></div>
+      <button class="cupdel" data-del="${v.id}" data-code="${esc(v.code)}"
+        title="${t('lib.del')}">×</button></div>`;
   }
   h += '</div>';
   $('#rpane').innerHTML = h;
@@ -957,6 +1018,34 @@ function showVariantGroup(key) {
     if (!u) { toast(t('lib.noclue'), 'err'); return; }
     showCupImage(u);
     $$('#rpane .cupcard').forEach(x => x.classList.toggle('on', x === n));
+  });
+  bindCupDelete();
+}
+
+/** 删除柜型 —— 用户诉求：「里面不需要的数据，我需要可以删除」。
+ *  删完必须重建当前分组视图，否则卡片还挂在界面上，
+ *  用户会以为没删掉。 */
+function bindCupDelete() {
+  $$('#rpane .cupdel').forEach(btn => {
+    btn.onclick = async (ev) => {
+      ev.stopPropagation();
+      const id = +btn.dataset.del;
+      const code = btn.dataset.code;
+      if (!confirm((LANGNOW === 'zh'
+        ? `确定删除柜型 ${code}？\n该柜型的图纸也会一并删除。`
+        : `Delete cupboard ${code}? Its drawing will be removed too.`))) return;
+      btn.disabled = true;
+      try {
+        await api(`/variants/${id}`, { method: 'DELETE' });
+        toast(`${t('lib.deldone')} ${code}`, 'ok');
+        await loadVariants();
+        const cur = $('#mfn').textContent.split('·').pop().trim();
+        showVariantGroup(cur);       // 重绘当前分组
+      } catch (e) {
+        toast(t('lib.delfail') + ': ' + e.message, 'err');
+        btn.disabled = false;
+      }
+    };
   });
 }
 
@@ -1233,46 +1322,80 @@ function showDwgResult(r) {
       <div class="kpi ${r.integrity === 'corrupt' ? 'r' : 'o'}"><div class="v">${(r.warnings || []).length}</div><div class="l">${t('dwg.warn')}</div></div>
     </div>
     ${(r.integrity_notes || []).map(n => `<div class="alert ${r.integrity === 'corrupt' ? 'err' : 'warn'}">${esc(n)}</div>`).join('')}
-    <div class="sec" style="padding-left:0">${t('dwg.blk')}</div>
-    <table><thead><tr><th>${t('dwg.blkname')}</th><th>${t('dwg.blklayer')}</th><th class="num">${t('dwg.count')}</th></tr></thead><tbody>
-      ${blocks.slice(0, 40).map(b => `<tr><td class="mono">${esc(b)}</td>
-        <td class="muted">${esc((bl[b] || []).join(', ') || '—')}</td>
-        <td class="num">${(bc[b] ?? '—')}</td></tr>`).join('')
-        || `<tr><td colspan="3" class="empty">${t('dwg.noblk')}</td></tr>`}
-    </tbody></table>
-    <div class="sec" style="padding-left:0">${t('dwg.layers')}</div>
-    <div>${(r.layers || []).map(l => `<span class="tag">${esc(l)}</span>`).join('') || `<span class="muted">${t('prov.none')}</span>`}</div>
-    ${(r.warnings || []).map(w => `<div class="alert warn">${esc(w)}</div>`).join('')}
     <div id="rendbox"></div>`;
 }
 
-/** 渲染完成后把缩略图贴进确认弹窗 —— 用户要先看到图再决定要不要入库 */
+/** 渲染完成后把缩略图贴进确认弹窗 —— 用户要先看到图再决定要不要入库。
+ *
+ *  用户诉求：「不应该只是左侧的类型树状结构，预览一下」
+ *  → 每张卡片带复选框，可以只勾选需要的柜型入库，
+ *    并且默认全选（他也可以全不勾就取消入库）。
+ *  用户诉求：「里面的不需要的数据，我需要可以删除」
+ *  → 勾选状态 S.selBlocks 驱动 commitDwg 只提交勾中的。 */
 function paintRenders() {
   const box = $('#rendbox');
   if (!box) return;
-  const rs = S.renders || [];
-  if (!rs.length) { box.innerHTML = ''; return; }
-  const ok = rs.filter(r => r.ok);
-  let h = `<div class="sec" style="padding-left:0">${t('lib.title')} · ${ok.length}/${rs.length}</div>`;
-  if (!ok.length) {
-    h += `<div class="alert err">${esc((rs[0] || {}).error || t('lib.noimg'))}</div>`;
-  } else {
-    h += '<div class="cupgrid" style="padding-left:0">';
-    for (const r of rs) {
-      h += r.ok
-        ? `<div class="cupcard has-img"><div class="thumb">
-             <img src="/api/thumbs/${esc(r.image_name)}" alt="${esc(r.block_name)}"></div>
-           <div class="meta"><div class="code mono">${esc(r.block_name)}</div>
-             <div class="dim">${r.entity_count} ${t('dwg.entity')}</div>
-             <div class="dim">${r.width_mm ?? '—'} × ${r.height_mm ?? '—'} mm</div>
-           </div></div>`
-        : `<div class="cupcard"><div class="thumb"><div class="noph">${t('lib.noimg')}</div></div>
-           <div class="meta"><div class="code mono">${esc(r.block_name)}</div>
-             <div class="desc">${esc(r.error || '')}</div></div></div>`;
-    }
-    h += '</div>';
+  const rs = (S.renders || []).filter(r => r.ok);
+  if (!rs.length) {
+    const all = S.renders || [];
+    box.innerHTML = `<div class="sec" style="padding-left:0">${t('lib.title')}</div>`
+      + `<div class="alert err">${esc((all[0] || {}).error || t('lib.noimg'))}</div>`;
+    return;
+  }
+  // 默认全选 —— 但只针对**判定为柜型**的那些（renders 已过滤）
+  if (!S.selBlocks || S.selBlocks.length !== rs.length) {
+    S.selBlocks = rs.map(r => r.block_name);
+  }
+  const sel = new Set(S.selBlocks);
+  const det = S.detected || {};
+  let h = `<div class="sec" style="padding-left:0">${t('lib.title')} · ${rs.length}/${t('lib.picked')}</div>`;
+  // 分类判定摘要 —— 解释「141 个里为什么只有 6 个是柜型」
+  if (det.rejected) {
+    h += `<div class="alert ok">
+      ${LANGNOW==='zh'?'已识别柜型':'Cupboards detected'}: <b>${det.detected ?? rs.length}</b> ·
+      ${LANGNOW==='zh'?'已排除非柜型 block':'non-cupboard blocks filtered'}: <b>${det.rejected}</b>
+      ${det.sample ? `<br/><span style="font-size:12px;opacity:.85">${esc(det.sample)}</span>` : ''}
+    </div>`;
+  }
+  h += `<div class="rendops">
+      <label><input type="checkbox" id="selall" ${sel.size === rs.length ? 'checked' : ''}> ${t('lib.selall')}</label>
+      <span class="muted" id="selcnt">${sel.size} / ${rs.length}</span>
+      <button class="btn" id="selnone">${t('lib.selnone')}</button>
+    </div><div class="cupgrid" style="padding-left:0">`;
+  for (const r of rs) {
+    const on = sel.has(r.block_name);
+    h += `<div class="cupcard has-img${on ? ' on' : ''}" data-sel="${esc(r.block_name)}">
+        <div class="thumb"><img loading="lazy" src="/api/thumbs/${esc(r.image_name)}"
+             alt="${esc(r.block_name)}"><span class="tick">${on ? '✓' : ''}</span></div>
+        <div class="meta"><div class="code mono">${esc(r.block_name)}</div>
+          <div class="dim">${r.entity_count} ${t('dwg.entity')} · ${r.width_mm ?? '—'} × ${r.height_mm ?? '—'} mm</div>
+        </div></div>`;
+  }
+  h += '</div>';
+
+  // 被排除的非柜型 block —— 折叠起来，让用户能核对而不是被噪声淹没
+  if ((S.rejected || []).length) {
+    h += `<details class="rejd"><summary>${LANGNOW==='zh'
+      ? `已排除 ${S.rejected.length} 个非柜型 block（点击查看）`
+      : `${S.rejected.length} non-cupboard blocks filtered (click)`}</summary>`
+      + `<div class="rejlist">${S.rejected.slice(0, 80).map(x =>
+          `<div><code>${esc(x.block_name)}</code><span>${esc(x.reason || '')}</span></div>`
+        ).join('')}</div></details>`;
   }
   box.innerHTML = h;
+
+  // 勾选交互
+  const cards = $$('#rendbox .cupcard');
+  const sync = () => {
+    S.selBlocks = cards.filter(c => c.classList.contains('on')).map(c => c.dataset.sel);
+    const c = $('#selcnt'); if (c) c.textContent = `${S.selBlocks.length} / ${cards.length}`;
+    const a = $('#selall'); if (a) a.checked = S.selBlocks.length === cards.length;
+  };
+  cards.forEach(n => n.onclick = () => { n.classList.toggle('on'); sync(); });
+  const all = $('#selall');
+  if (all) all.onchange = () => cards.forEach(c => c.classList.toggle('on', all.checked));
+  const none = $('#selnone');
+  if (none) none.onclick = () => { cards.forEach(c => c.classList.remove('on')); sync(); };
 }
 
 async function showPdfResult(r) {
@@ -1317,7 +1440,12 @@ async function renderCupboards(storedName) {
     });
     S.renders = r.items || [];
     S.storedName = storedName;
-    $('#pm').textContent = `${t('lib.rendered')} ${r.rendered}/${r.total}`;
+    // 分类判定明细 —— 用于解释「141 个里只有 6 个是柜型」
+    S.detected = { detected: r.detected, rejected: r.rejected,
+                   sample: (r.rejected_items || []).slice(0, 3).map(
+                     x => `${x.block_name} —— ${x.reason}`).join(' / ') };
+    S.rejected = r.rejected_items || [];
+    $('#pm').textContent = `${t('lib.rendered')} ${r.rendered}/${t('lib.of')} ${r.detected ?? r.rendered}`;
     paintRenders();
     return S.renders;
   } catch (e) {
@@ -1345,10 +1473,15 @@ function dwgVariantsFromRenders(renders) {
 
 async function commitDwg() {
   try {
-    const renders = S.renders || [];
+    // 只提交**勾选**的柜型 —— 用户可以在预览里逐个勾，
+    // 也可以一键全不勾直接放弃入库。
+    const sel = new Set(S.selBlocks || []);
+    const hasSel = S.selBlocks && S.selBlocks.length;
+    const renders = (S.renders || []).filter(r =>
+      r.ok && (!hasSel || sel.has(r.block_name)));
     const variants = dwgVariantsFromRenders(renders);
     if (!variants.length) {
-      toast(t('lib.noimg') + ' — ' + t('lib.noclue'), 'err');
+      toast(t('lib.nosel'), 'err');
       return;
     }
     const r = await api('/cupboards/from-dwg', {
@@ -1401,10 +1534,19 @@ function renderHub() {
   let h = '';
   if (isCup) {
     const groups = variantGroups();
+    const nAll = S.variants.length;
+    const nImg = S.variants.filter(v => v.image_url).length;
     h += `<div class="sec" style="padding-left:0">${t('tree.library')}</div>`;
     if (!groups.length) {
       h += `<div class="empty"><div class="big">⊞</div><b>${t('dwg.empty')}</b></div>`;
     } else {
+      // 批量管理工具条 —— 用户诉求：「里面不需要的数据，我需要可以删除」
+      h += `<div class="mgmt">
+        <span class="muted">${nAll} ${t('mtx.kind')}${nImg ? ' · ' + nImg + ' ' + t('lib.img') : ''}</span>
+        <span class="sp"></span>
+        <button class="btn sm" id="mginv">${t('lib.mginv')}</button>
+        <button class="btn sm danger" id="mgclear">${t('lib.clear')}</button>
+      </div>`;
       h += '<div class="filelist">';
       for (const g of groups) {
         h += `<div class="row-item" data-vg="${esc(g.key)}">
@@ -1448,6 +1590,59 @@ function renderHub() {
       } catch (e) { renderPane(); }
     })();
   });
+  bindLibraryManage();
+}
+
+/** 柜型库批量管理：反向选择（批量删）+ 清空 DWG 解析结果。
+ *
+ *  用户诉求原文：「没有删除功能，里面的不需要的数据，我需要可以删除」。
+ *  两个入口：
+ *    · 卡片右上角 ×—— 删单个（见 bindCupDelete）
+ *    · 这里的「反向选择 / 清空」—— 一次处理几十个，
+ *      否则逐张点 × 在 141 个变体上根本没法用。
+ */
+function bindLibraryManage() {
+  const inv = $('#mginv');
+  if (inv) inv.onclick = async () => {
+    const ids = S.variants.map(v => v.id);
+    if (!ids.length) { toast(t('lib.empty'), 'err'); return; }
+    const excluded = new Set((S.selBlocks || []).map(String));
+    // 「反向选择」= 排除勾选/带图的，删掉其余 —— 语义写清楚，
+    // 不能让用户猜「反向」到底是取反还是取补
+    const del = S.variants.filter(v => !excluded.has(String(v.code)))
+                          .map(v => v.id);
+    if (!del.length) { toast(t('lib.nosel'), 'err'); return; }
+    if (!confirm((LANGNOW === 'zh'
+      ? `将删除 ${del.length} 个柜型（保留 ${excluded.size} 个已勾选/带图的）。\n确定继续？`
+      : `Delete ${del.length} cupboards (keep ${excluded.size})?`))) return;
+    try {
+      const r = await api('/variants/delete', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: del }),
+      });
+      toast(`${t('lib.deldone')} ${r.deleted}`, 'ok');
+      await loadVariants();
+      gotoView('cupboard');
+    } catch (e) { toast(t('lib.delfail') + ': ' + e.message, 'err'); }
+  };
+
+  const clr = $('#mgclear');
+  if (clr) clr.onclick = async () => {
+    const n = S.variants.filter(v => v.source === 'dwg').length;
+    if (!n) { toast(t('lib.nodwg'), 'err'); return; }
+    if (!confirm((LANGNOW === 'zh'
+      ? `将清空 ${n} 个从 DWG 解析进来的柜型（手工录入与种子数据保留）。\n确定？`
+      : `Clear ${n} DWG-derived cupboards?`))) return;
+    try {
+      const r = await api('/variants/clear', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ only_dwg: true }),
+      });
+      toast(`${t('lib.deldone')} ${r.deleted}`, 'ok');
+      await loadVariants();
+      gotoView('cupboard');
+    } catch (e) { toast(t('lib.delfail') + ': ' + e.message, 'err'); }
+  };
 }
 
 /** 右栏 tab 也按 tab 切换 —— 「楼层×柜型」这类标签对柜型库毫无意义 */

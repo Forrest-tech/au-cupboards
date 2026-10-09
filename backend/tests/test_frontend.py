@@ -648,6 +648,12 @@ class TestLightTheme:
             if re.search(rf"background:\s*var\(--accent\)|background:\s*var\(--ok\)|"
                          rf"background:\s*var\(--accent2\)", body):
                 continue
+            # .tick 是上传预览里的勾选标记，实色蓝底白勾号（不是浅色面板）。
+            # 这里必须写进白名单而不是改它的颜色 —— 它本来就是实色圆点。
+            if name in {"spin", "tick"} and re.search(
+                r"background:\s*#2563eb", body
+            ):
+                continue
             assert name in {"spin"}, (
                 f"类 .{name} 用 #fff 作文字色但背景是浅色，可能看不清"
             )
@@ -687,3 +693,49 @@ class TestStructure:
         r = subprocess.run([node, "--check", path],
                            capture_output=True, text=True)
         assert r.returncode == 0, f"JS 语法错误:\n{r.stderr[-600:]}"
+
+class TestNoDuplicateFunctionDefs:
+    """同一函数不得定义两次 —— 后者会静默覆盖前者。
+
+    实测踩坑：为实现「上传预览里勾选柜型」我改了 ``paintRenders``，
+    但用 Edit 插入新定义时**旧定义还留在文件里**，于是浏览器
+    实际跑的是旧版（`node --check` 语法检查完全通过，
+    单元测试也全绿，只有真跑浏览器才发现勾选框根本没渲染）。
+    定位靠 `paintRenders.toString().includes('data-sel') === false`。
+    """
+    def test_no_redefined_functions(self, script: str):
+        names = re.findall(r"^\s*(?:async )?function ([A-Za-z_$][\w$]*)", script, re.M)
+        dup = {n for n in names if names.count(n) > 1}
+        assert not dup, (
+            f"函数被重复定义，后者会覆盖前者：{sorted(dup)}"
+            "（node --check 查不出这类问题，必须静态扫定义次数）"
+        )
+
+
+class TestCupboardSelectionUI:
+    """上传预览要能勾选柜型 —— 用户诉求「预览一下，不要把零件弄进来」。"""
+
+    def test_renders_carry_selection_markup(self, script: str):
+        fn = re.search(r"function paintRenders\(\).*?\n(?=async function|function )",
+                       script, re.S)
+        assert fn, "paintRenders 未找到"
+        body = fn.group(0)
+        assert "data-sel" in body, "卡片缺 data-sel，无法勾选"
+        assert "selall" in body and "selnone" in body, "缺全选/全不选"
+        assert "rejd" in body, "缺被排除 block 的折叠说明区"
+
+    def test_commit_only_submits_selected(self, script: str):
+        fn = re.search(r"async function commitDwg\(\).*?\n(?=async function|function )",
+                       script, re.S)
+        assert fn, "commitDwg 未找到"
+        body = fn.group(0)
+        assert "selBlocks" in body, "入库未按勾选过滤，会把没选的也存进去"
+        assert "nosel" in body, "全不勾时应提示而非静默入库 0 条"
+
+    def test_rejected_blocks_collected(self, script: str):
+        fn = re.search(r"async function renderCupboards\(.*?\n(?=async function|function )",
+                       script, re.S)
+        assert fn, "renderCupboards 未找到"
+        body = fn.group(0)
+        assert "rejected_items" in body, "未收集被排除的 block，前端无法解释"
+        assert "detected" in body, "未记录识别统计"

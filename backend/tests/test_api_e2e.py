@@ -34,6 +34,10 @@ def client():
     srv.UPLOAD_DIR = srv.VAR_DIR / "uploads"
     srv.EXPORT_DIR = srv.VAR_DIR / "export"
     srv.DB_PATH = srv.VAR_DIR / "aucup.db"
+    # 缩略图目录也必须重定向 —— 否则删除用例会把开发库的 var/thumbs/ 删掉。
+    # 早期版本漏了这条，测试一跑开发环境的缩略图就消失了。
+    srv.THUMB_DIR_PATH = srv.VAR_DIR / "thumbs"
+    srv.THUMB_DIR_PATH.mkdir(parents=True, exist_ok=True)
     for d in (srv.UPLOAD_DIR, srv.EXPORT_DIR):
         d.mkdir(parents=True, exist_ok=True)
 
@@ -311,3 +315,104 @@ def test_corrections_roundtrip(client, parsed):
     assert c.status_code == 200
     lst = client.get(f"/api/jobs/{jid}/corrections").json()
     assert any(x["target_ref"] == "G01" for x in lst)
+
+# ---------------------------------------------------------------- 删除功能
+
+
+def test_delete_variant_removes_thumbnail(client):
+    """删除柜型要连它的缩略图文件一起删 ——
+    只删库会留下 404 图片，只删文件会留下悬空引用。"""
+    from app.api import server as srv
+
+    # 造一条带图的变体
+    r = client.post("/api/cupboards/from-dwg", json={
+        "source_file": "t.dxf",
+        "variants": [{"code": "DEL-TEST-1x1", "rows": 1, "cols": 1,
+                      "w": 900, "h": 600}],
+        "renders": [{"block_name": "DEL-TEST-1x1", "ok": True,
+                     "image_name": "del_test.jpg", "width_mm": 900,
+                     "height_mm": 600, "entity_count": 4}],
+    })
+    assert r.status_code == 200, r.text
+    thumb = srv.THUMB_DIR_PATH / "del_test.jpg"
+    thumb.write_bytes(b"\xff\xd8\xff" + b"x" * 900)     # 造一个真文件
+    vid = next(v["id"] for v in client.get("/api/variants").json()
+               if v["code"] == "DEL-TEST-1x1")
+    assert thumb.is_file()
+
+    d = client.delete(f"/api/variants/{vid}")
+    assert d.status_code == 200
+    assert d.json()["deleted"] == 1
+    assert not any(v["id"] == vid for v in client.get("/api/variants").json())
+    assert not thumb.exists(), "缩略图文件没被删除，会留下 404 图片"
+
+
+def test_delete_variant_404(client):
+    assert client.delete("/api/variants/999999").status_code == 404
+
+
+def test_batch_delete_skips_missing(client):
+    """批量删除里不存在的 id 不能让整批失败。"""
+    vs = client.get("/api/variants").json()
+    if not vs:
+        pytest.skip("无变体")
+    ids = [vs[0]["id"], 999998, 999999]
+    r = client.post("/api/variants/delete", json={"ids": ids})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["deleted"] >= 1
+    assert set(body["missing"]) == {999998, 999999}
+
+
+def test_batch_delete_empty_is_noop(client):
+    r = client.post("/api/variants/delete", json={"ids": []})
+    assert r.status_code == 200
+    assert r.json()["deleted"] == 0
+
+
+def test_delete_by_code(client):
+    client.post("/api/cupboards/from-dwg", json={
+        "source_file": "t.dxf",
+        "variants": [{"code": "DEL-CODE-2x2", "rows": 2, "cols": 2,
+                      "w": 1400, "h": 1800}],
+        "renders": [],
+    })
+    r = client.post("/api/variants/delete-by-code", json={"codes": ["DEL-CODE-2x2"]})
+    assert r.status_code == 200
+    assert r.json()["deleted"] == 1
+    assert not any(v["code"] == "DEL-CODE-2x2"
+                   for v in client.get("/api/variants").json())
+
+
+def test_clear_keeps_seed_data(client):
+    """清空解析结果必须保留种子数据 ——
+    用户是「这份图纸认错了，重传」，不是「整个库都不要了」。"""
+    before = {v["code"]: v for v in client.get("/api/variants").json()}
+    seed_before = [c for c, v in before.items() if v["source"] != "dwg"]
+    client.post("/api/cupboards/from-dwg", json={
+        "source_file": "t.dxf",
+        "variants": [{"code": "CLR-TEST-1x1", "rows": 1, "cols": 1}],
+        "renders": [],
+    })
+    r = client.post("/api/variants/clear", json={"only_dwg": True})
+    assert r.status_code == 200
+    after = {v["code"]: v for v in client.get("/api/variants").json()}
+    assert not any(c.startswith("CLR-TEST") for c in after), "DWG 变体没清掉"
+    for c in seed_before:
+        assert c in after, f"种子柜型 {c} 被误删"
+
+
+def test_batch_delete_reports_in_use(client):
+    """被单元选用的柜型在批量删除里应跳过，而不是让整批报错。"""
+    units = client.get("/api/units", params={"job_id": 1}).json()
+    if not units or not units[0].get("variant"):
+        pytest.skip("尚无选型记录")
+    used = units[0]["variant"]["id"]
+    vs = client.get("/api/variants").json()
+    free = next((v["id"] for v in vs if v["id"] != used), None)
+    ids = [used] + ([free] if free else [])
+    r = client.post("/api/variants/delete", json={"ids": ids})
+    assert r.status_code == 200
+    body = r.json()
+    assert used in body["in_use"], "被选用的柜型应进 in_use 而不是被删"
+    assert any(v["id"] == used for v in client.get("/api/variants").json())

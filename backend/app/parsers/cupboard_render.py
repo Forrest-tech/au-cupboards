@@ -76,9 +76,14 @@ class BlockRender:
 
 
 def _pick_size(bbox, width: int) -> tuple[int, int]:
-    """按 bbox 比例算画布尺寸，并夹在上限内。"""
+    """按 bbox 比例算画布尺寸，并夹在上限内。
+
+    注意 ezdxf 的 BoundingBox.extmin/extmax 是**三元组**
+    ``(x, y, z)``。按二元组解包会抛 ValueError，而 except 把它吞成
+    默认尺寸 —— 表现为「画布比例不对/ 尺寸算不出来」，很难定位。
+    """
     try:
-        (x0, y0), (x1, y1) = bbox.extmin, bbox.extmax
+        (x0, y0, _z0), (x1, y1, _z1) = bbox.extmin, bbox.extmax
         w = abs(float(x1) - float(x0))
         h = abs(float(y1) - float(y0))
     except Exception:
@@ -291,10 +296,14 @@ def render_cupboard_library(
 ) -> list[BlockRender]:
     """渲染柜型库里所有「像柜型」的 block。
 
-    筛选规则：
+    筛选规则（**按语义，不按数量**）：
       · 跳过匿名 block（``*`` 开头 = 系统定义/标注）
-      · 跳过实体数过少的（< ``min_entities``）—— 那种不是柜型
-      · ``only_blocks`` 非空时只渲染指定 block
+      · 用 :mod:`app.parsers.cupboard_classify` 判定是否真是柜型。
+        早期版本只按「实体数 >= min_entities」筛，结果用户真实图纸里
+        141 个 block 有 130+ 个是 ``Aect_Duct_*`` 风管零件被当成柜型，
+        用户质问「这里面为啥会有这些东西」。
+      · ``only_blocks`` 非空时只渲染指定 block（跳过语义判定，
+        用户显式指定了就尊重用户）
 
     返回**所有** block 的结果（含失败的），便于把失败原因暴露给用户，
     而不是静默跳过。
@@ -306,14 +315,24 @@ def render_cupboard_library(
         return [BlockRender(block_name="<dxf>", ok=False,
                             error=f"无法读取 DXF: {exc}")]
 
+    if only_blocks:
+        names = list(only_blocks)
+    else:
+        from app.parsers.cupboard_classify import judge_library
+
+        try:
+            cups, _others = judge_library(dxf_path)
+            names = [v.block_name for v in cups]
+        except Exception as exc:
+            log.warning("柜型语义判定失败，回退到仅按实体数筛选: %s", exc)
+            names = [
+                b.name for b in doc.blocks
+                if not b.name.startswith("*") and len(list(b)) >= min_entities
+            ]
+
     results: list[BlockRender] = []
-    for blk in doc.blocks:
-        name = blk.name
+    for name in names:
         if name.startswith("*"):
-            continue
-        if only_blocks and name not in only_blocks:
-            continue
-        if not only_blocks and len(list(blk)) < min_entities:
             continue
         results.append(render_block_to_jpg(dxf_path, name, out_dir, width=width))
     return results

@@ -28,7 +28,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import load_config
@@ -110,6 +110,24 @@ async def _unhandled(request, exc: Exception):  # noqa: ANN001
 
 def _pipeline() -> Pipeline:
     return Pipeline(DB_PATH, EXPORT_DIR)
+
+
+def _to_dxf(src: Path) -> tuple[Path | None, str | None]:
+    """把 DWG 转成 DXF（ODA 优先 → LibreDWG 兜底），已是 DXF 则原样返回。
+
+    抽出来是因为 /api/parse 与 /api/cupboards/render 都要走这一步，
+    两处各写一遍迟早会走偏（选型结论一变就要改两处）。
+    """
+    if src.suffix.lower() == ".dxf":
+        return src, None
+    from app.parsers.dwg import convert_with_libredwg, convert_with_oda
+
+    work = VAR_DIR / "render_work"
+    work.mkdir(parents=True, exist_ok=True)
+    dxf, err = convert_with_oda(src, work)
+    if dxf is None:
+        dxf, err = convert_with_libredwg(src, work)
+    return dxf, err
 
 
 # ---------------------------------------------------------------- 概览
@@ -629,6 +647,148 @@ def list_variants() -> list[dict[str, Any]]:
         ]
 
 
+# ---------------------------------------------------------------- 删除
+
+
+def _delete_variant_row(s: Session, v: CupboardVariant) -> None:
+    """删变体并顺手清掉它的缩略图文件。
+
+    只删库不删文件的话，var/thumbs/ 会越堆越大；反过来只删文件
+    不删库则会留下 404 图片。两者必须一起做。
+    """
+    if v.image_path:
+        f = (VAR_DIR / v.image_path).resolve()
+        if str(f).startswith(str(THUMB_DIR_PATH.resolve())) and f.is_file():
+            try:
+                f.unlink()
+            except OSError as exc:
+                log.warning("缩略图删除失败 %s: %s", f, exc)
+    s.delete(v)
+
+
+def _assert_not_in_use(s: Session, vid: int) -> None:
+    """已被单户选用的柜型不许直接删 —— 保护已生成的清单。
+
+    这是既有业务规则（原 test_variant_in_use_cannot_be_deleted 守着）：
+    柜型一旦被 unit 引用（经由 selections.variant_id），删掉会让历史
+    排布清单出现悬空引用，导出的表格也对不上。所以返回 409 而不是硬删。
+
+    注意关联字段在 ``selections.variant_id``，Unit 上并没有
+    ``variant_id`` 列（那是 relationship 的名字，不是数据库字段）。
+    """
+    n = s.scalar(select(func.count()).where(Selection.variant_id == vid))
+    if n:
+        raise HTTPException(
+            409,
+            f"该柜型已被 {n} 个单元选用，不能直接删除。"
+            "请先到工作台把相关单元改选其它柜型。",
+        )
+
+
+@app.delete("/api/variants/{variant_id}")
+def delete_variant(variant_id: int) -> dict[str, Any]:
+    """删除单个柜型。用户诉求：「里面不需要的数据，我需要可以删除」。"""
+    with Session(_pipeline().engine) as s:
+        v = s.get(CupboardVariant, variant_id)
+        if v is None:
+            raise HTTPException(404, f"柜型 {variant_id} 不存在")
+        _assert_not_in_use(s, variant_id)
+        code = v.variant_code
+        _delete_variant_row(s, v)
+        s.commit()
+    return {"deleted": 1, "code": code}
+
+
+class DeleteBody(BaseModel):
+    ids: list[int] = []
+
+
+@app.post("/api/variants/delete")
+def delete_variants(body: DeleteBody) -> dict[str, Any]:
+    """批量删除。逐条跳过不存在的，避免用户重复点击时整批失败。
+
+    被单元选用的柜型**跳过而非报错**（返回 ``in_use``）——
+    批量操作里一个受保护的条目不该让其余白删。
+    """
+    if not body.ids:
+        return {"deleted": 0, "missing": [], "in_use": []}
+    deleted, missing, in_use = 0, [], []
+    with Session(_pipeline().engine) as s:
+        for vid in body.ids:
+            v = s.get(CupboardVariant, vid)
+            if v is None:
+                missing.append(vid)
+                continue
+            try:
+                _assert_not_in_use(s, vid)
+            except HTTPException:
+                in_use.append(vid)
+                continue
+            _delete_variant_row(s, v)
+            deleted += 1
+        s.commit()
+    return {"deleted": deleted, "missing": missing, "in_use": in_use}
+
+
+class DeleteByCodeBody(BaseModel):
+    """按 block / 变体编码删除 —— 用户在图纸里看到某个柜型不想要时，
+    比先查 id 再删顺手得多。"""
+    codes: list[str] = []
+
+
+@app.post("/api/variants/delete-by-code")
+def delete_variants_by_code(body: DeleteByCodeBody) -> dict[str, Any]:
+    deleted, missing = 0, []
+    with Session(_pipeline().engine) as s:
+        for code in body.codes:
+            rows = s.scalars(
+                select(CupboardVariant).where(CupboardVariant.variant_code == code)
+            ).all()
+            if not rows:
+                missing.append(code)
+                continue
+            for r in rows:
+                _delete_variant_row(s, r)
+                deleted += 1
+        s.commit()
+    return {"deleted": deleted, "missing": missing}
+
+
+class ClearVariantsBody(BaseModel):
+    #: 只清 source='dwg' 的（自动解析入库的），保留手工录入的
+    only_dwg: bool = True
+
+
+@app.post("/api/variants/clear")
+def clear_variants(body: ClearVariantsBody) -> dict[str, Any]:
+    """清空柜型库（重新上传前用）。
+
+    ``only_dwg=True``（默认）只清 DWG 解析进来的，种子数据与手工
+    录入的保留 —— 用户通常是「这份图纸认错了，重传」而不是
+    「整个库都不要了」。
+
+    被单元选用的柜型会跳过并计入 ``kept`` —— 清空库不等于让
+    已生成的排布清单出现悬空引用。
+    """
+    kept = 0
+    with Session(_pipeline().engine) as s:
+        q = select(CupboardVariant)
+        if body.only_dwg:
+            q = q.where(CupboardVariant.source == "dwg")
+        rows = s.scalars(q).all()
+        n = 0
+        for r in rows:
+            try:
+                _assert_not_in_use(s, r.id)
+            except HTTPException:
+                kept += 1
+                continue
+            _delete_variant_row(s, r)
+            n += 1
+        s.commit()
+    return {"deleted": n, "kept": kept, "only_dwg": body.only_dwg}
+
+
 class VariantIn(BaseModel):
     code: str
     rows: int = 1
@@ -789,6 +949,10 @@ def render_cupboards(body: RenderRequest) -> dict[str, Any]:
 
     需求：「读取了 dwg 文件，将里面的不同的柜型都导出成 jpg 格式，
     放在 library 里，可以点击查看」。
+
+    只渲染**语义判定为柜型**的 block —— 用户实测一份图纸 141 个 block 里
+    有 130+ 个是 ``Aect_Duct_*`` HVAC 风管零件，全渲进库等于噪声。
+    返回里同时给出 ``rejected`` 及每条的排除理由，用户能自己核对。
     """
     # 路径只能来自上传目录，不接受外部路径
     src = (UPLOAD_DIR / Path(body.file).name).resolve()
@@ -798,21 +962,24 @@ def render_cupboards(body: RenderRequest) -> dict[str, Any]:
     if src.suffix.lower() not in (".dwg", ".dxf"):
         raise HTTPException(400, "只支持 DWG / DXF")
 
-    # DWG 要先转 DXF 才能用 ezdxf 渲染
-    work = VAR_DIR / "render_work"
-    work.mkdir(parents=True, exist_ok=True)
-    dxf = src
-    if src.suffix.lower() == ".dwg":
-        from app.parsers.dwg import convert_with_libredwg, convert_with_oda
+    dxf, err = _to_dxf(src)
+    if dxf is None:
+        raise HTTPException(422, f"DWG 转换失败：{err}")
 
-        dxf, err = convert_with_oda(src, work)
-        if dxf is None:
-            dxf, err = convert_with_libredwg(src, work)
-        if dxf is None:
-            raise HTTPException(422, f"DWG 转换失败：{err}")
+    # 先做语义判定，把「哪些是柜型/ 哪些不是」明确告诉用户
+    from app.parsers.cupboard_classify import judge_library
+
+    try:
+        cups, others = judge_library(dxf)
+    except Exception as exc:
+        cups, others = [], []
+        log.warning("柜型判定失败: %s", exc)
 
     results = render_cupboard_library(
-        dxf, THUMB_DIR_PATH, only_blocks=body.only_blocks or None, width=body.width
+        dxf,
+        THUMB_DIR_PATH,
+        only_blocks=body.only_blocks or ([v.block_name for v in cups] if cups else None),
+        width=body.width,
     )
     ok = [r for r in results if r.ok]
     return {
@@ -820,6 +987,23 @@ def render_cupboards(body: RenderRequest) -> dict[str, Any]:
         "rendered": len(ok),
         "failed": len(results) - len(ok),
         "source": src.name,
+        # 判定明细 —— 用户抱怨「为啥会有这些东西」时要能逐条解释
+        "detected": len(cups),
+        "rejected": len(others),
+        "cupboards": [
+            {
+                "block_name": v.block_name,
+                "score": v.score,
+                "reason": v.reason,
+                "entity_count": v.entity_count,
+                "size_mm": list(v.size_mm),
+            }
+            for v in cups
+        ],
+        "rejected_items": [
+            {"block_name": v.block_name, "reason": v.reason}
+            for v in others[:120]        # 上限 120条，避免响应过大
+        ],
         "items": [RenderOut(**r.__dict__) for r in results],
     }
 
