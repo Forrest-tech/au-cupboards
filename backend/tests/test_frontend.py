@@ -174,6 +174,50 @@ class TestSinglePageEndpoint:
             "dpi 缺上限约束，存在内存打爆风险"
 
 
+class TestDwgHintSurfaced:
+    """/health 返回了 dwg_hint，前端必须真的展示它。
+
+    历史 bug：后端已给出可执行安装指引，但前端只写「DWG 未装后端」，
+    用户完全不知道下一步做什么。守卫「后端返回了 ≠ 用户看得到」。
+    """
+
+    def test_backend_returns_hint(self):
+        src = (ROOT / "backend" / "app" / "api" / "server.py").read_text()
+        fn = re.search(r"def health\(.*?\n(?=@app|\Z)", src, re.S)
+        assert fn, "health 未定义"
+        body = fn.group(0)
+        assert "dwg_hint" in body, "health 未返回 dwg_hint"
+        # 指引必须可执行：至少给出下载地址或安装命令
+        assert "opendesign.com" in body or "libredwg" in body, \
+            "dwg_hint 没有给出任何可执行的安装方式"
+
+    def test_frontend_consumes_hint(self, script: str):
+        m = re.search(r"async function boot\(.*?\n(?=async function|\Z)", script, re.S)
+        assert m, "boot 未找到"
+        assert "dwg_hint" in m.group(0), (
+            "boot() 没有读取 h.dwg_hint —— 后端返回了安装指引但前端丢弃了"
+        )
+
+    def test_badge_clickable_when_not_ready(self, script: str):
+        """未就绪时徽章要可点击，不能是个死标签。"""
+        assert re.search(r"class=\"badge link\" id=\"bdwg\"", script), \
+            "DWG 未就绪的徽章不可点击，用户无法打开安装指引"
+
+    def test_hint_modal_defined(self, script: str):
+        assert "function showDwgHint(" in script, "缺少 showDwgHint"
+        fn = re.search(r"function showDwgHint\(.*?\n(?=async function|\Z)", script, re.S).group(0)
+        assert "oda_file_converter" in fn, "指引里缺 ODA File Converter 下载地址"
+        assert "libredwg" in fn, "指引里缺 brew install libredwg 备选方案"
+        assert "closeModal()" in fn, "指引弹窗必须可关闭，否则用户被困住"
+
+    def test_hint_keys_localised(self, script: str):
+        """指引文案必须有 i18n —— 后端原文只有中文，英文界面下不可用。"""
+        for lang in ("zh", "en"):
+            blk = _dict_block(script, lang)
+            for k in ("dwg.hint.title", "dwg.hint.oda", "dwg.hint.brew", "dwg.hint.done"):
+                assert f"'{k}'" in blk, f"{lang} 缺少 {k}"
+
+
 class TestNavNotAutoPopup:
     """点顶栏不应直接弹上传框 —— 用户要先看到已有文件。"""
 
