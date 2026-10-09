@@ -5,6 +5,23 @@
 
 按需求分析报告第 14 章技术选型实现，**不引入** Frappe / NocoBase / DMS / Temporal。
 
+```bash
+git clone https://github.com/Forrest-tech/au-cupboards.git
+cd au-cupboards
+
+# 1) 依赖
+cd backend && pip install -r ../requirements.txt
+
+# 2) 启动（前端与 API 同源：http://127.0.0.1:8000）
+python -m uvicorn app.api.server:app --host 0.0.0.0 --port 8000
+
+# 3) 验证
+curl http://127.0.0.1:8000/api/health
+python -m pytest tests/ -q        # 102 项
+```
+
+DWG 解析为可选能力，未装后端时系统照常工作，详见下方「DWG 链路状态」。
+
 ---
 
 ## 权威口径：44 户（已锁定）
