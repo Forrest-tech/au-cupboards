@@ -1,18 +1,46 @@
-duckdb==1.5.6
-ezdxf==1.4.4
+# AU Meter Cupboard Scheduling System
+#
+# 唯一权威依赖清单。从仓库根目录安装：
+#     pip install -r requirements.txt
+#
+# backend/requirements.txt 指向本文件，不再重复维护。
+#
+# 最低要求：Python 3.11+（本项目使用了 `X | None` 联合类型语法与
+# `list[str]` 泛型下标，Python 3.9 及以下无法解析）。
+#
+# macOS 注意：系统自带的 `python` 是 2.7，必须用 `python3` 或虚拟环境，
+# 详见 README「运行」章节。
+
+# ---- Web 框架 ----
 fastapi==0.128.2
-numpy==2.3.5
-numpy-financial==1.0.0
-openpyxl==3.1.5
-pandas==3.0.0
-pandas-datareader==0.10.0
-pdfplumber==0.11.9
-pydantic==2.12.5
-pydantic_core==2.41.5
-PyMuPDF==1.26.7
-pytest==9.0.2
-python-docx==1.2.0
-reportlab==4.4.9
-shapely==2.1.2
-SQLAlchemy==2.1.4
 uvicorn==0.40.0
+pydantic==2.12.5           # pydantic_core 由其自动带入，无需显式声明
+
+# ---- 数据库 ----
+SQLAlchemy==2.1.4
+
+# ---- 图纸解析（Tier A 库，需求 4 指定）----
+ezdxf==1.4.4              # DWG/DXF 矢量解析
+PyMuPDF==1.26.7           # PDF 文本层与坐标提取（import fitz）
+pdfplumber==0.11.9        # PDF 表格与字符级定位
+
+# ---- 导出 ----
+reportlab==4.4.9          # PDF 导出
+python-docx==1.2.0        # Word(DOCX) 导出
+Pillow==12.1.0            # JPG 导出（STAGE 3 必需）
+openpyxl==3.1.5           # Excel 导出
+
+# ---- 数据处理 ----
+numpy==2.3.5
+pandas==3.0.0
+
+# ---- 报告第 08 章技术选型中指定、当前 POC 阶段尚未实际调用----
+# 保留安装以符合选型契约；后续模块（空间拓扑分析、财务测算、
+# 批量数据源接入）落地时才会用到。
+shapely==2.1.2
+duckdb==1.5.6
+numpy-financial==1.0.0
+pandas-datareader==0.10.0
+
+# ---- 测试 ----
+pytest==9.0.2

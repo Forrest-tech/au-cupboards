@@ -5,20 +5,69 @@
 
 按需求分析报告第 14 章技术选型实现，**不引入** Frappe / NocoBase / DMS / Temporal。
 
+**环境要求：Python 3.11 或更高。** 本项目使用 `X | None` 联合类型语法，
+3.9 及以下无法解析。
+
+> **macOS 用户注意**：系统自带的 `python` 是 **Python 2.7**，直接用会报
+> `No module named uvicorn`。请先按下面步骤配置环境。
+
+## 安装与运行
+
+### macOS（推荐用 Homebrew装 Python 3）
+
 ```bash
+# 1) 若还没有 Homebrew，先装
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# 2) 装 Python 3
+brew install python@3.12
+
+# 3) 克隆并进入项目
 git clone https://github.com/Forrest-tech/au-cupboards.git
 cd au-cupboards
 
-# 1) 依赖
-cd backend && pip install -r ../requirements.txt
+# 4) 建虚拟环境（隔离，避免污染系统 Python）
+python3 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 
-# 2) 启动（前端与 API 同源：http://127.0.0.1:8000）
+# 5) 装依赖（务必在仓库根目录执行）
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# 6) 启动（前端与API 同源）
+cd backend
 python -m uvicorn app.api.server:app --host 0.0.0.0 --port 8000
 
-# 3) 验证
-curl http://127.0.0.1:8000/api/health
-python -m pytest tests/ -q        # 102 项
+# 7) 浏览器打开
+#    http://127.0.0.1:8000
 ```
+
+### Linux / Windows
+
+步骤同上，只是第 2 步换成安装 Python 3.11+，第 4 步的虚拟环境激活命令为：
+
+- Linux / macOS：`source .venv/bin/activate`
+- Windows PowerShell：`.venv\Scripts\Activate.ps1`
+
+### 验证安装
+
+```bash
+# 后端健康检查（DWG 后端未装时 dwg_ready 为 false，不影响使用）
+curl http://127.0.0.1:8000/api/health
+
+# 测试（应输出 111 passed）
+cd backend && python -m pytest tests/ -q
+```
+
+### 常见问题
+
+| 报错 | 原因 | 解决 |
+|------|------|------|
+| `python: command not found` | macOS 只有 `python3` | 用 `python3`，或先激活虚拟环境 |
+| `No module named uvicorn` | 装到了 Python 2.7 或没装依赖 | `python3 -m pip install -r requirements.txt` |
+| `ModuleNotFoundError: PIL` | 用了旧的根目录 requirements | 重新 `pip install -r requirements.txt`（已含 Pillow） |
+| `SyntaxError` on `X \| None` | Python < 3.10 | 升级到 3.11+ |
+| `Address already in use` | 8000 端口被占 | `--port 8001` |
 
 DWG 解析为可选能力，未装后端时系统照常工作，详见下方「DWG 链路状态」。
 
@@ -78,20 +127,66 @@ DWG 解析为可选能力，未装后端时系统照常工作，详见下方「D
 
 ---
 
-## 运行
+## 命令行用法
+
+完整安装步骤见上文「安装与运行」。以下命令均需先激活虚拟环境，
+且除`uvicorn` 外都在 `backend/` 目录下执行。
+
+### 启动 Web 服务
 
 ```bash
-cd backend
-pip install -r ../requirements.txt
-
-# 启动服务（含前端 http://127.0.0.1:8000）
 python -m uvicorn app.api.server:app --host 0.0.0.0 --port 8000
+# 浏览器打开 http://127.0.0.1:8000
+```
 
-# 端到端流水线（命令行）
-python -m app.cli run /workspace/var/extract/plan.pdf
+### CLI
 
-# 测试（102 项）
-python -m pytest tests/ -q
+不想开浏览器时，可直接用命令行完成解析与导出：
+
+```bash
+# 环境自检（Python 版本 / 规则版本 / DWG 后端）
+python -m app.cli health
+
+# 端到端流水线：解析 → 匹配柜型 → 导出五种格式
+python -m app.cli run ~/Downloads/COMBINED\ ARCHITECTURAL\ DRAWINGS.pdf
+
+# 查看某次解析的逐单元明细（含 DRY/WET 面积、柜型、尺寸、无障碍标记）
+python -m app.cli units 1
+
+# 列出柜型库全部变体
+python -m app.cli variants
+```
+
+`run` 的实际输出：
+
+```
+================================================================
+  解析完成：plan.pdf
+================================================================
+  单元总数    : 44（+2 CO-LIVING，共 46 空间）
+  按楼层      : GROUND=8  L1=11  L2=11  L3=11  L4=3
+  按柜型      : CP-QUAD-1x4×1  CP-QUAD-2x2-ACC×4  CP-TRI-1x3×39
+  按户型      : CO-LIVING×2  DOUBLE×43  SINGLE×1
+  交叉验证    : AGREE（一致率 100%）
+  合规错误    : 0    警告: 0
+  平均置信度  : 0.986
+
+  导出文件：
+    json   → .../selection-20261009-044805.json
+    excel  → .../selection-20261009-044805.xlsx
+    pdf    → .../selection-20261009-044805.pdf
+    word   → .../selection-20261009-044805.docx
+    jpg    → .../selection-20261009-044805.jpg
+    jpg    → .../selection-20261009-044805-p2.jpg
+```
+
+> `run` 目前只接受 PDF。传DWG 会返回明确提示并指向
+> `/api/parse?kind=cupboard`（DWG 走柜型库入库流程，不进本流水线）。
+
+### 测试
+
+```bash
+python -m pytest tests/ -q# 111 passed
 ```
 
 ### DWG 支持（可选）
@@ -151,14 +246,16 @@ backend/app/
   services/stage3.py           STAGE 3：PDF / Word / JPG / Excel / JSON 导出
   services/meter_requirement.py表位需求推导（WET 面积分档）
   services/cupboard_seed.py    柜型库种子数据
-  services/pipeline.py         端到端流水线 + 落库
-  api/server.pyFastAPI 接口
+  services/pipeline.py端到端流水线 + 落库
+  api/server.py                FastAPI 接口（14 个端点）
+  cli.py                       命令行入口（health/run/units/variants）
 frontend/index.html            三栏 UI（树导航 + 原图预览 + 楼层×柜型矩阵）
 backend/tests/
-  test_dwg.pyDWG 降级链 + 完整性校验（34 项）
+  test_dwg.py                  DWG 降级链 + 完整性校验（34 项）
   test_core_assumptions.py     核心假设（25 项）
   test_regression_74keeler.py  实测踩坑固化 + 44 户口径锁定（22 项）
-  test_api_e2e.py端到端 API 行为（21 项）
+  test_api_e2e.py              端到端 API 行为（21 项）
+  test_cli.py命令行冒烟（9 项）
   fixtures/
     cupboard_library_design.dxf  自建柜型库 DXF（正向）
     dwg_real_acad2000.dwg        真实 AutoCAD 2000（正向）
@@ -300,6 +397,26 @@ modelspace 只有 4 个实体（3× INSERT + 1× TEXT）。只统计 modelspace 
 这种自相矛盾的用户可见消息。现改为结构化 `IntegrityReport`，
 `notes`（说明）与 `issues`（问题）分开，只有 `issues` 进 `error`。
 
+### 14. README 里的命令必须实跑验证
+
+用户会照着 README 敲命令。实测踩坑：README 写了 `python -m app.cli run`，
+但 `app/cli.py` **根本不存在**；补写后又引用了一批不存在的字段 ——
+`Unit.area_dry_m2`（实际 `area_m2`）、`CupboardVariant.code`（实际 `variant_code`）、
+`.width/.height/.depth`（实际 `.w/.h/.d`）、`Selection.job_id`（该列不存在）、
+`JobStatus.DONE`（枚举实际是 `QUEUED/RUNNING/NEEDS_REVIEW/CONFIRMED/FAILED`）。
+
+这些错误只有运行时才暴露。现已：
+- 补齐 `app/cli.py`（`health` / `run` / `units` / `variants` 四个子命令，全部实跑验证）
+- 新增 `test_cli.py` 9 项冒烟测试，把字段名钉死
+- 目录结构与依赖清单逐项核对（发现根 `requirements.txt` 漏了 `Pillow`，
+  照原README 装会`ModuleNotFoundError: PIL`，已合并为单一权威清单）
+
+### 15. 两份 requirements.txt 必须合并
+
+根目录与 `backend/` 各有一份，内容曾不一致（根目录漏 `Pillow`，而 JPG 导出
+依赖它）。现在根目录是唯一权威来源，`backend/requirements.txt` 改为
+`-r ../requirements.txt` 引用。类似 `python -m app.cli run` 的路径陷阱要一并避免。
+
 ---
 
 ## API
@@ -343,7 +460,7 @@ POST   /api/jobs/{id}/corrections      # 人工修正字典
 | | 上传图纸 → 预览 → 挂载树节点 → 自动解析楼层与 units | ✅ |
 | **4** 技术要求 | 成熟算法/API key | ✅（ezdxf/PyMuPDF/pdfplumber/LibreDWG，无 AI 依赖） |
 | | 100% 识别 DWG/PDF/JPG | ✅ PDF 100%（44 户全对）；✅ DWG 已用真实 AutoCAD 2000/2018 验证；⚠️ JPG 走 OCR 指引 |
-| | 完整测试通过后交付 | ✅ **102 项**测试通过 |
+| | 完整测试通过后交付 | ✅ **111 项**测试通过 |
 | | 本地使用 | ✅ 单命令启动 |
 | | 代码保存在 GitHub | ⏳ **待推送凭据**（本地已提交，34 个文件） |
 
@@ -430,12 +547,13 @@ modelspace 几何全丢，**但退出码是 0**，ezdxf 也能"成功"读出文�
 
 ```bash
 cd backend && python -m pytest tests/ -q
-# 102 passed
+# 111 passed
 ```
 
 | 文件 | 项数 | 覆盖 |
 |------|------|------|
 | `test_dwg.py` | 34 | DWG 降级链、完整性分级、block 遍历（需求 2/4） |
+| `test_cli.py` | 9 | 命令行入口冒烟（字段名回归） |
 | `test_core_assumptions.py` | 25 | 核心假设（坐标法、规范校验、配置外置） |
 | `test_regression_74keeler.py` | 22 | 实测踩坑固化 + 44 户口径锁定 |
 | `test_api_e2e.py` | 21 | 端到端 HTTP 行为（需求 1/2/3逐条） |

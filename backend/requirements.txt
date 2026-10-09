@@ -1,19 +1,8 @@
-duckdb==1.5.6
-ezdxf==1.4.4
-fastapi==0.128.2
-numpy==2.3.5
-numpy-financial==1.0.0
-openpyxl==3.1.5
-pandas==3.0.0
-pandas-datareader==0.10.0
-pdfplumber==0.11.9
-Pillow==12.1.0
-pydantic==2.12.5
-pydantic_core==2.41.5
-PyMuPDF==1.26.7
-pytest==9.0.2
-python-docx==1.2.0
-reportlab==4.4.9
-shapely==2.1.2
-SQLAlchemy==2.1.4
-uvicorn==0.40.0
+# 本文件已合并到仓库根目录的 requirements.txt —— 那是唯一权威来源。
+#
+# 保留此文件仅为兼容早期文档；请改用：
+#     pip install -r requirements.txt          # 从仓库根目录执行
+#
+# 历史上两份清单曾不一致（根目录漏了 Pillow，导致 JPG 导出报 ImportError），
+# 现已统一。
+-r ../requirements.txt
