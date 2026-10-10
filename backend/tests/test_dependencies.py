@@ -77,6 +77,7 @@ class TestRequirementsFile:
         "fastapi", "uvicorn", "sqlalchemy", "ezdxf", "pymupdf",
         "reportlab", "python-docx", "pillow", "openpyxl",
         "numpy", "pandas", "pytest", "python-multipart",
+        "matplotlib", "httpx",
     ])
     def test_core_dependency_is_declared(self, dist):
         assert dist in _declared(), f"{dist} 未在 requirements.txt 中声明"
@@ -87,6 +88,50 @@ class TestRequirementsFile:
         assert "python-multipart" in text
         assert "python-multipart" in text.split("python-multipart")[0].rsplit(
             "\n#", 2)[-1] or True  # 宽松：只要求有注释说明
+
+    def test_no_comment_butts_against_version(self):
+        """`==3.10.8# 注释` 这种写法会让 pip 直接报 Invalid requirement。
+
+        实测踩坑：加 matplotlib 时在版本号后紧贴 `#` 写了行内注释，
+        开发机因为依赖早就装好、全程跳过安装而没暴露，
+        用户在干净 venv 里跑 setup.sh 当场崩：
+
+            ERROR: Invalid requirement: 'matplotlib==3.10.8# 柜型block → JPG 渲染'
+
+        注意这行**静态扫描查不出来** —— 上面 _declared() 用
+        split("#", 1)[0] 剥离注释，恰好把错误的部分一起切掉了，
+        看起来完全正常。只有真的交给 pip 解析才会炸。
+        """
+        offenders = []
+        for i, raw in enumerate(REQ.read_text().splitlines(), 1):
+            s = raw.strip()
+            if not s or s.startswith(("#", "-r")):
+                continue
+            if re.search(r"[=<>!~0-9][#;]", s):
+                offenders.append(f"第 {i} 行: {s}")
+        assert not offenders, (
+            "版本号与注释/分号之间缺少空格，pip 会报 Invalid requirement：\n  "
+            + "\n  ".join(offenders)
+        )
+
+    def test_pip_can_actually_parse_the_file(self):
+        """真的让 pip 解析一次 —— 格式错误的最终裁决权交给 pip 自己。
+
+        用 --dry-run --no-deps：不下载、不安装、不改环境，
+        但走完整的 requirement 解析逻辑（含行内注释、版本说明符、
+        环境标记），任何格式错误都会在这一步暴露。
+        """
+        r = subprocess.run(
+            [sys.executable, "-m", "pip", "install",
+             "--dry-run", "--no-deps", "--no-index", "-r", str(REQ)],
+            capture_output=True, text=True, cwd=str(ROOT),
+        )
+        assert r.returncode == 0, (
+            "pip 无法解析 requirements.txt：\n" + (r.stderr or r.stdout)[-500:]
+        )
+        assert "Invalid requirement" not in (r.stdout + r.stderr), (
+            "pip 报 Invalid requirement：\n" + (r.stdout + r.stderr)[-500:]
+        )
 
 
 # ---------------------------------------------------------------- 实际使用
