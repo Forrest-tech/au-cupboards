@@ -236,6 +236,60 @@ def test_variant_crud_lifecycle(client):
     assert not any(v["id"] == vid for v in client.get("/api/variants").json())
 
 
+def test_variant_rename_keeps_positions(client):
+    """改名**只改名字，不能顺带把套数改错**。
+
+    实测踩坑：复用通用端点 ``PATCH /api/variants/{id}`` 改名，
+    它会用 ``rows × cols`` 覆写 ``positions_total`` —— 但网格容量
+    不是套数（真实图纸里13 Units 的柜网格是 5×4=20，只填了 13 套）。
+    走它改个名字，套数就从 13 变成 20 了。所以单开了
+    ``PATCH /api/variants/{id}/name``，这里守住这条边界。
+    """
+    r = client.post("/api/variants",
+                    json={"code": "TEST-RENAME-2x3", "rows": 2, "cols": 3})
+    assert r.status_code in (200, 409), r.text
+    vid = r.json()["id"] if r.status_code == 200 else next(
+        v["id"] for v in client.get("/api/variants").json()
+        if v["code"] == "TEST-RENAME-2x3")
+
+    before = next(v for v in client.get("/api/variants").json() if v["id"] == vid)
+    up = client.patch(f"/api/variants/{vid}/name", json={"name": "改过的名字"})
+    assert up.status_code == 200, up.text
+    assert up.json()["name"] == "改过的名字"
+
+    after = next(v for v in client.get("/api/variants").json() if v["id"] == vid)
+    assert after["label"] == "改过的名字", "改名没被API 透出来"
+    # 关键断言：套数、尺寸、排布都不能动
+    assert after["positions"] == before["positions"], (
+        f"改名把套数改了：{before['positions']} -> {after['positions']}")
+    assert (after["rows"], after["cols"]) == (before["rows"], before["cols"])
+    assert (after["w"], after["h"]) == (before["w"], before["h"])
+
+    # 空名要拒绝
+    assert client.patch(f"/api/variants/{vid}/name", json={"name": "  "}).status_code == 400
+    assert client.patch("/api/variants/999999/name",
+                        json={"name": "x"}).status_code == 404
+
+    client.delete(f"/api/variants/{vid}")
+
+
+def test_variant_label_survives_in_tree_data(client):
+    """改名要能反映到列表接口，前端树靠它显示自定义名。"""
+    r = client.post("/api/variants",
+                    json={"code": "TEST-LABEL-X", "rows": 1, "cols": 2})
+    assert r.status_code in (200, 409), r.text
+    vid = r.json()["id"] if r.status_code == 200 else next(
+        v["id"] for v in client.get("/api/variants").json()
+        if v["code"] == "TEST-LABEL-X")
+
+    assert client.patch(f"/api/variants/{vid}/name",
+                        json={"name": "A 型"}).status_code == 200
+    got = next(v for v in client.get("/api/variants").json() if v["id"] == vid)
+    assert got["label"] == "A 型"
+
+    client.delete(f"/api/variants/{vid}")
+
+
 def test_variant_in_use_cannot_be_deleted(client):
     """已选用的柜型不允许直接删（保护已生成的清单）。"""
     units = client.get("/api/units", params={"job_id": 1}).json()

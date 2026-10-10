@@ -144,6 +144,61 @@ class TestRenderConstants:
         """字节阈值现在只作极端兜底，范围放宽即可。"""
         assert 1_000 < MIN_IMAGE_BYTES < 60_000
 
+    def test_white_border_is_trimmed(self, tmp_path):
+        """渲完必须裁掉四周纯白边 —— 用户诉求「留白太多了」。
+
+        实测踩坑：画布尺寸按 bbox 比例算（见 ``_pick_size``），而 bbox
+        里混着柜外的标注/图框，柜体本身很窄，于是算出的画布两侧各空掉
+        一大条。3 Units 那个柜（915×1750）原本渲成 440×619，
+        内容只占中间一小条。
+        """
+        from PIL import Image
+        from app.parsers.cupboard_render import _trim_white_border
+
+        p = tmp_path / "pad.jpg"
+        # 造一张四周有大白边、只有中间一小块内容的图
+        im = Image.new("RGB", (400, 300), "white")
+        for x in range(180, 220):
+            for y in range(120, 180):
+                im.putpixel((x, y), (0, 0, 0))
+        im.save(p, format="JPEG", quality=95)
+
+        _trim_white_border(p)
+
+        out = Image.open(p)
+        w, h = out.size
+        # 内容宽约 40px、高约 60px，留 1.2% 内边距（按短边 300 算约 3px）
+        assert w <= 60, f"宽没裁下来：{w}px（内容只40px宽）"
+        assert h <= 80, f"高没裁下来：{h}px（内容只 60px 高）"
+        # 裁完内容仍要在，别把内容也削没了
+        assert w >= 40 and h >= 55, f"裁过头了，把内容削掉了：{w}x{h}"
+
+    def test_trim_keeps_already_tight_image(self, tmp_path):
+        """内容已经贴边的图不该被再动一次（否则反复裁会越裁越小）。"""
+        from PIL import Image
+        from app.parsers.cupboard_render import _trim_white_border
+
+        p = tmp_path / "tight.jpg"
+        im = Image.new("RGB", (200, 200), "white")
+        for x in range(0, 200):
+            im.putpixel((x, 100), (0, 0, 0))
+        for y in range(0, 200):
+            im.putpixel((100, y), (0, 0, 0))
+        im.save(p, format="JPEG", quality=95)
+
+        _trim_white_border(p)
+
+        assert Image.open(p).size == (200, 200), "贴边的图被改了尺寸"
+
+    def test_trim_never_raises_on_garbage(self, tmp_path):
+        """裁剪失败不能影响渲染结果 —— 图已经渲出来了，只是留白多一点。"""
+        from app.parsers.cupboard_render import _trim_white_border
+
+        p = tmp_path / "notanimage.jpg"
+        p.write_bytes(b"definitely not a jpeg")
+        _trim_white_border(p)          # 不能抛异常
+        assert p.read_bytes() == b"definitely not a jpeg", "文件被改动了"
+
 
 class TestThumbEndpointSecurity:
     """缩略图端点不接受路径穿越。"""

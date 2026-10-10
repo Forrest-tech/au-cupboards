@@ -281,6 +281,62 @@ def _looks_blank(path: Path) -> bool:
     return edge / len(dark) > 0.97
 
 
+def _trim_white_border(path: Path, pad_ratio: float = 0.012) -> None:
+    """裁掉渲染图四周的纯白边，只留一点点内边距。
+    原地改写文件。
+
+    为什么需要它
+    ------------
+    用户诉求：「这个留白太多了，只需要显示实际的尺寸」。
+
+    原来的画布尺寸是按 **bbox 比例** 算的（见 :func:`_pick_size`），
+    但 ezdxf 的 bbox 里往往混进了柜体外的标注、图框、引线，
+    而柜体本身很窄 —— 于是算出来的画布两侧各空掉一大条。
+    实测 3Units 那个柜（915×1750）渲出来 440×619 像素，
+    内容只占中间一小条，上下左右全是白。
+
+    为什么不直接改 `_pick_size`
+    --------------------------
+    bbox 本身算得没错（含标注是有意为之，标注能说明柜型）。
+    真正该做的是**渲完之后按实际着墨像素裁**，与几何 bbox 解耦 ——
+    这样不管 bbox 里混进什么东西，成图都紧贴内容。
+    """
+    try:
+        from PIL import Image
+    except Exception:
+        return
+    try:
+        with Image.open(path) as im:
+            im = im.convert("L")
+            # 阈值 245：JPEG 压缩会在纯白区产生 235~250 的轻微噪点，
+            # 用 255 去比会把噪点当内容，导致裁不掉。
+            #
+            # 映射成「**白=0、黑=255**」后直接 getbbox()：它找的是
+            # 非零像素区域，正好就是有内容的部分。
+            #（不要再invert —— 那会把大片白底当成内容，反而裁不动。）
+            mask = im.point(lambda v: 0 if v > 245 else 255, "L")
+            bbox = mask.getbbox()
+            if not bbox:
+                return
+            W, H = im.size
+            x0, y0, x1, y1 = bbox
+            if x1 <= x0 or y1 <= y0:
+                return
+            # 四周各留一点点内边距，别让线条紧贴画布边缘（印刷观感）。
+            # 按**短边**算一个统一的 pad，四边一致 —— 分边算会出现
+            # 上边有留白、左边贴死的不对称情况。
+            m = int(min(W, H) * pad_ratio)
+            nx0, ny0 = max(0, x0 - m), max(0, y0 - m)
+            nx1, ny1 = min(W, x1 + m), min(H, y1 + m)
+            if (nx1 - nx0) >= W and (ny1 - ny0) >= H:
+                return   # 已经贴满边，裁了也没变化，别白重存一遍
+            im.crop((nx0, ny0, nx1, ny1)).convert("RGB").save(
+                path, format="JPEG", quality=JPEG_QUALITY)
+    except Exception:
+        # 裁剪失败不是致命错误 —— 图已经渲出来了，只是留白多一点
+        pass
+
+
 def _pick_size(bbox, width: int) -> tuple[int, int]:
     """按 bbox 比例算画布尺寸，并夹在上限内。
 
@@ -712,6 +768,11 @@ def render_cupboard_regions(
             res.error = "渲染结果疑似空白（画面几乎无内容），已丢弃"
             results.append(res)
             continue
+
+        # 裁掉四周纯白边 —— 用户诉求「留白太多了，只需要显示实际尺寸」。
+        # 放在空白检测**之后**：先确认不是白图，再裁，顺序反了会把
+        # 「本来就空」的图裁成更小的空白图。
+        _trim_white_border(fpath)
 
         w, h = cup.bbox_mm
         res.ok = True

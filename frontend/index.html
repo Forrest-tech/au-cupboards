@@ -184,6 +184,13 @@ main{display:flex;height:calc(100% - 52px)}
    才是真正会被选中的叶子节点，光靠 lv2 的灰色会显得像分类标题。 */
 .node.lv2.lv3{padding-left:54px;color:var(--fg)}
 .node.lv2.lv3:hover{background:#f2f6fb}
+/* 树节点的编辑按钮（改名 / 删除）—— 默认藏起来，hover 整行才出现，
+   免得密密麻麻的小图标干扰阅读树结构 */
+.renam{opacity:0;border:0;background:transparent;cursor:pointer;padding:0 3px;
+  font-size:12px;line-height:1;color:var(--dim);transition:opacity .12s}
+.node:hover>.renam{opacity:1}
+.renam:hover{color:var(--accent)}
+.renam.danger:hover{color:#dc2626}
 
 /* ---------- 中栏 ---------- */
 .mid-bar{
@@ -452,6 +459,7 @@ const I18N = {
     'lib.selall': '全选', 'lib.selnone': '全不选', 'lib.nosel': '没有勾选任何柜型',
     'lib.units': '套', 'lib.rename': '修改名称',
     'lib.del': '删除该柜型', 'lib.deldone': '已删除', 'lib.delfail': '删除失败',
+    'lib.delone': '删除该柜型', 'lib.delfile': '删除该图纸下的全部柜型',
     'lib.mginv': '反向选择', 'lib.clear': '清空解析结果',
     'lib.empty': '柜型库是空的', 'lib.nodwg': '没有从 DWG 解析进来的柜型',
     'mid.none': '未选择文件', 'mid.ph': '上传建筑图纸后在此原样预览',
@@ -518,6 +526,7 @@ const I18N = {
     'lib.selall': 'Select all', 'lib.selnone': 'Clear', 'lib.nosel': 'No cupboard selected',
     'lib.units': 'units', 'lib.rename': 'Rename',
     'lib.del': 'Delete this cupboard', 'lib.deldone': 'Deleted', 'lib.delfail': 'Delete failed',
+    'lib.delone': 'Delete this cupboard', 'lib.delfile': 'Delete all cupboards in this drawing',
     'lib.mginv': 'Select the rest', 'lib.clear': 'Clear parsed',
     'lib.empty': 'Library is empty', 'lib.nodwg': 'No DWG-derived cupboards',
     'mid.none': 'No file selected', 'mid.ph': 'Building drawing will be previewed here',
@@ -585,6 +594,10 @@ const S = {          // 全局状态
   apiver: '2',
   projects: [], job: null, curBuilding: null, curPage: 0,
   variants: [], treeSel: null,
+  // 柜型库树里「哪些 DWG 文件是展开的」——按 fileKey 记忆。
+  // 刻意**不放** treeSel：展开和选中是两个独立状态，混在一起会导致
+  // 点子节点后根节点判定为「未展开」，整棵子树自己收起来。
+  lfOpen: {},
   openDrawing: null, // 哪张图纸处于展开状态（drawing id）
   fold: {},          // 楼的折叠状态：key 'b<buildingId>' -> true=折叠
   parsing: false,    // 正在解析 —— 用于禁止关闭弹窗
@@ -868,6 +881,10 @@ function libraryGroups() {
 
 function renderTreeLibrary() {
   const groups = libraryGroups();
+  // 展开态字典必须先兜住：S 是普通对象，S.lfOpen 在用户点开任何节点
+  // 之前是 undefined，直接读会抛
+  // "Cannot read properties of undefined"（实测：切到柜型库时树整个不渲染）。
+  S.lfOpen = S.lfOpen || {};
   let h = `<div class="sec">${t('tree.library')}</div>`;
   if (!groups.length) {
     h += `<div class="node lv1" style="color:var(--dim)">${t('dwg.empty')}</div>`;
@@ -875,31 +892,48 @@ function renderTreeLibrary() {
     return;
   }
   for (const f of groups) {
-    const fsel = S.treeSel === 'f:' + f.fileKey ? ' on' : '';
-    const fopen = S.treeSel === 'f:' + f.fileKey;
+    // 「展开」和「选中」必须是**两个独立状态**。
+    //
+    // 实测 bug（用户报「点一下左侧树就自动收起来了」）：早先把展开
+    // 也存在 S.treeSel 上，于是点子节点时 treeSel 从 'f:file' 变成
+    // 'file#7'，重渲染时根节点 fopen 判false -> 整个子树收起。
+    // 现在展开态放S.lfOpen（按 fileKey 记忆），treeSel 只管高亮。
+    const fopen = !!S.lfOpen[f.fileKey];
+    const fsel = fopen && isSelUnder(f.fileKey) ? ' on' : '';
     h += `<div class="node lv1${fsel}" data-lf="${esc(f.fileKey)}">
-      <span class="tw">▸</span><span class="ico">⊞</span>
-      <span class="nm" title="${esc(f.name)}">${esc(f.name)}</span>
+      <span class="tw">${fopen ? '▾' : '▸'}</span><span class="ico">⊞</span>
+      <span class="nm" title="${esc(f.name)}">${esc(dispName(f.fileKey))}</span>
       <span class="ct">${f.count}</span>
       <button class="renam" data-rename="${esc(f.fileKey)}"
-        title="${t('lib.rename')}">✎</button></div>`;
+        title="${t('lib.rename')}">✎</button>
+      <button class="renam danger" data-del-file="${esc(f.fileKey)}"
+        title="${t('lib.delfile')}">🗑</button></div>`;
     if (fopen) {
       for (const u of f.units) {
         // 只有一个摆法时不加后缀；有多个时逐个列成
         // 「6 Units - A」「6 Units - B」…（「13 Units」有三个）
         const rows = u.labels.length === 1
-          ? [{ key: u.key, label: `${u.n} ${t('lib.units')}`, ct: 1 }]
+          ? [{ key: u.key, label: `${u.n} ${t('lib.units')}`, ct: 1, v: u.labels[0].v }]
           : u.labels.map(x => ({
             key: u.key + '@' + x.v.id,
             label: `${u.n} ${t('lib.units')}${x.suffix}`,
             ct: null,
+            v: x.v,
           }));
         for (const r of rows) {
           const on = S.treeSel === r.key ? ' on' : '';
           const ct = r.ct === null ? '' : `<span class="ct">${r.ct}</span>`;
+          const disp = vLabel(r.v, r.label);
+          // 每个变体都能改名 / 删除（用户诉求：「有编辑的功能，
+          // 可以删除元素，或者重命名」）
           h += `<div class="node lv2${on}${r.ct === null ? ' lv3' : ''}"
-            data-lg="${esc(r.key)}" data-vid="${esc(r.key.split('@')[1] || '')}">
-            <span class="nm">${esc(r.label)}</span>${ct}</div>`;
+            data-lg="${esc(r.key)}" data-vid="${esc(r.v.id)}">
+            <span class="nm">${esc(disp)}</span>${ct}
+            <button class="renam" data-rename-vid="${esc(r.v.id)}"
+              data-vname="${esc(disp)}" title="${t('lib.rename')}">✎</button>
+            <button class="renam danger" data-del-vid="${esc(r.v.id)}"
+              data-vname="${esc(disp)}" title="${t('lib.delone')}">🗑</button>
+          </div>`;
         }
       }
     }
@@ -909,31 +943,157 @@ function renderTreeLibrary() {
   bindTreeRename();
 }
 
-/** 重命名 DWG 节点 —— 用户要求「根目录的名字就是 dwg 文件的名字（可以修改）」。
- *  改名只改显示名，**不动原文件**：柜型图已经渲成 JPG 存库了，
- *  原DWG 改了名反而对不上。名字存在 sessionStorage，刷新后仍在。 */
+/** 柜型的用户自定义名（后端 ``meter_counts.label``），没有则回退默认标签 */
+function vLabel(v, dflt) {
+  return (v && v.label) || dflt;
+}
+
+/** 尺寸显示：DWG 实测值是浮点，直接印出来是
+ *  ``864.9999999999998`` 这种噪声（用户截图里看到的就是它）。
+ *  取整到 1mm —— 实测尺寸本身精度远不到 1mm。
+ */
+function fmtMM(x) {
+  if (x === null || x === undefined || x === '') return '—';
+  const n = Math.round(Number(x));
+  return Number.isFinite(n) ? String(n) : '—';
+}
+
+/** 当前选中项是否挂在某个文件节点下 —— 用来给展开的根节点加高亮 */
+function isSelUnder(fileKey) {
+  return S.treeSel === 'f:' + fileKey
+      || String(S.treeSel || '').startsWith(fileKey + '#');
+}
+
+/** 树节点的编辑入口：**重命名 + 删除**（文件级与变体级各一套）。
+ *
+ *  重命名只改显示名，不动原文件 —— 柜型图已渲成 JPG 存库，
+ *  原 DWG 改名反而对不上。
+ *  文件级名字存 sessionStorage；变体级改名走后端 PATCH，
+ *  因为变体要能持久化，不能只活在当前会话里。
+ */
 function bindTreeRename() {
+  // ---- 文件级重命名 ----
   $$('#tree [data-rename]').forEach(b => {
     b.onclick = ev => {
       ev.stopPropagation();
       const key = b.dataset.rename;
-      const cur = (S.renames || {})[key] || key;
+      const cur = dispName(key);
       const name = prompt(
         LANGNOW === 'zh' ? '修改显示名称：' : 'Rename display name:', cur);
       if (name === null) return;
       const clean = String(name).trim();
       S.renames = S.renames || {};
-      if (!clean || clean === key) delete S.renames[key];
+      if (!clean || clean === cur) delete S.renames[key];
       else S.renames[key] = clean;
       try {
         sessionStorage.setItem('cupRename', JSON.stringify(S.renames));
       } catch (e) { /* 隐私模式下写不了，忽略 */ }
       renderTree();
-      // 正在看的那个分组要刷新标题
-      if (S.treeSel === 'f:' + key) showUnitsGroup(key + '#0', true);
-      else if (S.treeSel?.startsWith(key + '#')) showUnitsGroup(S.treeSel, true);
+      if (isSelUnder(key)) showUnitsGroup(S.treeSel, true);
     };
   });
+
+  // ---- 文件级删除：该图纸下所有柜型变体 ----
+  $$('#tree [data-del-file]').forEach(b => {
+    b.onclick = ev => {
+      ev.stopPropagation();
+      const key = b.dataset.delFile;
+      const f = libraryGroups().find(x => x.fileKey === key);
+      const n = f ? f.count : 0;
+      if (!confirm((LANGNOW === 'zh' ? '删除该图纸下的全部柜型？'
+                    : 'Delete all cabinets from this drawing?')
+                  + `\n${dispName(key)}\n${n} variants`)) return;
+      delVariantsBySource(key);
+    };
+  });
+
+  // ---- 变体级重命名（持久化到后端）----
+  $$('#tree [data-rename-vid]').forEach(b => {
+    b.onclick = ev => {
+      ev.stopPropagation();
+      const id = +b.dataset.renameVid;
+      const old = b.dataset.vname || '';
+      const name = prompt(
+        LANGNOW === 'zh' ? '修改柜型名称：' : 'Rename variant:', old);
+      if (name === null) return;
+      const clean = String(name).trim();
+      if (!clean || clean === old) return;
+      renameVariant(id, clean);
+    };
+  });
+
+  // ---- 变体级删除 ----
+  $$('#tree [data-del-vid]').forEach(b => {
+    b.onclick = ev => {
+      ev.stopPropagation();
+      const id = +b.dataset.delVid;
+      const nm = b.dataset.vname || '';
+      if (!confirm((LANGNOW === 'zh' ? '删除这个柜型？'
+                    : 'Delete this variant?') + `\n${nm}`)) return;
+      delVariant(id);
+    };
+  });
+}
+
+/** 变体改名 —— 持久化到后端。
+ *
+ *  走 ``PATCH /api/variants/{id}/name`` 而不是通用的
+ *  ``PATCH /api/variants/{id}``：后者会用 rows×cols 覆写套数，
+ *  而网格容量不等于套数（13 Units 的柜网格 5×4=20，只填 13 套），
+ *  走它改个名字会把套数一起改错。
+ */
+async function renameVariant(id, name) {
+  try {
+    await api(`/variants/${id}/name`, { method: 'PATCH', body: { name } });
+    toast((LANGNOW === 'zh' ? '已重命名为 ' : 'Renamed to ') + name, 'ok');
+    await loadVariants();
+    renderTree();
+    if (S.treeSel) showUnitsGroup(S.treeSel, true);
+  } catch (e) { toast('rename failed: ' + e.message, 'err'); }
+}
+
+/** 删单个变体 */
+async function delVariant(id) {
+  try {
+    await api(`/variants/${id}`, { method: 'DELETE' });
+    toast(t('lib.deldone'), 'ok');
+    await loadVariants();
+    // 删掉的正好是当前选中项 -> 落到同组下一个，组空了就清选中
+    if (String(S.treeSel || '').endsWith('@' + id)) {
+      const g = libraryGroups();
+      let next = null;
+      for (const f of g) for (const u of f.units) {
+        if (u.labels.length) {
+          const hit = u.labels.find(x => String(x.v.id) === String(id));
+          if (hit) {
+            const i = u.labels.indexOf(hit);
+            const nx = u.labels[i + 1] || u.labels[i - 1];
+            next = u.labels.length === 1 ? u.key : u.key + '@' + nx.v.id;
+          }
+        }
+      }
+      S.treeSel = next;
+    }
+    renderTree();
+    renderHub();
+    if (S.treeSel) showUnitsGroup(S.treeSel, true);
+  } catch (e) { toast(t('lib.delfail') + ': ' + e.message, 'err'); }
+}
+
+/** 按来源图纸批量删（文件节点上的垃圾桶）*/
+async function delVariantsBySource(fileKey) {
+  const ids = S.variants
+    .filter(v => (v.source_name || v.dwg_name) === fileKey)
+    .map(v => v.id);
+  if (!ids.length) { toast(t('lib.delfail'), 'err'); return; }
+  try {
+    const r = await api('/variants/delete', { method: 'POST', body: { ids } });
+    toast(`${t('lib.deldone')} ${r.deleted ?? ids.length}`, 'ok');
+    S.treeSel = null;
+    await loadVariants();
+    renderTree();
+    renderHub();
+  } catch (e) { toast(t('lib.delfail') + ': ' + e.message, 'err'); }
 }
 
 /** 取显示名（应用过重命名的优先） */
@@ -953,20 +1113,37 @@ function bindTree() {
     }
     if (n.dataset.b) { S.curBuilding = +n.dataset.b; S.treeSel = null; renderTree(); }
     else if (n.dataset.lf) {
-      // 点根节点：展开/收起，默认展开后自动选中第一个 Units
+      // 点根节点：只切换展开，**不动选中态**。
+      //
+      // 实测 bug：以前这里会顺手把 treeSel 设成 'f:key'，而展开态
+      // 又只看 treeSel，于是「点子节点 -> 再点根节点」这种正常操作
+      // 会互相打架。现在展开记在 S.lfOpen，选中分开管。
       const key = n.dataset.lf;
-      if (S.treeSel === 'f:' + key) { S.treeSel = null; renderTree(); return; }
-      S.treeSel = 'f:' + key;
+      S.lfOpen = S.lfOpen || {};
+      S.lfOpen[key] = !S.lfOpen[key];
+      if (S.lfOpen[key] && !isSelUnder(key)) {
+        // 展开时若该文件下没有任何选中项，默认选第一个 Units，
+        // 这样右栏立刻有内容（但不覆盖用户已有的选中）。
+        const g = libraryGroups().find(f => f.fileKey === key);
+        if (g?.units.length) {
+          const u0 = g.units[0];
+          const k0 = u0.labels.length === 1
+            ? u0.key : u0.key + '@' + u0.labels[0].v.id;
+          S.treeSel = k0;
+          renderTree();
+          showUnitsGroup(k0);
+          return;
+        }
+      }
       renderTree();
-      const g = libraryGroups().find(f => f.fileKey === key);
-      if (g?.units.length) showUnitsGroup(g.units[0].key);
       return;
     }
     else if (n.dataset.lg) {
+      // 点子节点：只改选中态，展开态保持不变 —— 树不会自己收起。
       const k = n.dataset.lg;
-      S.treeSel = (S.treeSel === k) ? null : k;
+      S.treeSel = k;
       renderTree();
-      if (S.treeSel) showUnitsGroup(k);
+      showUnitsGroup(k);
     }
     else if (n.dataset.sel) {
       const k = n.dataset.sel;
@@ -1098,7 +1275,7 @@ function renderDetail() {
       <td>${esc(u.unit_type || '—')}</td>
       <td class="mono">${esc(v.code || t('mtx.nomatch'))}</td>
       <td class="mono">${esc(v.grid || '—')}</td>
-      <td class="num" style="font-size:10.5px">${v.w ? `${v.w}×${v.h}×${v.d}` : '—'}</td>
+      <td class="num" style="font-size:10.5px">${v.w ? `${fmtMM(v.w)}×${fmtMM(v.h)}×${fmtMM(v.d)}` : '—'}</td>
       <td style="font-size:10px">
         <span class="tag ${u.confidence_tier}">${t('tier.'+(u.confidence_tier||''))||'—'}</span>
         ${d.bucket ? `<div class="muted">${esc(d.bucket)} ${esc(d.bucket_label || '')}</div>` : ''}
@@ -1229,7 +1406,7 @@ function showUnitsGroup(key, keepScroll) {
       <div class="meta">
         <div class="code mono">${esc(v.code)}</div>
         <div class="dim">${n} ${t('lib.units')}${esc(suffixOf(v))} · ${esc(v.grid || '-')}</div>
-        <div class="dim">${v.w ?? '—'} × ${v.h ?? '—'} × ${v.d ?? '—'} mm ${srcTag}</div>
+        <div class="dim">${fmtMM(v.w)} × ${fmtMM(v.h)} × ${fmtMM(v.d)} mm ${srcTag}</div>
         ${v.description ? `<div class="desc">${esc(v.description)}</div>` : ''}
       </div></div>
       <button class="cupdel" data-del="${v.id}" data-code="${esc(v.code)}"
@@ -1279,7 +1456,7 @@ function showVariantGroup(key) {
       <div class="meta">
         <div class="code mono">${esc(v.code)}</div>
         <div class="dim">${v.positions} ${t('dwg.pos')} · ${esc(v.grid || '-')}</div>
-        <div class="dim">${v.w ?? '—'} × ${v.h ?? '—'} × ${v.d ?? '—'} mm ${srcTag}</div>
+        <div class="dim">${fmtMM(v.w)} × ${fmtMM(v.h)} × ${fmtMM(v.d)} mm ${srcTag}</div>
         ${v.description ? `<div class="desc">${esc(v.description)}</div>` : ''}
       </div></div>
       <button class="cupdel" data-del="${v.id}" data-code="${esc(v.code)}"
@@ -1787,7 +1964,7 @@ function paintRenders() {
       ? `<div class="dim">${LANGNOW==='zh'
           ? `${c.positions_total} ${t('lib.units')}${c.grid_aspect ? ' · ' + c.grid_aspect : ''}`
           : `${c.positions_total} units${c.grid_aspect ? ' · ' + c.grid_aspect : ''}`}
-          ${c.gas_count}/${c.water_count} · ${c.w} × ${c.h} mm</div>`
+          ${c.gas_count}/${c.water_count} · ${fmtMM(c.w)} × ${fmtMM(c.h)} mm</div>`
       : `<div class="dim">${r.entity_count} ${t('dwg.entity')} · ${r.width_mm ?? '—'} × ${r.height_mm ?? '—'} mm</div>`;
     h += `<div class="cupcard has-img${on ? ' on' : ''}" data-sel="${esc(r.block_name)}">
         <div class="thumb"><img loading="lazy" src="/api/thumbs/${esc(r.image_name)}"
@@ -1873,7 +2050,7 @@ async function renderCupboards(storedName) {
     S.detected = cupboards
       ? { detected: (cupboards).length, rejected: (discarded).length,
           sample: discarded.slice(0, 3).map(
-            x => `${x.w}×${x.h}mm —— ${x.reason}`).join(' / ') }
+            x => `${fmtMM(x.w)}×${fmtMM(x.h)}mm —— ${x.reason}`).join(' / ') }
       : { detected: r.detected, rejected: r.rejected,
           sample: (r.rejected_items || []).slice(0, 3).map(
             x => `${x.block_name} —— ${x.reason}`).join(' / ') };
@@ -2104,20 +2281,27 @@ function bindLibraryManage() {
   };
 }
 
-/** 右栏 tab 也按 tab 切换 —— 「楼层×柜型」这类标签对柜型库毫无意义 */
+/** 右栏 tab 也按 tab 切换 —— 「楼层×柜型」这类标签对柜型库毫无意义。
+ *
+ *  用户诉求「去掉右侧这三个 tabs」：柜型库 / 建筑图纸这两个视图里，
+ *  「楼层 × 柜型 / 单元明细 / 溯源诊断」既没内容也不该占一条bar，
+ *  所以整条 ``.rtabs`` 直接隐藏（不是逐个 button 隐藏 —— 那样
+ *  背景色带还在，看着还是像有三个 tab）。
+ */
 function syncTabsForView() {
-  const tabs =$$('.rtabs button');
+  const bar = $('.rtabs');
   if (S.view === 'cupboard') {
-    tabs.forEach(b => b.classList.remove('on'));
+    bar.style.display = 'none';
     $('#rpane').innerHTML = '';   // 由 renderHub 填充
     return;
   }
   if (S.view === 'building') {
-    // 建筑图纸 tab：没有解析结果可看，隐藏三个结果页
-    tabs.forEach(b => b.style.display = 'none');
+    bar.style.display = 'none';
     return;
   }
-  tabs.forEach(b => { b.style.display = ''; b.classList.toggle('on', b.dataset.pane === S.pane); });
+  bar.style.display = '';
+  $$('.rtabs button').forEach(b => b.style.toggleProperty('display', false));
+  $$('.rtabs button').forEach(b => b.classList.toggle('on', b.dataset.pane === S.pane));
 }
 
 /** 统一切换 tab：三个 tab 的树/ 中栏 / 右栏整体切换，避免串内容 */

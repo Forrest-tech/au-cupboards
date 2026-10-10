@@ -628,6 +628,10 @@ def list_variants() -> list[dict[str, Any]]:
                 "cols": v.layout_cols,
                 "positions": v.positions_total,
                 "grid": v.grid_aspect,
+                # 用户自定义显示名（PATCH /api/variants/{id}/name 写入
+                # meter_counts['label']）。没有就用下面的默认描述。
+                # 前端树与标题优先取这个，所以改名刷新后还在。
+                "label": (v.meter_counts or {}).get("label"),
                 "name": f"{v.layout_cols}表位/层 × {v.layout_rows}层",
                 "w": v.w, "h": v.h, "d": v.d,
                 "spacing_h": v.meter_spacing_h,
@@ -875,6 +879,39 @@ def update_variant(variant_id: int, body: VariantIn) -> dict[str, Any]:
             v.variant_code = body.code
         s.commit()
         return {"id": v.id, "code": v.variant_code}
+
+
+class VariantRenameIn(BaseModel):
+    """只改显示名 —— 柜型改名。
+
+    为什么不复用上面的 ``PATCH /api/variants/{id}``：
+    那个端点会用 ``rows × cols`` 覆写 ``positions_total``，而**网格容量
+    不是套数**（真实样本里13 Units 的柜网格是 5×4=20，只填了 13 套）。
+    走它改名会顺手把套数改错，所以单开一个只碰名字的端点。
+    """
+    name: str
+
+
+@app.patch("/api/variants/{variant_id}/name")
+def rename_variant(variant_id: int, body: VariantRenameIn) -> dict[str, Any]:
+    """柜型改名。用户诉求：「有编辑的功能，可以删除元素，或者重命名」。
+
+    存进 ``meter_counts['label']``：``CupboardVariant`` 没有单独的
+    显示名字段，而 ``meter_combo`` 同时被前端当分组键用，改它会把
+    柜型从树里挪走。所以借用 ``meter_counts`` 里这个不参与逻辑的键。
+    """
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "名称不能为空")
+    with Session(_pipeline().engine) as s:
+        v = s.get(CupboardVariant, variant_id)
+        if not v:
+            raise HTTPException(404, "变体不存在")
+        mc = dict(v.meter_counts or {})
+        mc["label"] = name
+        v.meter_counts = mc
+        s.commit()
+        return {"id": v.id, "name": name}
 
 
 @app.delete("/api/variants/{variant_id}")
