@@ -236,8 +236,12 @@ body.resizing{cursor:col-resize;user-select:none}
   display:flex;align-items:center;gap:8px;padding:7px 12px;
   background:var(--panel);border-bottom:1px solid var(--line);flex-shrink:0;
 }
+/* 工具条上的按钮不许被压扁。中栏可拖拽变窄后，按钮里的文字会被
+   挤成「重新解析」四个字竖排一列（实际踩到过），所以显式禁止收缩、
+   并保持单行。窄了就让 .fn 先让位——它有 text-overflow:ellipsis。 */
+.mid-bar .btn,.mid-bar .badge{flex:0 0 auto;white-space:nowrap}
 .mid-bar .fn{
-  flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   font-size:12px;color:var(--txt);
 }
 /* 滚动模式提示 —— 说明「整份连续显示」+ 怎么快速翻页 */
@@ -883,7 +887,13 @@ function autoSelectFirstInView() {
     if (f) { showFloorPanel(S.floorSel); return; }
     S.floorSel = null;
   }
-  if (S.treeSel) return;             // 已有选中（刷新恢复来的），不动
+  if (S.treeSel) {
+    // 刷新恢复来的选中：gotoView 已经把右栏重画成占位内容了（renderHub），
+    // 这里必须按treeSel 把真实内容重新灌上，否则「树里选中 3 Units、
+    // 右栏却是柜型库总览」这种错位会出现。
+    restoreSelection();
+    return;
+  }
   // 建筑图纸 tab：第一个 item 是楼栋，直接点它只会展开、不会加载内容。
   // 用户要的是「默认选中第一个 item，中间显示完整 PDF，右边显示楼层
   // 信息」—— 所以这里自动往下钻到楼层列表，钻到第一个真实楼层。
@@ -905,6 +915,29 @@ function autoSelectFirstInView() {
   if (first) { first.click(); return; }
   // 树是空的（柜型库没数据 / 没解析过）—— 中右两栏也别留上一 tab 的残影
   if (S.view !== 'work') renderHub();
+}
+
+/** 按当前的 S.treeSel 把中栏/右栏内容重新灌一遍。
+ *
+ *  只在「刷新恢复」这条路径上用：localStorage 里存着上次的选中项，
+ *  但那些内容在页面重载后并不存在于 DOM 里，必须重放一次渲染。
+ *  分派规则与 bindTree 的点击分支保持一致。
+ */
+function restoreSelection() {
+  const sel = String(S.treeSel || '');
+  if (!sel) return;
+  if (sel === 'floors') {
+    if (S.view === 'building' && S.floorSel) { showFloorPanel(S.floorSel); return; }
+    renderPane();
+    return;
+  }
+  if (S.view === 'cupboard') {
+    if (sel.includes('@') || sel.includes('#')) showUnitsGroup(sel);
+    else if (/^u\d+$/.test(sel)) showUnitsGroup(unitsGroupKey(Number(sel.slice(1))));
+    return;
+  }
+  // 工作台 / 建筑图纸的其它形态：交给既有的楼层筛选
+  filterFloor(S.floorFilter);
 }
 
 async function loadTree() {
@@ -1372,8 +1405,24 @@ function bindEditMenu() {
     const isModel = sel.includes('@');
     const vid = isModel ? Number(sel.split('@')[1]) : null;
     const v = vid ? S.variants.find(x => +x.id === vid) : null;
-    const units = S.view === 'cupboard'
-      ? Number(String(sel).split('#').pop()?.replace(/@.*/, '')) || 0 : 0;
+    // 当前选中的套数。treeSel 有三种形态，都得能取出套数：
+    //   ``u7``                  柜型库根节点（units 数量就是 key）
+    //   ``<dwg>#7``旧格式（按文件分组时的 units 组）
+    //   ``<dwg>#7@15``          具体 model（取 # 后那段）
+    // 之前只按 '#' 分割，柜型库改成 units 根之后父节点取不到套数，
+    // 「删除该套数全部」就整项消失了。
+    let units = 0;
+    if (S.view === 'cupboard') {
+      if (isModel) {
+        const m = String(sel).slice(0, sel.indexOf('@')).match(/#(\d+)/);
+        units = m ? Number(m[1]) : 0;
+      } else if (sel.charAt(0) === 'u' && /^\d+$/.test(sel.slice(1))) {
+        units = Number(sel.slice(1));
+      } else {
+        const m = String(sel).match(/#(\d+)/);
+        units = m ? Number(m[1]) : 0;
+      }
+    }
 
     const items = [];
     if (S.view === 'cupboard') {
@@ -1383,8 +1432,8 @@ function bindEditMenu() {
         items.push(['del', ic('trash'), LANGNOW === 'zh' ? '删除' : 'Delete']);
       } else if (units) {
         items.push(['delall', ic('trash'),
-          (LANGNOW === 'zh' ? '删除该' : 'Delete all ') + units + ' '
-          + (LANGNOW === 'zh' ? '套的全部柜型' : 'cupboards')]);
+          (LANGNOW === 'zh' ? `删除该 ${units} 套的全部柜型`
+                             : `Delete all ${units}-unit cupboards`)]);
       }
       items.push(['clear', ic('eraser'), LANGNOW === 'zh' ? '清空柜型库' : 'Clear library']);
     } else {
@@ -1788,8 +1837,17 @@ function showFloorPanel(code) {
 
   // ---- 2. 该层每户的柜型 ----
   if (units.length) {
+    // unit_count 只数住宅，不含 communal。所以L4 上面写「3 户」、
+    // 下面却列出 401/402/403/CLA2 四行，看着像漏了一户 —— 把口径写明。
+    const nPriv = units.filter(u => !u.is_communal).length;
+    const nCom = units.length - nPriv;
     h += `<div class="sec" style="padding-left:0">${
-      LANGNOW === 'zh' ? '本层各户配置' : 'Units on this floor'}</div>
+      LANGNOW === 'zh' ? '本层各户配置' : 'Units on this floor'}${
+      nCom ? `<span style="color:var(--dim);font-weight:400"> · ${
+        LANGNOW === 'zh'
+          ? `${nPriv} 住宅 + ${nCom} 公共（上方 units 数不含公共户）`
+          : `${nPriv} private + ${nCom} communal (unit count excludes communal)`}</span>` : ''
+    }</div>
       <table><thead><tr><th>${t('d.empty')}</th><th>${t('d.type')}</th>
       <th>${t('d.cup')}</th><th class="num">${t('d.size')}</th></tr></thead><tbody>`;
     for (const u of units) {
@@ -1844,8 +1902,10 @@ function showFloorPanel(code) {
     const u = x.dataset.img;
     if (!u) { toast(t('lib.noclue'), 'err'); return; }
     const v = list.find(y => y.image_url === u);
-    showCupImage(u, v ? `${esc(vLabel(v, ''))}${esc(suffixOf(v))}<div class="muted">${
-      fmtMM(v.w)} × ${fmtMM(v.h)} mm · ${n} ${t('lib.units')}</div>` : '');
+    // 尺寸一行、型号一行，别把套数写两遍（同 capOf 的叠字问题）
+    showCupImage(u, v ? `<b>${fmtMM(v.w)} × ${fmtMM(v.h)} mm</b>${
+      v.label ? ` · ${esc(v.label)}` : ''}<div class="muted">${
+      n} ${t('lib.units')}${esc(suffixOf(v))}</div>` : '');
     $$('#rpane .cupcard').forEach(y => y.classList.toggle('on', y === x));
   });
   applyZoomToImages();
@@ -1913,9 +1973,12 @@ function showUnitsGroup(key, keepScroll) {
     const tag = src === 'measured' ? (LANGNOW === 'zh' ? 'DWG 实测' : 'measured')
       : src === 'manual' ? (LANGNOW === 'zh' ? '人工录入' : 'manual')
       : (LANGNOW === 'zh' ? '待实测' : 'estimated');
+    // 这一行只放尺寸本身。柜型名（有 label 就用 label）另起，
+    // 套数在下面那行已经写了 —— 之前这里回退成「5 Units」，
+    // 渲染出来是「1065 × 2350 mm · 5 套5 套 · 2x4」这种叠字。
     return `<b>${fmtMM(v.w)} × ${fmtMM(v.h)} mm</b>`
       + (v.d ? ` · D ${fmtMM(v.d)}` : '')
-      + ` · ${esc(vLabel(v, n + ' ' + t('lib.units')))}`
+      + (v.label ? ` · ${esc(v.label)}` : '')
       + `<div class="muted">${n} ${t('lib.units')} · ${esc(v.grid || '-')} · ${tag}</div>`;
   };
 
@@ -2326,8 +2389,13 @@ async function loadExports(jobId) {
     const ex = await api(`/jobs/${jobId}/exports`);
     S.exports = ex;
     $('#bexp')?.remove();
+    // 柜型库 tab 不显示导出栏：导的是建筑解析结果，跟当前看柜型无关，
+    // 而且 5 个按钮会把中栏挤到放不下柜型图。loadJob 是在 gotoView
+    // 之后跑的，所以这里必须再判一次 tab，不能只靠 syncTabsForView。
+    if (S.view === 'cupboard') return;
     const bar = document.createElement('div');
-    bar.id = 'bexp'; bar.style.cssText = 'display:flex;gap:5px';
+    bar.id = 'bexp';
+    bar.style.cssText = 'display:flex;gap:5px;flex:0 0 auto';
     bar.innerHTML = ['pdf', 'docx', 'jpg', 'xlsx', 'json'].map(k =>
       (ex[k] ? `<button class="btn ok" onclick="dlExport('${k}')">↓ ${k.toUpperCase()}</button>` : '')
     ).join('') || `<span class="muted" style="font-size:11px">${t('exp.none')}</span>`;
@@ -2352,7 +2420,7 @@ function openUpload(kind) {
     <div class="mbody">
       <div class="alert info">${esc(cfg.d)}</div>
       <div class="drop" id="dz">
-        <div class="big">⬆</div>
+        <div class="big"><svg class="ic" aria-hidden="true"><use href="#i-upload"></use></svg></div>
         <div><b>${t('up.pick')}</b> ${t('up.drag')}</div>
         <div class="muted" style="font-size:11px;margin-top:4px">${esc(cfg.accept)}</div>
       </div>
@@ -2867,6 +2935,10 @@ function bindLibraryManage() {
  */
 function syncTabsForView() {
   const bar = $('.rtabs');
+  // 导出栏（PDF/DOCX/JPG/XLSX/JSON）导的是**建筑图纸解析结果**，
+  // 柜型库 tab 里点它毫无意义，而且 5 个按钮会把中栏挤到放不下柜型图。
+  // 所以跟着右栏 tab 一起在两个 hub tab 隐藏。
+  $('#bexp')?.remove();
   if (S.view === 'cupboard') {
     bar.style.display = 'none';
     $('#rpane').innerHTML = '';   // 由 renderHub 填充
@@ -2929,6 +3001,9 @@ function gotoView(v) {
     // renderHub/resetViewer 会把提示清掉，切回工作台要重新挂上
     $('#bhelp').style.display = S.jobId && S.pages?.length ? '' : 'none';
     renderPane();
+    // 导出栏在 hub tab 里被 loadExports 跳过了（loadExports 是异步的，
+    // 切回工作台时它不会自己再跑一遍），这里补一次。
+    if (S.jobId && !document.querySelector('#bexp')) loadExports(S.jobId);
   } else {
     // 换tab 必须把中栏和右栏都清干净 —— 用户报的
     // 「从柜型图切换到建筑图纸，还是显示柜型图的内容」：
