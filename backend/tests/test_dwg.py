@@ -35,7 +35,6 @@ from app.parsers.dwg import (
 )
 
 FIX = Path(__file__).parent / "fixtures"
-DXF_DESIGN = FIX / "cupboard_library_design.dxf"
 DWG_NEGATIVE = FIX / "neg_truncated_by_dxf2dwg.dwg"
 DWG_REAL_2018 = FIX / "dwg_real_acad2018.dwg"
 DWG_REAL_2000 = FIX / "dwg_real_acad2000.dwg"
@@ -331,70 +330,66 @@ class TestAssessIntegrity:
 
 
 # ---------------------------------------------------------------- DXF 直读
+#
+# 这一组全部跑在**真实 DWG 转出来的 DXF** 上。
+# 早先这里用的是一份自建合成 DXF（``cupboard_library_design.dxf``），
+# 断言的是「4 个自造图层 + 3 个自造 block」—— 那些结构和真实图纸差得很远，
+# 留着只会给人「已经在图纸上验证过」的错觉。合成样本已删除。
 
 
 class TestInspectDxf:
-    def test_design_dxf_reads_all_four_layers(self):
-        """本项目自建的柜型库 DXF：4 个图层必须全部读出（验证无回归）。"""
-        res = inspect_dxf(DXF_DESIGN)
+    def test_real_dxf_reads_ok(self, real_dxf):
+        """真实 DXF 必须能直读，且完整性判定为 ok。"""
+        res = inspect_dxf(real_dxf)
         assert res.ok
-        assert res.integrity == "ok"
-        for layer in ("WATER_METER", "GAS_METER", "CUPBOARD", "ANNOTATION"):
-            assert layer in res.layers, f"缺图层 {layer}：{res.layers}"
+        assert res.integrity == "ok", f"完整性判定异常：{res.integrity_notes}"
 
-    def test_design_dxf_exposes_cupboard_blocks(self):
-        """柜型变体在 DWG 里是 block —— 这是 Module B 入库的主要抓手。"""
-        res = inspect_dxf(DXF_DESIGN)
-        for code in ("CP-TRI-1x3", "CP-QUAD-2x2", "CP-SIX-2x3"):
-            assert code in res.blocks, f"缺 block {code}：{res.blocks}"
+    def test_real_dxf_exposes_cabinet_layers(self, real_dxf):
+        """真实图纸的柜框图层必须能被读出。
 
-    def test_design_dxf_counts_modelspace_entities(self):
-        res = inspect_dxf(DXF_DESIGN)
-        assert res.entity_counts.get("INSERT", 0) == 3   # 3 个柜型引用
-        assert res.entity_counts.get("TEXT", 0) == 1
-
-    def test_design_dxf_counts_entities_inside_blocks(self):
-        """柜型库几何全在 block 里 —— 必须遍历 block 定义。
-
-        实测踩坑：只统计 modelspace 时，一份含 3 个柜型 block、13 个
-        冷热水表圆的完整图纸被算成「只有 4 个实体」，进而被完整性校验
-        误判为 degraded。
-
-        逐 block 实测构成（外框 1 + 每表位燃气方框 1）：
-          CP-TRI-1x3   LWPOLYLINE 4  CIRCLE 3  TEXT 3
-          CP-QUAD-2x2  LWPOLYLINE 5  CIRCLE 4  TEXT 4
-          CP-SIX-2x3   LWPOLYLINE 7  CIRCLE 6  TEXT 6
+        实测柜体长LINE分布在 ``1CO`` / ``2CONC`` / ``HWAT___5CS`` 等图层，
+        柜型识别正是靠这些图层的长线配对出柜体矩形，所以读不出来就等于
+        柜型识别无从下手。
         """
-        res = inspect_dxf(DXF_DESIGN)
-        assert res.block_entity_counts.get("CIRCLE", 0) == 13      # 冷热水表
-        assert res.block_entity_counts.get("TEXT", 0) == 13        # 表位标注
-        # 16 = 3 个柜体���框 + 13 个燃气方框；另 2 个来自 ACAD 预定义块
-        assert res.block_entity_counts.get("LWPOLYLINE", 0) == 18
-        assert res.total_entities > 40
+        res = inspect_dxf(real_dxf)
+        assert res.ok
+        joined = " ".join(res.layers).upper()
+        for kw in ("1CO", "2CONC", "HWAT"):
+            assert kw in joined, f"缺柜框图层关键字 {kw}：{res.layers[:20]}"
 
-    def test_block_layers_expose_water_gas_split(self):
-        """Module B 靠 block 内的图层清单区分 water / gas 分组。"""
-        res = inspect_dxf(DXF_DESIGN)
-        for code in ("CP-TRI-1x3", "CP-QUAD-2x2", "CP-SIX-2x3"):
-            layers = res.block_layers[code]
-            assert "WATER_METER" in layers
-            assert "GAS_METER" in layers
-            assert "CUPBOARD" in layers
+    def test_real_dxf_counts_modelspace_entities(self, real_dxf):
+        """modelspace 必须有足量实体（真实样本约 3420 个）。"""
+        res = inspect_dxf(real_dxf)
+        assert res.entity_counts.get("INSERT", 0) > 100, res.entity_counts
+        assert res.entity_counts.get("LINE", 0) > 100, res.entity_counts
+        assert res.total_entities > 1000
 
-    def test_block_with_empty_modelspace_is_not_degraded(self):
-        """modelspace 空但 block 有内容 → 正常，不该报 degraded。"""
-        res = inspect_dxf(DXF_DESIGN)
-        assert res.entity_counts.get("LWPOLYLINE", 0) == 0   # modelspace 确实空
-        assert res.integrity == "ok"
+    def test_real_dxf_counts_entities_inside_blocks(self, real_dxf):
+        """必须遍历 block 定义才能数全表位。
 
-    def test_anonymous_blocks_are_excluded(self):
+        真实样本的``gas meter 1`` / ``water meter v`` 都是 block，
+        只统计 modelspace 会把柜内表位全部漏掉。
+        """
+        res = inspect_dxf(real_dxf)
+        assert res.block_entity_counts, "未统计到任何 block 内容"
+        assert sum(res.block_entity_counts.values()) > 100
+
+    def test_block_layers_expose_water_gas_split(self, real_dxf):
+        """block 清单里必须能区分 water / gas 表。"""
+        res = inspect_dxf(real_dxf)
+        joined = " ".join(res.blocks).lower()
+        assert "gas" in joined or "water" in joined, res.blocks[:20]
+
+    def test_anonymous_blocks_are_excluded(self, real_dxf):
         """匿名块（*Model_Space 等）是系统定义，不该计入设计内容。"""
-        res = inspect_dxf(DXF_DESIGN)
-        assert not any(k in res.block_entity_counts for k in ("*Model_Space", "*Paper_Space"))
+        res = inspect_dxf(real_dxf)
+        assert not any(
+            k in res.block_entity_counts for k in ("*Model_Space", "*Paper_Space")
+        )
 
-    def test_dxf_bypasses_dwg_backends(self):
-        """.dxf 直接送 inspect_dxf，不该调外部进程。"""
-        res = parse_dwg(DXF_DESIGN)
+    def test_dxf_bypasses_dwg_backends(self, real_dxf):
+        """.dxf 直接送 parse_dwg，不该调外部进程。"""
+        res = parse_dwg(real_dxf)
         assert res.ok
         assert res.backend == DwgBackend.NONE
 

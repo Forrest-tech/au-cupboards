@@ -23,7 +23,13 @@ from app.parsers.cupboard_render import (
 )
 
 FIX = Path(__file__).parent / "fixtures"
-DXF = FIX / "cupboard_library_design.dxf"
+
+#: 真实图纸里代表水表/气表的 block 名。
+#:
+#: 早先这里用的是自建合成 DXF 里的 ``CP-QUAD-2x2`` 等假 block，
+#: 那些样本已删除 —— 渲染必须跑在真实图纸的 block 上才算数。
+BLOCK_GAS = "gas meter 1"
+BLOCK_WATER = "water meter v"
 
 
 @pytest.fixture()
@@ -37,43 +43,43 @@ def out_dir():
 
 
 class TestRenderBlock:
-    def test_renders_named_block(self, out_dir):
-        r = render_block_to_jpg(DXF, "CP-QUAD-2x2", out_dir)
+    def test_renders_named_block(self, real_dxf, out_dir):
+        r = render_block_to_jpg(real_dxf, BLOCK_GAS, out_dir)
         assert r.ok, r.error
         assert r.image_name and (out_dir / r.image_name).is_file()
         assert r.entity_count > 0
 
-    def test_output_is_visible_not_blank(self, out_dir):
+    def test_output_is_visible_not_blank(self, real_dxf, out_dir):
         """核心守卫：产出必须**看起来有东西**。
 
         实测踩坑：ezdxf 默认渲染配置在白底上产出 4587 字节的
         「空白图」（线宽过细 + 颜色过淡），而旧代码只判断文件 >512 字节，
         于是空白图被静默入库。这里用体积下限拦住。
         """
-        r = render_block_to_jpg(DXF, "CP-QUAD-2x2", out_dir)
+        r = render_block_to_jpg(real_dxf, BLOCK_GAS, out_dir)
         assert r.ok, r.error
         size = (out_dir / r.image_name).stat().st_size
         assert size >= MIN_IMAGE_BYTES, (
             f"产出仅 {size} 字节，疑似空白图（阈值 {MIN_IMAGE_BYTES}）"
         )
 
-    def test_measures_real_size_in_mm(self, out_dir):
+    def test_measures_real_size_in_mm(self, real_dxf, out_dir):
         """尺寸必须来自几何 bbox，不是占位数字。"""
-        r = render_block_to_jpg(DXF, "CP-QUAD-2x2", out_dir)
+        r = render_block_to_jpg(real_dxf, BLOCK_GAS, out_dir)
         assert r.ok, r.error
         assert r.width_mm and r.width_mm > 1, f"宽={r.width_mm}"
         assert r.height_mm and r.height_mm > 1, f"高={r.height_mm}"
         # 是同一个量级（mm），不是 0.18 之类的米
         assert max(r.width_mm, r.height_mm) < 100_000
 
-    def test_reports_layers_and_texts(self, out_dir):
+    def test_reports_layers_and_texts(self, real_dxf, out_dir):
         """图层用于区分 water/gas；标注文字即柜型的「介绍」。"""
-        r = render_block_to_jpg(DXF, "CP-QUAD-2x2", out_dir)
+        r = render_block_to_jpg(real_dxf, BLOCK_GAS, out_dir)
         assert r.layers, "没拿到图层 —— 无法区分 water / gas 分组"
         assert r.layer_counts
 
-    def test_missing_block_is_actionable(self, out_dir):
-        r = render_block_to_jpg(DXF, "NO_SUCH_BLOCK", out_dir)
+    def test_missing_block_is_actionable(self, real_dxf, out_dir):
+        r = render_block_to_jpg(real_dxf, "NO_SUCH_BLOCK", out_dir)
         assert not r.ok
         assert "不存在" in (r.error or "")
 
@@ -88,20 +94,20 @@ class TestRenderBlock:
 
 
 class TestRenderLibrary:
-    def test_renders_multiple_blocks(self, out_dir):
-        rs = render_cupboard_library(DXF, out_dir)
+    def test_renders_multiple_blocks(self, real_dxf, out_dir):
+        rs = render_cupboard_library(real_dxf, out_dir)
         assert len(rs) >= 2, f"只找到 {len(rs)} 个 block"
         ok = [r for r in rs if r.ok]
         assert ok, f"一个都没渲染成功: {[(r.block_name, r.error) for r in rs]}"
 
-    def test_skips_anonymous_blocks(self, out_dir):
+    def test_skips_anonymous_blocks(self, real_dxf, out_dir):
         """匿名 block（* 开头）是系统定义，不是柜型。"""
-        rs = render_cupboard_library(DXF, out_dir)
+        rs = render_cupboard_library(real_dxf, out_dir)
         assert all(not r.block_name.startswith("*") for r in rs)
 
-    def test_only_blocks_filter(self, out_dir):
-        rs = render_cupboard_library(DXF, out_dir, only_blocks=["CP-QUAD-2x2"])
-        assert len(rs) == 1 and rs[0].block_name == "CP-QUAD-2x2"
+    def test_only_blocks_filter(self, real_dxf, out_dir):
+        rs = render_cupboard_library(real_dxf, out_dir, only_blocks=[BLOCK_WATER])
+        assert len(rs) == 1 and rs[0].block_name == BLOCK_WATER
 
     def test_unreadable_dxf_returns_failure_not_exception(self, out_dir):
         bad = out_dir / "x.dxf"

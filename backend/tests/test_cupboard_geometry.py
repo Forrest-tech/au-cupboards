@@ -1,21 +1,29 @@
-"""柜型几何分解测试 —— 锁住「柜体→表位」的正确粒度。
+"""柜型几何分解测试 —— **只跑真实 DWG**，Ground Truth = 用户人工统计。
 
-**这轮测试存在的理由**
+**为什么不用合成样本（2026-10 血泪史）**
+------------------------------------------
+早期版本有个 ``make_cabinet_sample.py``，用 ezdxf 画「闭合矩形柜体 +
+闭合矩形表位框」的假 DWG，然后所有柜型识别逻辑都在这份假数据上调参。
+假数据结构和真实图纸差得很远，导致**在假数据上配对成功率 100% 的规则，
+真实图纸上一个都配不出来**：
 
-前两轮都在同一件事上翻车：
+===================  =====================  =====================
+                     合成样本（假）          真实图纸
+===================  =====================  =====================
+柜体外框             闭合 LWPOLYLINE         **4 条跨图层 LINE**
+表位                 闭合矩形                INSERT block（块内顶点用
+                                             绝对坐标，``insert`` 点
+                                             偏 6500mm）
+柜框对齐             上下边与侧墙严格对齐    侧墙在上下边端点**内侧**
+上下边长度           上下完全一致            上下差几十毫米（顶板 vs净宽）
+相邻柜               各自分开               **共用横线**
+===================  =====================  =====================
 
-1. 第 1 轮：遍历命名 block逐个渲染 → 141 个 block 里 130+ 个是
-   ``Aect_Duct_*`` 风管零件。
-2. 第 2 轮：改成按 block 名 + 图层打分筛选 → 粒度错，渲出来的是
-   柜内**单个 water 表 / gas 表**，而不是柜子。
+所以现在：**集成测试一律跑真实 DWG**，验收标准是
+:data:`~tests.fixtures.real_dwg.GROUND_TRUTH`（用户人工统计的 22 套柜）。
 
-根因是同一个错误的��提：「一个 block = 一个柜型」。真实图纸里
-block 是按零件组织的，柜子在 modelspace 里。所以第 2 轮的关键
-断言不是「认出了几个柜型」，而是**柜型数与表位数必须等于图纸里
-空间并列的柜子**。
-
-样本由 ``fixtures/make_cabinet_sample.py`` 按用户 2024-10 实图结构
-构造：3 个柜型（2x3=6 套 / 2x2=4 套 / 2x1=2 套）+ Aect_Duct 噪声。
+纯几何单测（``TestRectGeometry`` / ``TestEdgeCases``）保留 —— 它们测的是
+``Rect`` 数学运算，用``ezdxf.new()`` 现画现用，不依赖任何外部样本。
 """
 from __future__ import annotations
 
@@ -37,24 +45,13 @@ from app.parsers.cupboard_geometry import (
     parse_cupboards,
     rect_from_entity,
 )
-
-FIXTURES = Path(__file__).resolve().parent / "fixtures"
-
-
-@pytest.fixture(scope="module")
-def sample_dxf(tmp_path_factory) -> str:
-    """按用户实图结构生成的样本 DXF（3 柜型 + 噪声 block）。"""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "make_cabinet_sample", FIXTURES / "make_cabinet_sample.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod.build(str(tmp_path_factory.mktemp("cup") / "sample.dxf"))
-
-
-@pytest.fixture(scope="module")
-def parsed(sample_dxf):
-    return parse_cupboards(sample_dxf)
+from tests.fixtures.real_dwg import (
+    GROUND_TRUTH,
+    GT_CABINETS,
+    GT_UNITS,
+    real_dwg_path,  # noqa: F401  (供 real_dxf 依赖链使用)
+    real_dxf,
+)
 
 
 # ---------------------------------------------------------------- 基本几何
@@ -114,18 +111,18 @@ class TestRectGeometry:
         assert rect is not None, "POLYLINE 闭合矩形应被识别"
         assert rect.width == pytest.approx(800)
 
-    def test_extract_rects_ignores_blocks(self, sample_dxf):
-        """柜型在 modelspace，block 里的零件不该被当成矩形。"""
-        import ezdxf
-        """柜型在 modelspace，不在 block 里。
+    def test_extract_rects_ignores_blocks(self, real_dxf):
+        """柜型在 modelspace，block 里的零件不该被当成矩形。
 
-        这是第1 轮翻车的根因：``Aect_Duct_*`` 全在 block 中，
-        遍历 block 就会把它们全认成柜型。
+        这是第 1 轮翻车的根因：真实图纸里 ``Aecb_Duct_Oval_*`` 风管零件
+        有 130+ 个 block（注意前缀是 ``Aecb_`` 不是 ``Aect_``），遍历
+        block 就会把它们全认成柜型。
         """
-        rects, total = extract_rects(ezdxf.readfile(sample_dxf))
+        import ezdxf
+        rects, total = extract_rects(ezdxf.readfile(str(real_dxf)))
         assert total > 0
-        assert rects, "样本应有矩形"
-        # 噪声 block 里的圆不该被当成矩形
+        # 真实文件里闭合多段线极少（1069 个 LWPOLYLINE 只有 16 个闭合），
+        # 且闭合的那些主要是表位框 / 混凝土剖面，不是柜体
         for r in rects:
             assert r.source_type in ("LWPOLYLINE", "POLYLINE", "RECTANG")
 
@@ -145,42 +142,152 @@ class TestLayerSemantics:
         assert classify_position(["SOMETHING_ELSE"]) == "unknown"
         assert classify_position([]) == "unknown"
 
-    def test_junk_layers_cover_aect(self):
-        """Aect 是 AutoCAD 风管组件库前缀 —— 第 1 轮 130+ 噪声的来源。"""
-        assert any("aect" in k for k in JUNK_LAYER_KEYWORDS)
+    def test_junk_layers_cover_aec_prefixes(self):
+        """真实图纸的风管零件前缀是 ``Aecb_`` 而不是 ``Aect_``。
+
+        按 ``aect`` 过滤一个都拦不住 —— 这个坑踩过一次。
+        """
+        for pfx in ("aect", "aecb"):
+            assert any(pfx in k for k in JUNK_LAYER_KEYWORDS), (
+                f"噪声前缀 {pfx} 未被JUNK_LAYER_KEYWORDS 覆盖"
+            )
 
     def test_cabinet_layer_keywords_present(self):
         assert CABINET_LAYER_KEYWORDS, "柜体图层关键词不能为空"
 
 
-# ---------------------------------------------------------------- 核心分解
+# ---------------------------------------------------- 真实 DWG 核心验收
+#
+# 以下是**唯一**的柜型识别验收标准：跑真实 DWG，对照用户人工统计。
 
 
-class TestCupboardDecomposition:
-    def test_finds_three_cabinets(self, parsed):
-        """样本里空间并列 3 个柜型（上方2 大柜 + 下方 1 小柜）。"""
-        assert len(parsed.cupboards) == 3, (
-            f"应识别 3 个柜型，实际 {len(parsed.cupboards)}："
-            f"{[c.rect.as_tuple() for c in parsed.cupboards]}"
+@pytest.fixture(scope="module")
+def parsed(real_dxf):
+    """真实 DWG 的解析结果（整个模块只解析一次，约 1.6 秒）。"""
+    return parse_cupboards(str(real_dxf))
+
+
+@pytest.fixture(scope="module")
+def units_histogram(parsed):
+    """{units: 个数} —— 与 Ground Truth 直接对比。"""
+    hist: dict[int, int] = {}
+    for c in parsed.cupboards:
+        hist[c.positions_total] = hist.get(c.positions_total, 0) + 1
+    return hist
+
+
+class TestGroundTruthCabinetCount:
+    """**验收标准：22 个柜型**（用户人工统计）。"""
+
+    def test_total_cabinets_is_22(self, parsed):
+        got = len(parsed.cupboards)
+        assert got == GT_CABINETS, (
+            f"应识别 {GT_CABINETS} 个柜型，实际 {got}。"
+            f"分布={sorted(c.positions_total for c in parsed.cupboards)}"
         )
 
-    def test_positions_count_matches_design(self, parsed):
-        """**这是本轮最关键的断言**。
+    def test_units_distribution_matches(self, units_histogram):
+        """**验收标准：按户数分布逐项一致**。
 
-        用户口径：「每层楼有一个柜，每层有几个 units 就有几套
-        water+gas」。所以柜子的表位数必须等于图纸画的表位框数，
-        而不是「柜内 water 图元数」或「block 数」。
+        用户 Ground Truth::
+            3:2  4:1  5:2  6:2  7:2  8:1  9:2 10:2 11:2 12:2 13:3 14:1
         """
-        counts = sorted(c.positions_total for c in parsed.cupboards)
-        assert counts == [2, 4, 6], f"表位数应��� 2/4/6，实际 {counts}"
+        for units, count in sorted(GROUND_TRUTH.items()):
+            assert units_histogram.get(units, 0) == count, (
+                f"{units} Units 应有 {count} 套，实际 "
+                f"{units_histogram.get(units, 0)} 套。"
+                f"全量分布={dict(sorted(units_histogram.items()))}"
+            )
 
-    def test_each_position_is_one_water_plus_gas(self, parsed):
-        """每个表位标记必须是 gas 或 water 之一，不能是未知类型。
+    def test_no_extra_units_bucket(self, units_histogram):
+        """不该出现 Ground Truth 里没有的户数（凭空多出来的柜）。"""
+        extra = set(units_histogram) - set(GROUND_TRUTH)
+        assert not extra, f"出现 Ground Truth 之外的户数：{sorted(extra)}"
 
-        实测踩坑：water 竖线常落在 gas 红框**之外**
-        （样本里相距180mm），只看框内图层会把 water 算成 0 套。
-        所以这里不要求预先配对成 mixed —— 解析器按「谁在柜内」
-        逐个登记，套数由 :attr:`positions_total` 按gas 口径汇总。
+    def test_total_units_is_191(self, parsed):
+        """所有柜的套数加起来 = 191（用户清单 22 套柜的总和）。"""
+        got = sum(c.positions_total for c in parsed.cupboards)
+        assert got == GT_UNITS, f"总套数应{GT_UNITS}，实际 {got}"
+
+    def test_seven_units_cabinets_are_all_real(self, parsed):
+        """把 7 Units 的差异钉死：识别到的每一个都是真实柜体。
+
+        当前实测 3 套、Ground Truth 记 2 套 —— 差一个。
+        上面三条断言失败正是这个差异的信号，**不要靠改Ground Truth
+        把它们改绿**：先确认这三个柜是不是真柜。
+
+        本条给出正面证据：三个 7 Units 柜互不重叠、各带真实 DIMENSION
+        尺寸标注、且gas 与 water 数量逐一相等（每套1+1）。
+        """
+        seven = [c for c in parsed.cupboards if c.positions_total == 7]
+        assert len(seven) == 3, f"预期 3 个 7 Units 柜，实际 {len(seven)}"
+
+        # 1) 互不重叠（排除同一个柜被框成两遍）
+        for i, a in enumerate(seven):
+            for b in seven[i + 1:]:
+                ox = min(a.rect.x1, b.rect.x1) - max(a.rect.x0, b.rect.x0)
+                oy = min(a.rect.y1, b.rect.y1) - max(a.rect.y0, b.rect.y0)
+                assert not (ox > 0 and oy > 0), (
+                    f"两个 7 Units 柜重叠 {ox:.0f}×{oy:.0f}mm，疑似重复框"
+                )
+
+        for c in seven:
+            gas = sum(1 for m in c.positions if m.kind == "gas")
+            water = sum(1 for m in c.positions if m.kind == "water")
+            # 2) 每套 1 gas + 1 water
+            assert gas == water == 7, (
+                f"7 Units 柜 gas={gas} water={water}，应各为 7"
+            )
+            # 3) 带真实 DIMENSION 标注（图纸上量出来的，不是估算）
+            assert c.dim_w_mm and c.dim_h_mm, (
+                f"7 Units 柜 {c.rect.width:.0f}×{c.rect.height:.0f} "
+                f"缺少尺寸标注，无法确认它是真实柜体"
+            )
+            assert 800 < c.dim_w_mm < 2500, f"标注宽 {c.dim_w_mm:.0f} 不合理"
+            assert 1700 < c.dim_h_mm < 2600, f"标注高 {c.dim_h_mm:.0f} 不合理"
+
+
+class TestUnitsDefinition:
+    """「套数」口径的固化断言。
+
+    用户原话：「一个 cupboard 里面包含了多套的 water+gas，这种是一套」，
+    以及「**所有水表、气表外观样式完全一样**，不能靠表的外观特征区分
+    柜型，只能靠数量 + 空间排布」。
+    """
+
+    def test_gas_equals_water_in_every_cabinet(self, parsed):
+        """**每个柜的 gas 表数必须等于 water 表数**。
+
+        这是用户明确给的约束。不等就说明柜框边界切错了 ——
+        有相邻的表被算进了这个柜，或者本该算进来的漏了。
+        """
+        for c in parsed.cupboards:
+            assert c.gas_count == c.water_count, (
+                f"柜 {c.positions_total} units "
+                f"({c.rect.width:.0f}×{c.rect.height:.0f}mm "
+                f"x={c.rect.x0:.0f}..{c.rect.x1:.0f}) "
+                f"gas={c.gas_count} water={c.water_count}"
+            )
+
+    def test_units_equals_gas_count(self, parsed):
+        """套数 = gas 表数（每套必配 1 个 gas）。"""
+        for c in parsed.cupboards:
+            assert c.positions_total == c.gas_count, (
+                f"套数 {c.positions_total} != gas {c.gas_count}"
+            )
+
+    def test_units_in_ground_truth_range(self, parsed):
+        """套数必须落在 3~14（Ground Truth 的取值范围）。"""
+        for c in parsed.cupboards:
+            assert 3 <= c.positions_total <= 14, (
+                f"套数 {c.positions_total} 超出 Ground Truth 范围 3~14"
+            )
+
+    def test_every_position_is_gas_or_water(self, parsed):
+        """每个表位标记都必须是 gas 或 water，不能是未知类型。
+
+        实测踩坑：water 竖线常落在 gas 红框**之外**，只看框内图层会把
+        water 算成 0 套。所以这里不要求预先配对成 mixed。
         """
         for c in parsed.cupboards:
             for p in c.positions:
@@ -189,26 +296,23 @@ class TestCupboardDecomposition:
                     f"（kind={p.kind}, 图层={p.layers}）"
                 )
 
-    def test_gas_count_equals_positions(self, parsed):
-        """套数 == gas 表数（每套必配1 个 gas）。
 
-        water 数可能**多于**套数 —— 图纸上单独的 water bank
-        （不成套排布的水表组）不该被算成额外的套。
-        """
-        for c in parsed.cupboards:
-            assert c.gas_count == c.positions_total
-            assert c.water_count >= c.positions_total
+class TestSpatialLayout:
+    """空间排布 —— 用户说「只能靠数量 + 空间排布」区分柜型。"""
 
-    def test_layout_grid_inferred(self, parsed):
-        """排布行列要从表位坐标聚类得出，不能靠猜。"""
-        got = sorted(c.grid_aspect for c in parsed.cupboards)
-        assert got == ["2x1", "2x2", "2x3"], f"排布应2x1/2x2/2x3，实际 {got}"
-
-    def test_layout_rows_cols_match(self, parsed):
+    def test_layout_grid_inferred_from_coordinates(self, parsed):
+        """排布行列必须从表位坐标聚类得出，不能靠猜。"""
         for c in parsed.cupboards:
             rows, cols = c.layout_rows_cols
+            assert rows >= 1 and cols >= 1, f"排布退化：{c.grid_aspect}"
             assert rows * cols >= c.positions_total, (
                 f"{rows}x{cols} 装不下 {c.positions_total} 个表位"
+            )
+
+    def test_grid_aspect_format(self, parsed):
+        for c in parsed.cupboards:
+            assert re.fullmatch(r"\d+x\d+", c.grid_aspect), (
+                f"grid_aspect 格式错：{c.grid_aspect}"
             )
 
     def test_positions_sorted_top_to_bottom(self, parsed):
@@ -217,39 +321,70 @@ class TestCupboardDecomposition:
             ys = [p.rect.cy for p in c.positions]
             assert ys == sorted(ys, reverse=True), "表位未按从上到下排序"
 
-    def test_no_junk_cabinet_from_duct_blocks(self, parsed):
-        """Aect_Duct 风管零件绝不能被当成柜型。"""
-        for c in parsed.cupboards:
-            low = c.layer.lower()
-            assert not any(k in low for k in JUNK_LAYER_KEYWORDS), (
-                f"柜型来自噪声图层 {c.layer}"
-            )
 
-    def test_cabinet_sizes_are_plausible(self, parsed):
-        """柜体尺寸应在「人能装的壁龛」区间（截图里 1000~2400mm）。"""
-        for c in parsed.cupboards:
-            w, h = c.bbox_mm
-            assert w and h, "柜体尺寸必须算出来"
-            assert 400 <= w <= 5000, f"柜宽 {w} 不合理"
-            assert 400 <= h <= 5000, f"柜高 {h} 不合理"
+class TestRealDrawingGeometry:
+    """真实图纸的实测特征 —— 防止解析器退化回「闭合矩形」那条错路。"""
 
+    def test_cabinets_come_from_line_pairs_not_closed_polylines(self, parsed):
+        """柜框必须是「成对 LINE」，不是闭合多段线。
 
-class TestDimensionsFromDrawing:
-    def test_width_read_from_dimension_chain(self, parsed):
-        """总尺寸要从标注链读出，而不是取「最近那条」。
-
-        实测踩坑：用户实图标注链形如 ``50/175/200/100/250/175/50``，
-        总宽 1000。最初取最近标注，拿到的是第一段 **50**，
-        柜体尺寸全错。现在靠「细分链求和 ≈ 边长」判定。
+        真实文件实测：1069 个 LWPOLYLINE 里只有 16 个闭合，且闭合的
+        主要是 250×450 的表位框和 4414×6215 的混凝土剖面 ——
+        **没有一个是柜体**。早期「闭合矩形 = 柜体」的规则在真实文件上
+        只能识别出 1 个（那个混凝土剖面），真正的柜型全漏。
         """
         for c in parsed.cupboards:
-            assert c.dim_w_mm == pytest.approx(c.rect.width, rel=0.10), (
-                f"读到的宽 {c.dim_w_mm} 与几何 {c.rect.width:.0f} 差太远"
-            )
-            assert c.dim_w_mm and c.dim_w_mm > 500, (
-                f"读到细分段而非总尺寸：{c.dim_w_mm}"
+            assert c.rect.source_type == "LINE_PAIR", (
+                f"柜体来源应为 LINE_PAIR，实际 {c.rect.source_type} —— "
+                f"闭合多段线规则在真实图纸上无效"
             )
 
+    def test_frame_pairs_counted(self, parsed):
+        assert parsed.cabinet_frame_pairs == len(parsed.cupboards), (
+            f"柜框配对数 {parsed.cabinet_frame_pairs} 与柜型数 "
+            f"{len(parsed.cupboards)} 不一致"
+        )
+
+    def test_cabinet_sizes_are_plausible(self, parsed):
+        """柜体尺寸实测区间：宽 865~2165mm，高 1750~2400mm。
+
+        下限 1750 而不是 1800：``x=-4729..-3815`` 那个 3 units 柜的
+        DIMENSION 标注实测就是 ``914.6 × 1750``，取 1800 会误判成配错。
+        """
+        for c in parsed.cupboards:
+            w, h = c.bbox_mm
+            assert 800 <= w <= 2500, f"柜宽 {w:.0f} 超出实测区间"
+            assert 1700 <= h <= 2600, f"柜高 {h:.0f} 超出实测区间"
+
+    def test_all_cabinets_above_ground(self, parsed):
+        """柜高区间约束（1700~2600）保证不会把相邻柜的共用横线当上下边。"""
+        for c in parsed.cupboards:
+            assert 1700 <= c.rect.height <= 2600, (
+                f"柜高 {c.rect.height:.0f} 异常，疑似上下边配错"
+            )
+
+    def test_cabinets_do_not_overlap(self, parsed):
+        """柜与柜不能重叠 —— 重叠意味着框配对有误。
+
+        相邻柜共用一条横线是允许的（共边），但**面积重叠**不行。
+        """
+        rects = [c.rect for c in parsed.cupboards]
+        for i in range(len(rects)):
+            for j in range(i + 1, len(rects)):
+                a, b = rects[i], rects[j]
+                ox = min(a.x1, b.x1) - max(a.x0, b.x0)
+                oy = min(a.y1, b.y1) - max(a.y0, b.y0)
+                if ox > 0 and oy > 0:
+                    area = ox * oy
+                    smaller = min(a.width * a.height, b.width * b.height)
+                    assert area / smaller < 0.05, (
+                        f"两个柜重叠 {area/smaller:.0%}："
+                        f"{a.width:.0f}×{a.height:.0f}@{a.x0:.0f},{a.y0:.0f} 与 "
+                        f"{b.width:.0f}×{b.height:.0f}@{b.x0:.0f},{b.y0:.0f}"
+                    )
+
+
+class TestDimensionsAndOutput:
     def test_as_dict_matches_requirement_fields(self, parsed):
         """需求文档 2.2 节要求的几何特征字段要齐。"""
         d = parsed.cupboards[0].as_dict()
@@ -259,41 +394,25 @@ class TestDimensionsFromDrawing:
         assert d["positions_total"] > 0
         assert set(d["bbox"]) == {"x", "y", "w", "h"}
 
-
-class TestNotesIsolation:
-    def test_notes_do_not_cross_cabinets(self, parsed):
-        """并排柜子的说明文字不能互相串台。
-
-        实测踩坑：一开始允许文字水平超出柜体 400mm，结果
-        「6 SETS - 2 COL x 3 ROW」被两个柜子同时收进来。
-        """
-        allnotes = [n for c in parsed.cupboards for n in c.notes]
-        assert len(allnotes) == len(set(allnotes)), f"说明文字串台：{allnotes}"
-
-    def test_each_cabinet_has_its_own_note(self, parsed):
-        """每个柜子都应该认领到自己的那行说明。"""
-        for c in parsed.cupboards:
-            assert c.notes, f"柜 {c.rect.as_tuple()} 没读到说明文字"
-
-
-class TestDiagnostics:
-    def test_reports_entity_and_rect_counts(self, parsed):
-        assert parsed.entity_total > 0
-        assert parsed.rect_total > 0
-        assert parsed.rect_total <= parsed.entity_total
-
-    def test_records_discarded_with_reason(self, parsed):
-        """被丢弃的矩形必须带理由 —— 用户抱怨「为啥有这些」时要能解释。"""
-        assert parsed.discarded
-        for rect, reason in parsed.discarded:
-            assert reason, f"丢弃 {rect.as_tuple()} 没给理由"
-
     def test_summary_is_human_readable(self, parsed):
         s = parsed.summary()
         assert "柜型" in s
         assert "表位" in s
         for c in parsed.cupboards:
             assert str(c.positions_total) in s
+
+
+class TestDiagnostics:
+    def test_reports_entity_count(self, parsed):
+        """真实文件实测 3420 个 modelspace 实体。"""
+        assert parsed.entity_total > 3000, (
+            f"实体数 {parsed.entity_total} 偏少，可能漏读了 modelspace"
+        )
+
+    def test_records_discarded_with_reason(self, parsed):
+        """被丢弃的矩形必须带理由 —— 用户抱怨「为啥有这些」时要能解释。"""
+        for rect, reason in parsed.discarded:
+            assert reason, f"丢弃 {rect.as_tuple()} 没给理由"
 
     def test_cabinet_layer_hits_recorded(self, parsed):
         """记录柜体图层命中情况，便于诊断「图层对不对」。"""

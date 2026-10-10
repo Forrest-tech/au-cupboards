@@ -250,9 +250,16 @@ class TestTopLevelImportsAreDeclared:
                     if not m:
                         continue
                     mod = m.group(1)
-                    # `from __future__ import ...` 会被正则截成 "--future--"
+                    # `from __future__ import ...` 会被正则截成"--future--"
+                    #
+                    # ``app`` 和 ``tests`` 都是**本仓库自己的包**，不是
+                    # 第三方，必须一起排除。漏掉 ``tests`` 的后果很具体：
+                    # ``tests/fixtures/real_dwg.py`` 里定义Ground Truth，
+                    # 测试文件用 ``from tests.fixtures.real_dwg import ...``
+                    # 拿它 —— 扫���器不认识 ``tests``，就会把这条真实存在的
+                    # 内部引用报成「未声明的第三方包」。
                     if (mod.startswith("_") or mod in _STDLIB
-                            or mod == "app"):
+                            or mod in ("app", "tests")):
                         continue
                     dist = cls.ALIAS.get(mod, mod.lower().replace("_", "-"))
                     if dist not in declared:

@@ -180,6 +180,10 @@ main{display:flex;height:calc(100% - 52px)}
 .node .ct{font-size:10px;color:var(--dim);font-variant-numeric:tabular-nums}
 .node.lv1{padding-left:26px}
 .node.lv2{padding-left:40px;font-size:12px;color:var(--dim)}
+/* 同套数下的具体摆法（「6 Units - A」）：再缩进一级，字色加深 —— 它们
+   才是真正会被选中的叶子节点，光靠 lv2 的灰色会显得像分类标题。 */
+.node.lv2.lv3{padding-left:54px;color:var(--fg)}
+.node.lv2.lv3:hover{background:#f2f6fb}
 
 /* ---------- 中栏 ---------- */
 .mid-bar{
@@ -825,7 +829,29 @@ function libraryGroups() {
     }
     // 套数从少到多排：5 Units 在 6 Units 前面，符合直觉
     const units = [...byUnits.entries()]
-      .map(([n, list]) => ({ n, list, key: `${fname}#${n}` }))
+      .map(([n, list]) => {
+        // 同套数下的多个柜用 A / B / C 区分（用户口径）。
+        //
+        // 排序依据必须是**柜体尺寸**而不是入库顺序：真实样本里
+        // 同一套数下三个柜的入库顺序受DXF 实体顺序影响，
+        // 每次解析可能不同，按顺序编号会让 A/B 换来换去。
+        // 尺寸（宽×高）稳定，且正是用户区分"不同摆法"的依据。
+        const sorted = [...list].sort((a, b) =>
+          (Number(a.w) - Number(b.w)) || (Number(a.h) - Number(b.h))
+          || String(a.code).localeCompare(String(b.code)));
+        return {
+          n,
+          list: sorted,
+          key: `${fname}#${n}`,
+          labels: sorted.map((v, i) => ({
+            // 只有 1 个柜时不需要后缀，多了反而啰嗦
+            suffix: sorted.length > 1
+              ? '-' + String.fromCharCode(65 + i)
+              : '',
+            v,
+          })),
+        };
+      })
       .sort((a, b) => a.n - b.n);
     files.push({
       name: fname,
@@ -859,10 +885,22 @@ function renderTreeLibrary() {
         title="${t('lib.rename')}">✎</button></div>`;
     if (fopen) {
       for (const u of f.units) {
-        const on = S.treeSel === u.key ? ' on' : '';
-        h += `<div class="node lv2${on}" data-lg="${esc(u.key)}">
-          <span class="nm">${u.n} ${t('lib.units')}</span>
-          <span class="ct">${u.list.length}</span></div>`;
+        // 只有一个摆法时不加后缀；有多个时逐个列成
+        // 「6 Units - A」「6 Units - B」…（「13 Units」有三个）
+        const rows = u.labels.length === 1
+          ? [{ key: u.key, label: `${u.n} ${t('lib.units')}`, ct: 1 }]
+          : u.labels.map(x => ({
+            key: u.key + '@' + x.v.id,
+            label: `${u.n} ${t('lib.units')}${x.suffix}`,
+            ct: null,
+          }));
+        for (const r of rows) {
+          const on = S.treeSel === r.key ? ' on' : '';
+          const ct = r.ct === null ? '' : `<span class="ct">${r.ct}</span>`;
+          h += `<div class="node lv2${on}${r.ct === null ? ' lv3' : ''}"
+            data-lg="${esc(r.key)}" data-vid="${esc(r.key.split('@')[1] || '')}">
+            <span class="nm">${esc(r.label)}</span>${ct}</div>`;
+        }
       }
     }
   }
@@ -1121,17 +1159,38 @@ function filterFloor(code) { S.floorFilter = S.floorFilter === code ? null : cod
  *  尺寸不同就是不同的摆法（1315×2250 与 1315×2300 算两种）。
  */
 function showUnitsGroup(key, keepScroll) {
-  const hash = String(key).lastIndexOf('#');
-  const fname = hash >= 0 ? key.slice(0, hash) : key;
-  const n = hash >= 0 ? Number(key.slice(hash + 1)) : 0;
-  const items = S.variants.filter(v => {
+  // key 有两种形态：
+  //   ``<fname>#<units>``      整个套数组（平铺全部摆法）
+  //   ``<fname>#<units>@<id>`` 某一个具体摆法（树上「6 Units - B」）
+  const at = String(key).indexOf('@');
+  const onlyId = at >= 0 ? String(key).slice(at + 1) : '';
+  const base = at >= 0 ? String(key).slice(0, at) : String(key);
+  const hash = base.lastIndexOf('#');
+  const fname = hash >= 0 ? base.slice(0, hash) : base;
+  const n = hash >= 0 ? Number(base.slice(hash + 1)) : 0;
+  const pool = S.variants.filter(v => {
     const vf = v.source_name || v.dwg_name || t('tree.library');
     return vf === fname && Number(v.positions || 0) === n;
   });
+  // 与 libraryGroups() 保持同样的排序，树上第 i 个字母对应这里第 i 个
+  const sortedPool = [...pool].sort((a, b) =>
+    (Number(a.w) - Number(b.w)) || (Number(a.h) - Number(b.h))
+    || String(a.code).localeCompare(String(b.code)));
+  const items = onlyId
+    ? pool.filter(v => String(v.id) === onlyId)
+    : sortedPool;
+  // 后缀字母：始终按**整组**的排序位置算，不能用 items.indexOf ——
+  // 选中单个变体时 items 只有一条，会永远算成 "A"。
+  const suffixOf = (v) => {
+    if (sortedPool.length <= 1) return '';
+    const i = sortedPool.findIndex(x => String(x.id) === String(v.id));
+    return i >= 0 ? ' - ' + String.fromCharCode(65 + i) : '';
+  };
   const withImg = items.filter(v => v.image_url);
   const scroll0 = keepScroll ? ($('#rpane')?.scrollTop || 0) : 0;
 
-  $('#mfn').textContent = dispName(fname) + ' · ' + n + ' ' + t('lib.units');
+  $('#mfn').textContent = dispName(fname) + ' · ' + n + ' ' + t('lib.units')
+    + (items.length === 1 ? suffixOf(items[0]) : '');
   $('#pagelist').innerHTML = '';
   resetViewer();
   $('#bpage').style.display = withImg.length ? '' : 'none';
@@ -1144,14 +1203,16 @@ function showUnitsGroup(key, keepScroll) {
 
   let h = `<div class="sec" style="padding-left:0">
       ${dispName(fname)} · <b>${n} ${t('lib.units')}</b> ·
-      ${LANGNOW === 'zh' ? '共' : ''} ${items.length}
-      ${LANGNOW === 'zh' ? '种摆法' : (items.length === 1 ? 'layout' : 'layouts')}
+      ${LANGNOW === 'zh' ? '共' : ''} ${pool.length}
+      ${LANGNOW === 'zh' ? '种摆法' : (pool.length === 1 ? 'layout' : 'layouts')}
+      ${onlyId ? `<span style="color:var(--dim)"> · ${LANGNOW === 'zh' ? '仅显示' : 'showing'} ${
+        n}${suffixOf(items[0])}</span>` : ''}
     </div>`;
-  if (items.length > 1) {
+  if (pool.length > 1 && !onlyId) {
     h += `<div class="alert ok" style="margin-bottom:10px">
       ${LANGNOW === 'zh'
-        ? `同样是 ${n} 套，柜子的尺寸和 meter 摆放方式可以不同 —— 下面 ${items.length} 种都是这个套数的合法柜型。`
-        : `All ${items.length} below hold ${n} units; only the size and meter layout differ.`}
+        ? `同样是 ${n} 套，柜子的尺寸和 meter 摆放方式可以不同 —— 下面 ${pool.length} 种都是这个套数的合法柜型。`
+        : `All ${pool.length} below hold ${n} units; only the size and meter layout differ.`}
     </div>`;
   }
   h += '<div class="cupgrid">';
@@ -1167,7 +1228,7 @@ function showUnitsGroup(key, keepScroll) {
         : `<div class="noph">${t('lib.noimg')}</div>`}</div>
       <div class="meta">
         <div class="code mono">${esc(v.code)}</div>
-        <div class="dim">${n} ${t('lib.units')} · ${esc(v.grid || '-')}</div>
+        <div class="dim">${n} ${t('lib.units')}${esc(suffixOf(v))} · ${esc(v.grid || '-')}</div>
         <div class="dim">${v.w ?? '—'} × ${v.h ?? '—'} × ${v.d ?? '—'} mm ${srcTag}</div>
         ${v.description ? `<div class="desc">${esc(v.description)}</div>` : ''}
       </div></div>
