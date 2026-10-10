@@ -2789,15 +2789,30 @@ function paintRenders() {
   // 柜型尺寸/套数明细 —— 后端返回 cupboards 时按柜型展示，
   // 没有就退回旧的「实体数 × 尺寸」写法。
   const cupByCode = new Map((S.cupboards || []).map(c => [c.code, c]));
+  // 图元简称 → 中文名。柜型图是用 DWG 里这4 个 meter 块的光栅化 PNG
+  // 按真实表位坐标贴出来的，所以这里直接把「贴了几张原图」亮出来，
+  // 用户一眼就能确认图不是程序自己画的（用户诉求 #F）。
+  const SPRITE_LABEL = {gas: '燃气表', water_v: '冷水表(竖)', water_h: '冷水表(横)', hot: '热水表'};
+  const spriteLine = (r) => {
+    const sp = r.sprites || {};
+    const keys = Object.keys(sp);
+    if (!keys.length) return '';
+    const parts = keys.map(k => `${sp[k]} ${SPRITE_LABEL[k] || k}`);
+    const total = keys.reduce((a, k) => a + (sp[k] || 0), 0);
+    return `<div class="dim" title="DWG 原图元合成">${LANGNOW === 'zh'
+      ? `DWG 原图元合成 · ${total} 个：${parts.join(' + ')}`
+      : `DWG sprites · ${total}: ${parts.join(' + ')}`}</div>`;
+  };
   for (const r of rs) {
     const on = sel.has(r.block_name);
     const c = cupByCode.get(r.block_name);
-    const meta = c
+    const meta = (c
       ? `<div class="dim">${LANGNOW==='zh'
           ? `${c.positions_total} ${t('lib.units')}${c.grid_aspect ? ' · ' + c.grid_aspect : ''}`
           : `${c.positions_total} units${c.grid_aspect ? ' · ' + c.grid_aspect : ''}`}
           ${c.gas_count}/${c.water_count} · ${fmtMM(c.w)} × ${fmtMM(c.h)} mm</div>`
-      : `<div class="dim">${r.entity_count} ${t('dwg.entity')} · ${r.width_mm ?? '—'} × ${r.height_mm ?? '—'} mm</div>`;
+      : `<div class="dim">${r.entity_count} ${t('dwg.entity')} · ${r.width_mm ?? '—'} × ${r.height_mm ?? '—'} mm</div>`)
+      + spriteLine(r);
     h += `<div class="cupcard has-img${on ? ' on' : ''}" data-sel="${esc(r.block_name)}">
         <div class="thumb"><img loading="lazy" src="/api/thumbs/${esc(r.image_name)}"
              alt="${esc(r.block_name)}"><span class="tick">${on ? '✓' : ''}</span></div>
