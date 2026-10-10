@@ -986,6 +986,10 @@ class RenderOut(BaseModel):
     text_render_failed: bool = False
     #: 降级时被剥离的带文字实体数量。
     stripped_count: int = 0
+    #: 图元合成时各类仪表的贴图数量，如 ``{"gas": 13, "water_v": 13}``。
+    #: 前端把它显示在卡片上 —— 这是「柜型图确实由 DWG 原图元合成」
+    #: 最直接的证据：数字与柜内实际表位数一一对应。
+    sprites: dict[str, int] = {}
 
 
 class RenderRequest(BaseModel):

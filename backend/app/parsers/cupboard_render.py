@@ -27,6 +27,7 @@ import ezdxf
 from ezdxf.bbox import extents
 
 from .cupboard_geometry import _entity_extents, bind_document
+from .meter_sprites import METER_BLOCKS
 
 log = logging.getLogger(__name__)
 
@@ -201,6 +202,10 @@ class BlockRender:
     text_render_failed: bool = False
     #: 降级时删掉了多少个带文字的实体（DIMENSION/TEXT/…）
     stripped_count: int = 0
+    #: 图元合成时各类仪表的贴图数量，如 ``{"gas": 13, "water_v": 13}``。
+    #: 这是「柜型图真的用了 DWG 原图」的直接证据 —— 数字对得上，
+    #: 说明图上的每个图元都对应 DWG 里的一个真实实例。
+    sprites: dict[str, int] = field(default_factory=dict)
     error: str | None = None
 
 
@@ -835,6 +840,7 @@ def render_cupboard_regions(
     dpi: int = DPI,
     parsed=None,
     workers: int | None = None,
+    compose: bool = True,
 ) -> tuple[list[BlockRender], object]:
     """把每个**柜体**渲染成一张 JPG。
 
@@ -843,13 +849,30 @@ def render_cupboard_regions(
     就是前两轮反复踩的坑—— 用户要的是**整个柜子**，
     不是柜子内部的单个 water 表 / gas 表符号。
 
-    实现方式：柜体在 modelspace 里是一个矩形区域，不是一个命名 block。
-    所以把**落在该矩形内的所有实体**复制到临时 modelspace 再渲染，
-    等价于「把柜子这一块单独抠出来画」。
+    两种出图方式（``compose``）
+    ------------------------
+    * ``compose=True``（**默认，用户诉求 #F**）
+      用 DWG 里的真实 meter 图元（``water meter v/h``、``gas meter 1``、
+      ``h-meter``）按解析器量出的表位坐标**合成**柜型图。
+      图上每个线条都是 DXF 里的原始图元，一个都没自己画。
+    * ``compose=False``
+      旧路径：把落在柜体矩形内的**全部**实体丢给 matplotlib 整柜渲染。
+      保留是因为它能画出柜内的建筑底图线（标注、引线），
+      合成图里不含这些 —— 有时需要对照看。
 
     返回 ``(渲染结果列表, 解析结果)``。
     """
     from app.parsers.cupboard_geometry import parse_cupboards
+
+    if compose:
+        try:
+            return _render_by_compose(
+                dxf_path, out_dir, only_codes, parsed,
+            ), (parsed if parsed is not None
+                else parse_cupboards(dxf_path))
+        except Exception as exc:  # 合成失败退回整柜渲染，不让整批挂掉
+            log.warning("图元合成失败(%s: %s)，退回整柜渲染",
+                        type(exc).__name__, exc)
 
     dxf_path = Path(dxf_path)
     out_dir = Path(out_dir)
@@ -1067,3 +1090,174 @@ def rect_from_entity_safe(ent):
         return rect_from_entity(ent)
     except Exception:
         return None
+
+# ======================================================================
+# 图元合成路径（用户诉求 #F：柜型图必须用 DWG 原图）
+# ======================================================================
+
+#: 合成用的图元缓存目录。绝对路径，理由见 meter_sprites.SPRITE_DIR。
+SPRITE_CACHE_DIR = Path(__file__).resolve().parents[3] / "var" / "sprites"
+
+
+def _cabinet_frame_lines(doc, cup) -> list:
+    """找该柜体的外框 LINE。
+
+    柜体在 modelspace 里不是 block，而是由 4 条**跨图层长直线**围成的
+    矩形。这里把它们挑出来按原坐标描到图上 —— 端点取自 DXF，
+    所以柜框的每一段都对应图纸里真实存在的那条线。
+
+    判定：近水平/近垂直、长度 ≥ 柜宽/柜高的 80%、且落在柜矩形附近。
+    """
+    r = cup.rect
+    out = []
+    for e in doc.modelspace():
+        if e.dxftype() != "LINE":
+            continue
+        try:
+            x0, y0 = e.dxf.start.x, e.dxf.start.y
+            x1, y1 = e.dxf.end.x, e.dxf.end.y
+        except Exception:
+            continue
+        # 与柜矩形有交集才考虑
+        if (max(x0, x1) < r.x0 - 200 or min(x0, x1) > r.x1 + 200
+                or max(y0, y1) < r.y0 - 200 or min(y0, y1) > r.y1 + 200):
+            continue
+        horiz = abs(y1 - y0) < 40 and abs(x1 - x0) > r.width * 0.8
+        vert = abs(x1 - x0) < 40 and abs(y1 - y0) > r.height * 0.8
+        if horiz or vert:
+            out.append(e)
+    return out
+
+
+# ---- 合成 worker（fork 继承 doc，避免每柜重读+重解析 DXF）----
+_C: dict = {}
+
+
+def _c_init(doc, out_dir, sprite_dir):
+    _C.clear()
+    from .meter_sprites import SpriteBank
+
+    _C.update(doc=doc, out_dir=Path(out_dir), bank=SpriteBank(sprite_dir))
+
+
+def _c_render(job):
+    """合成单个柜型。返回 ``(idx, code, ok, error, meta)``。"""
+    idx, cup_rect, code, positions = job
+    from PIL import Image
+
+    from .cabinet_compose import compose_cabinet
+    from .cupboard_geometry import Cupboard, MeterPosition, Rect
+    from .meter_sprites import plan_from_positions
+
+    doc = _C["doc"]
+    try:
+        # 把 pickle 过来的表位还原成 Cupboard 结构（只用到 plan 所需字段）
+        cup = Cupboard(
+            rect=Rect(x0=cup_rect[0], y0=cup_rect[1],
+                      x1=cup_rect[2], y1=cup_rect[3]),
+            positions=[
+                MeterPosition(
+                    rect=Rect(x0=p[0], y0=p[1], x1=p[2], y1=p[3]),
+                    kind=p[4],
+                ) for p in positions
+            ],
+        )
+        plan = plan_from_positions(cup)
+        if not plan.placements:
+            return idx, code, False, "柜内没有识别到 water/gas 表位", {}
+        lines = _cabinet_frame_lines(doc, cup)
+        fpath = _C["out_dir"] / f"{code}.jpg"
+        meta = compose_cabinet(doc, cup, plan, _C["bank"], [], fpath,
+                               frame_lines=lines)
+        if not fpath.exists() or fpath.stat().st_size < 2048:
+            return idx, code, False, "合成产出为空文件", meta
+        with Image.open(fpath) as im:
+            meta["width_px"], meta["height_px"] = im.size
+        return idx, code, True, None, meta
+    except Exception as exc:
+        return idx, code, False, f"合成失败: {type(exc).__name__}: {exc}", {}
+
+
+def _render_by_compose(dxf_path, out_dir, only_codes, parsed) -> list[BlockRender]:
+    """图元合成主流程（支持 fork 并行）。"""
+    import ezdxf
+
+    from .meter_sprites import SpriteBank
+
+    dxf_path = Path(dxf_path)
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if parsed is None:
+        from app.parsers.cupboard_geometry import parse_cupboards
+
+        parsed = parse_cupboards(dxf_path)
+
+    doc = ezdxf.readfile(str(dxf_path))
+    bind_document(doc)
+
+    # 预热图元（串行渲染一次，存磁盘缓存；worker 直接命中缓存）
+    bank = SpriteBank(SPRITE_CACHE_DIR)
+    for name, short in METER_BLOCKS.items():
+        try:
+            bank.get(doc, name, short)
+        except Exception as exc:
+            log.warning("图元 %r 渲染失败: %s", short, exc)
+
+    jobs = []
+    for idx, cup in enumerate(parsed.cupboards):
+        code = _cabinet_code(cup, idx)
+        if only_codes and code not in only_codes:
+            continue
+        r = cup.rect
+        jobs.append((
+            idx,
+            (r.x0, r.y0, r.x1, r.y1),
+            code,
+            [(m.rect.x0, m.rect.y0, m.rect.x1, m.rect.y1, m.kind)
+             for m in (cup.positions or [])],
+        ))
+
+    n_workers = _auto_workers(len(jobs))
+    results: list[BlockRender] = []
+    if n_workers > 1 and len(jobs) > 1:
+        from concurrent.futures import ProcessPoolExecutor
+        import multiprocessing as mp
+
+        ctx = mp.get_context("fork")
+        try:
+            with ProcessPoolExecutor(
+                max_workers=n_workers, mp_context=ctx,
+                initializer=_c_init,
+                initargs=(doc, out_dir, SPRITE_CACHE_DIR),
+            ) as ex:
+                raw = list(ex.map(_c_render, jobs))
+            by_idx = {r[0]: r for r in raw}
+        except Exception as exc:
+            log.warning("合成并行失败(%s)，退回串行", exc)
+            _c_init(doc, out_dir, SPRITE_CACHE_DIR)
+            by_idx = {j[0]: _c_render(j) for j in jobs}
+    else:
+        _c_init(doc, out_dir, SPRITE_CACHE_DIR)
+        by_idx = {j[0]: _c_render(j) for j in jobs}
+
+    for job in jobs:
+        idx = job[0]
+        cup = parsed.cupboards[idx]
+        code = job[2]
+        _, _, ok, err, meta = by_idx[idx]
+        res = BlockRender(block_name=code, ok=ok)
+        res.layer = cup.layer
+        res.error = err
+        if ok:
+            res.image_name = f"{code}.jpg"
+            res.width_mm, res.height_mm = meta.get("width_mm"), meta.get("height_mm")
+            res.texts = list(cup.notes)
+            # 合成诊断：图元数与各类表数量
+            counts = meta.get("counts") or {}
+            res.entity_count = int(meta.get("sprites_placed") or 0)
+            res.sprites = counts
+        else:
+            res.entity_count = len(cup.positions or [])
+        results.append(res)
+    return results
+
