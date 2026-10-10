@@ -818,6 +818,11 @@ class VariantIn(BaseModel):
     positions: int | None = None
     #: 排布字符串，如 "5x4"（5 列 × 4 行）
     grid: str | None = None
+    #: **替换目标**（用户诉求「如果库里面已经有一样的图，就提示已经存在，
+    #: 是否要替换」）。前端检测到同尺寸柜型已存在、用户选「替换」时，
+    #: 把已存在的变体 id 放在这里 —— 后端改为**更新那条记录的图与尺寸**，
+    #: 而不是新建一条重复的。
+    replace_id: int | None = None
 
 
 @app.post("/api/variants")
@@ -1106,6 +1111,11 @@ class DwgCommitIn(BaseModel):
     note: str | None = None
     #: 柜型 block 名 → 渲染结果。解析阶段产出，前端原样回传。
     renders: list[RenderOut] = []
+    #: 重复柜型的处理策略（用户诉求 #E）：
+    #:   add（默认）— 照旧新建，可能与库里已有记录重复
+    #:   replace    — 同尺寸的已有变体改写图与尺寸，不新建
+    #:   skip       — 前端已把重复项剔掉，这里只做兜底校验
+    dup_mode: str = "add"
 
 
 @app.post("/api/cupboards/from-dwg")
@@ -1113,6 +1123,7 @@ def commit_from_dwg(body: DwgCommitIn) -> dict[str, Any]:
     """需求 2：分解预览 → 人工确认 → 入库。"""
     pl = _pipeline()
     created = 0
+    replaced = 0
     with Session(pl.engine) as s:
         c = s.scalar(select(Cupboard).where(Cupboard.code == "CP-GENERIC"))
         if c is None:
@@ -1123,6 +1134,31 @@ def commit_from_dwg(body: DwgCommitIn) -> dict[str, Any]:
         # block 名 → 渲染结果。尺寸优先用 DWG 实测值，不再是 POC 占位。
         rmap = {r.block_name: r for r in body.renders if r.ok and r.image_name}
         for v in body.variants:
+            # ---- 「替换已有柜型」分支 ----
+            # 用户在重复提示里点了「替换」：把图与尺寸写回那条已存在的
+            # 变体，而不是新建一条同尺寸的重复记录。
+            # 注意只碰图与尺寸，**不动套数**（positions_total）——
+            # 套数由柜体几何决定，换张图不该改变一个柜能装几套。
+            if v.replace_id:
+                old = s.get(CupboardVariant, int(v.replace_id))
+                if old is not None:
+                    r0 = rmap.get(v.block_name or "") or rmap.get(v.code)
+                    if w0 := (v.w if v.w is not None
+                              else (r0.width_mm if r0 else None)):
+                        old.w = w0
+                    if h0 := (v.h if v.h is not None
+                              else (r0.height_mm if r0 else None)):
+                        old.h = h0
+                    if r0 and r0.image_name:
+                        old.image_path = f"{THUMB_DIR}/{r0.image_name}"
+                        old.image_dpi = DEFAULT_THUMB_DPI
+                        old.size_source = "measured"
+                    if v.grid:
+                        old.grid_aspect = v.grid
+                        old.layout_rows = v.rows
+                        old.layout_cols = v.cols
+                    replaced += 1
+                    continue
             if s.scalar(select(CupboardVariant).where(CupboardVariant.variant_code == v.code)):
                 continue
             # 先按 block_name 精确匹配，再退回 code（多数情况两者相同）
@@ -1184,7 +1220,7 @@ def commit_from_dwg(body: DwgCommitIn) -> dict[str, Any]:
         # 原代码在 Cupboard 已存在时不 commit 前访问，侥幸没触发。
         s.commit()
         cid = c.id
-    return {"created": created, "cupboard_id": cid}
+    return {"created": created, "replaced": replaced, "cupboard_id": cid}
 
 
 # ---------------------------------------------------------------- 修正字典

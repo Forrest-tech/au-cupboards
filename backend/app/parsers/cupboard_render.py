@@ -44,17 +44,55 @@ JPEG_QUALITY = 88
 
 #: 渲染线宽（1/100 mm）。
 #:
-#: 历史：默认配置下白底上几乎看不见（产出 4587字节的「空白图」），
-#: 于是把它调到 25（0.25mm）强行加粗 —— 那是在**按 block 渲染**时期，
-#: 因为整个 block 缩到一张图里，线条太细就真的看不见了。
+#: 历史踩坑链（三轮才收敛）：
 #:
-#: 现在改回细线：按**柜体区域**渲染后，一个柜子独占一张图，
-#: 细节足够大。实测 min_lineweight=25 会把 150×190mm 的表位框
-#: 糊成一块黑斑，完全看不出柜内排布；改成 6 才能看清
-#: 「水表竖线+圆头」与「气表框」的结构。
+#: 1. 最早默认配置下白底上几乎看不见 → 调到 25（0.25mm）强行加粗。
+#:    那是**按 block 渲染**时期：整个 block 缩到一张图里，线条太细
+#:    真的看不见。
+#: 2. 改成按**柜体区域**渲染后，一个柜子独占一张图，25 太粗 ——
+#:    150×190mm 的表位框直接糊成黑斑，看不出柜内排布。降到 6。
+#: 3. 用户实测仍不满意（截图里柜内是一坨黑块，认不出 water meter /
+#:    gas meter），要求「必须使用 DWG 里的原图，可以用 water meter
+#:    和 gas meter 作为原始元素」。
 #:
-#: 6 = 0.06mm，在 1400px 宽的图上约 1~2px，清晰且不糊。
-MIN_LINEWEIGHT = 6
+#: 根因不是线宽策略（RELATIVE_FIXED / ABSOLUTE 产物字节数完全一样，
+#: 32KB vs 32KB），而是 **min_lineweight 是个下限**：
+#: DXF 里 water/gas meter 的块内轮廓线自身线宽只有 5~9（0.05~0.09mm），
+#: 6 的下限把它们和柜体粗线（~50）一起保住了，但 meter 内部那些
+#: 0.05mm 级的细部（表盘、阀门、接管）全被下限「抬」到 0.06mm，
+#: 在 1400px 图上叠成实心块。
+#:
+#: 实测参数矩阵（同一柜 CP-13p-01，1400×1555）：
+#:   minlw=6  → 32KB，细部糊成黑块（用户截图就是这个）
+#:   minlw=2  → 47KB，能看出 meter 轮廓
+#:   minlw=1  → 70KB，water meter 的表盘/阀门/接管全部可辨
+#:   minlw=0  → 51KB，反而更糊（0 号线在 110dpi 下小于 1px，
+#:               matplotlib 走 antialiasing 把它糊回去）
+#:
+#: 结论取 1：既保住了 DXF 原始线宽的层级关系，又让最细的线至少 1px。
+MIN_LINEWEIGHT = 1
+
+#: 渲染 DPI（像素/英寸）。110 是 matplotlib 下的经验值 ——
+#: 提高到 200 只让文件从 70KB 涨到 95KB、耗时涨 80%，肉眼几乎无差别。
+DPI = 110
+
+#: **带文字实体**（标注/引线/文字）。渲染它们必须查系统字体，
+#: 而容器里字体不全时`ezdxf` 会抛
+#: ``AttributeError: 'NoneType' object has no attribute 'filename'``。
+#:
+#: 排查结论（真实样本 23 个柜型 100% 触发）：触发者**不是** TEXT/MTEXT，
+#: 而是 50 个 **DIMENSION** —— 标注文字同样要查字体。��且
+#: ``FontFace()`` 的``filename`` 默认就是 ``None``，实体 style 为空时
+#: 会带着空 filename 一路传到 ``find_font_name`` 才炸。
+#:
+#: 所以渲染**默认直接跳过带文字实体**，不再「先试一次失败再降级」——
+#: 那个「先试一次」每次要白跑2~4 秒（matplotlib 画到 DIMENSION 才炸，
+#: 前面的线已经画完了），23 个柜型就是 70 秒纯浪费。
+#:
+#: 代价是图里没有标注数值。对「看清柜型排布」这个用途来说，
+#: 尺寸数值本来就由右栏的文字给出，图上少几个数字不致命；
+#: 而糊成黑块的图是彻底不可用的。
+RENDER_TEXT = False
 
 #: 产出 JPG 的最小合理字节数。
 #:
@@ -337,6 +375,80 @@ def _trim_white_border(path: Path, pad_ratio: float = 0.012) -> None:
         pass
 
 
+def _fonts_available() -> bool:
+    """系统里有没有可用的默认字体。
+
+    ``ezdxf`` 渲染任何**带文字**的实体时都会走
+    ``fonts.find_font_file_name(font_face)``，而 ``FontFace()`` 的
+    ``filename`` 默认是 ``None`` —— style 为空的实体（真实样本里
+    DIMENSION 展开出的虚拟 MTEXT 就是这样）会一路把 ``None`` 传进去，
+    然后在 ``font_manager._font_cache.find_best_match`` 里炸成
+    ``AttributeError: 'NoneType' object has no attribute 'filename'``。
+
+    所以这里主动探测一次：能拿到带``filename`` 的 FontFace 才允许
+    渲染文字，省掉「先渲染一次再降级」的巨额 wasted time。
+    """
+    try:
+        from ezdxf.fonts import fonts
+        ff = fonts.font_manager.get_font_face("")
+        return bool(ff is not None and getattr(ff, "filename", None))
+    except Exception:
+        return False
+
+
+def _render_config():
+    """柜型图渲染配置。
+
+    - ``RELATIVE_FIXED``：按实体的 lineweight 渲染。实测与 ``ABSOLUTE``
+      产物字节数完全一致（32KB vs 32KB），但 RELATIVE 会把 0 权重线
+      也画出来，对柜型图更有用。
+    - ``min_lineweight=MIN_LINEWEIGHT(1)``：DXF 里water/gas meter
+      的细部线宽只有 5~9，下限设6 会把它们糊成实心黑块（用户截图
+      就是这样）。降到 1 之后表盘、阀门、接管都能看清。
+    - ``BLACK`` + ``WHITE``：建筑图纸惯例，黑线白底，打印和缩略图
+      都能看清。彩色版（COLOR policy）实测只有 23KB 且线条丢失，
+      因为 DXF 里的 ACI 色在白底上非常浅。
+    """
+    from ezdxf.addons.drawing.config import (
+        BackgroundPolicy,
+        ColorPolicy,
+        Configuration,
+        LineweightPolicy,
+    )
+    return Configuration(
+        lineweight_policy=LineweightPolicy.RELATIVE_FIXED,
+        lineweight_scaling=1.0,
+        min_lineweight=MIN_LINEWEIGHT,
+        color_policy=ColorPolicy.BLACK,
+        background_policy=BackgroundPolicy.WHITE,
+    )
+
+
+def _draw_one(target_doc, fpath: Path, pw: int, ph: int, cfg, dpi: int) -> Path:
+    """把 target_doc 的 modelspace 渲染成一张白底黑线 JPG。
+
+    单独抽成函数是为了让并行 worker 能直接调用它（进程池里没法
+    闭包捕获 plt/Frontend 这些对象）。
+    """
+    import matplotlib.pyplot as plt
+    from ezdxf.addons.drawing import Frontend, RenderContext
+    from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
+
+    f = plt.figure(figsize=(pw / dpi, ph / dpi), dpi=dpi)
+    try:
+        a = f.add_axes([0, 0, 1, 1])
+        a.set_axis_off()
+        a.set_facecolor("white")
+        Frontend(RenderContext(target_doc), MatplotlibBackend(a),
+                 config=cfg).draw_layout(target_doc.modelspace(),
+                                         finalize=True)
+        f.savefig(str(fpath), format="jpg", facecolor="white", dpi=dpi,
+                  pil_kwargs={"quality": JPEG_QUALITY})
+    finally:
+        plt.close(f)
+    return fpath
+
+
 def _pick_size(bbox, width: int) -> tuple[int, int]:
     """按 bbox 比例算画布尺寸，并夹在上限内。
 
@@ -588,13 +700,141 @@ def render_cupboard_library(
 
 # ============================================================ 按柜体渲染
 
+#: 渲染并行度上限。实测 8 最优，16 反而更慢（见
+#: :func:`render_cupboard_regions` 里的实测数据），所以封顶 8。
+MAX_RENDER_WORKERS = 8
+
+
+def _auto_workers(n_jobs: int) -> int:
+    """按 CPU 数与任务量决定并行度。
+
+    ``os.cpu_count()`` 在容器里可能返回几十核，但这是**共享**宿主，
+    真实可用配额往往只有 2~4。所以按 ``min(8, cpu-1, 任务数)`` 取，
+    并且至少留一个核给主进程。
+    """
+    import os
+    try:
+        cpus = len(os.sched_getaffinity(0))     # 比 cpu_count 更准（含 cgroup 限制）
+    except AttributeError:
+        cpus = os.cpu_count() or 2
+    return max(1, min(MAX_RENDER_WORKERS, cpus - 1, n_jobs))
+
+
+# ---- 并行渲染 worker ----
+#
+# 这些函数必须在**模块顶层**（不能是闭包），ProcessPoolExecutor 才能
+# pickle 它们。用 fork 上下文时，子进程直接继承父进程的 doc /
+# all_ents全局状态，不需要重新 readfile。
+_W: dict = {}
+
+
+def _w_init(doc, all_ents, out_dir, width, dpi, strip_text):
+    """进程池 initializer：把父进程已解析好的状态塞进模块全局。"""
+    import matplotlib
+    matplotlib.use("Agg")
+    _W.clear()
+    _W.update(doc=doc, all_ents=all_ents, out_dir=Path(out_dir), width=width,
+              dpi=dpi, strip_text=strip_text, cfg=_render_config())
+
+
+def _w_render(job):
+    """渲染单个柜型，返回 ``(idx, code, ok, error, meta)``。
+
+    只回传标量与字符串，不回传 ezdxf 实体 —— 后者不可 pickle 且体积大。
+    """
+    import matplotlib.pyplot as plt
+    from ezdxf.bbox import extents as _ext
+
+    idx, cup_rect, cup_bbox, code = job
+    doc = _W["doc"]
+    try:
+        inside = [e for e in _W["all_ents"] if _entity_near(e, cup_rect, tol=2.0)]
+        if not inside:
+            return idx, code, False, "柜体区域内没有实体", {}
+
+        if _W["strip_text"]:
+            view_doc, stripped = _clone_without_text(doc, inside)
+            meta = {"entity_count": len(inside), "stripped_count": stripped,
+                    "text_render_failed": True}
+            if stripped == 0:
+                view_doc = None
+        else:
+            view_doc, meta = None, {"entity_count": len(inside)}
+
+        if view_doc is None:
+            view_doc = ezdxf.new()
+            _cloned, clone_errs = _clone_into_cabinet_view(doc, view_doc, inside)
+            if clone_errs:
+                meta["clone_errors"] = clone_errs[:5]
+
+        try:
+            pw, ph = _pick_size(_ext(list(view_doc.modelspace()), fast=True),
+                                _W["width"])
+        except Exception:
+            pw, ph = _W["width"], int(_W["width"] * 0.6)
+
+        fpath = _W["out_dir"] / f"{code}.jpg"
+        _draw_one(view_doc, fpath, pw, ph, _W["cfg"], _W["dpi"])
+
+        if not fpath.exists() or fpath.stat().st_size < 512:
+            return idx, code, False, "渲染产出为空文件", meta
+        if _looks_blank(fpath):
+            fpath.unlink(missing_ok=True)
+            return idx, code, False, "渲染结果疑似空白（画面几乎无内容），已丢弃", meta
+        _trim_white_border(fpath)
+        meta.update(width_mm=cup_bbox[0], height_mm=cup_bbox[1])
+        return idx, code, True, None, meta
+    except Exception as exc:
+        return idx, code, False, f"渲染失败: {type(exc).__name__}: {exc}", {}
+    finally:
+        try:
+            plt.close("all")
+        except Exception:
+            pass
+
+
+def _render_parallel(jobs, doc, all_ents, out_dir, width, dpi, strip_text,
+                     n_workers):
+    """用 fork 进程池并行渲染，保持与串行一致的返回顺序。"""
+    from concurrent.futures import ProcessPoolExecutor
+    import multiprocessing as mp
+
+    payload = [(idx, cup.rect, cup.bbox_mm, code) for idx, cup, code in jobs]
+    ctx = mp.get_context("fork")     # 关键：fork 才能继承 doc
+    with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx,
+                             initializer=_w_init,
+                             initargs=(doc, all_ents, out_dir, width, dpi,
+                                       strip_text)) as ex:
+        raw = list(ex.map(_w_render, payload))
+
+    # 按 jobs 原顺序重建结果列表
+    by_idx = {r[0]: r for r in raw}
+    results: list[BlockRender] = []
+    for idx, cup, code in jobs:
+        _, _, ok, err, meta = by_idx[idx]
+        res = BlockRender(block_name=code, ok=ok)
+        res.layer = cup.layer
+        res.error = err
+        for k in ("entity_count", "stripped_count", "clone_errors",
+                  "text_render_failed"):
+            if k in meta:
+                setattr(res, k, meta[k])
+        if ok:
+            res.image_name = f"{code}.jpg"
+            res.width_mm, res.height_mm = meta["width_mm"], meta["height_mm"]
+            res.texts = list(cup.notes)
+        results.append(res)
+    return results
+
+
 def render_cupboard_regions(
     dxf_path: str | Path,
     out_dir: str | Path,
     only_codes: list[str] | None = None,
     width: int = DEFAULT_WIDTH,
-    dpi: int = 110,
+    dpi: int = DPI,
     parsed=None,
+    workers: int | None = None,
 ) -> tuple[list[BlockRender], object]:
     """把每个**柜体**渲染成一张 JPG。
 
@@ -633,26 +873,58 @@ def render_cupboard_regions(
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
-        from ezdxf.addons.drawing import Frontend, RenderContext
-        from ezdxf.addons.drawing.config import (
-            BackgroundPolicy,
-            ColorPolicy,
-            Configuration,
-            LineweightPolicy,
-        )
-        from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
     except Exception as exc:
         return ([BlockRender(block_name="<deps>", ok=False,
                              error=f"渲染依赖缺失: {exc}")], parsed)
 
-    results: list[BlockRender] = []
+    # ---- 先决定每个柜型用哪个「视图文档」，再渲染 ----
+    #
+    # 以前是「先渲染带文字的，炸了再降级重渲」。这个顺序在真实样本上
+    # 每一柜都要白跑 2~4 秒（matplotlib 会一直画到 DIMENSION 才抛异常，
+    # 柜体线和表位块早就画完了），23 柜累计浪费 ~70 秒 —— 这正是用户
+    # 抱怨的「渲染太久了」。
+    #
+    # 现在改成：字体不可用时**直接**走不含带文字实体的视图，
+    # 每个柜型只渲染一次。
+    strip_text = not RENDER_TEXT
+    if strip_text:
+        log.info("柜型渲染：跳过 DIMENSION/TEXT 等带文字实体（%s）",
+                 "字体不可用" if not _fonts_available() else "按RENDER_TEXT 配置")
+
+    jobs = []
     for idx, cup in enumerate(parsed.cupboards):
         code = _cabinet_code(cup, idx)
-        res = BlockRender(block_name=code, ok=False)
-        res.layer = cup.layer
-
         if only_codes and code not in only_codes:
             continue
+        jobs.append((idx, cup, code))
+
+    # ---- 并行渲染 ----
+    #
+    # 用户诉求：「渲染的时间太久了」。实测（真实样本 23 柜，110dpi）：
+    #   串行           177.0s   ← 用户等的就是这个
+    #   8 进程并行45.7s
+    #   16 进程并行     50.4s   （反而变慢：进程数超过有效并行度后
+    #                             调度与内存拷贝的开销占回来了）
+    #
+    # 每个 worker 都要重读+重解析 DXF（1.1s + 1.6s ≈ 2.7s），
+    # 23 个 worker 各做一遍就是 62s 纯重复劳动。用 fork 起进程池
+    # 让子进程**继承**父进程已经读好的 doc（COPY-ON-WRITE，零拷贝），
+    # 只在 worker 里做「抠实体 → 渲染 → 存盘」。
+    n_workers = workers if workers is not None else _auto_workers(len(jobs))
+    if n_workers > 1 and len(jobs) > 1:
+        try:
+            return _render_parallel(
+                jobs, doc, all_ents, out_dir, width, dpi, strip_text,
+                n_workers,
+            ), parsed
+        except Exception as exc:
+            # 并行失败不能连累整个入库流程 —— 退回串行
+            log.warning("并行渲染失败(%s)，退回串行", exc)
+
+    results: list[BlockRender] = []
+    for idx, cup, code in jobs:
+        res = BlockRender(block_name=code, ok=False)
+        res.layer = cup.layer
 
         # 抠出柜体区域内的实体。留2mm 外扩，柜框线本身才不会被裁掉。
         inside = [e for e in all_ents if _entity_near(e, cup.rect, tol=2.0)]
@@ -662,88 +934,46 @@ def render_cupboard_regions(
             results.append(res)
             continue
 
-        tmp = ezdxf.new()
-        try:
-            _cloned, clone_errs = _clone_into_cabinet_view(doc, tmp, inside)
-            tmsp = tmp.modelspace()
-        except Exception as exc:
-            res.error = f"实体复制失败: {exc}"
-            results.append(res)
-            continue
-        if clone_errs:
-            # 不再静默：记进诊断信息，便于判断是不是块搬运失败导致空图
-            res.clone_errors = clone_errs[:5]
+        # 每个柜型**只构建一次**视图文档：RENDER_TEXT=False 时直接用
+        # 不含带文字实体的版本，不再「先搬全的、炸了再搬一次」。
+        view_doc = None
+        if strip_text:
+            try:
+                view_doc, stripped = _clone_without_text(doc, inside)
+                res.stripped_count = stripped
+                if stripped == 0:
+                    # 该柜本来就没有带文字实体，没必要走降级视图
+                    view_doc = None
+            except Exception as exc:
+                res.error = f"实体复制失败: {exc}"
+                results.append(res)
+                continue
+        if view_doc is None:
+            view_doc = ezdxf.new()
+            try:
+                _cloned, clone_errs = _clone_into_cabinet_view(doc, view_doc, inside)
+            except Exception as exc:
+                res.error = f"实体复制失败: {exc}"
+                results.append(res)
+                continue
+            if clone_errs:
+                # 不再静默：记进诊断信息，便于判断是不是块搬运失败导致空图
+                res.clone_errors = clone_errs[:5]
+            if strip_text:
+                res.text_render_failed = True
 
         try:
-            box = _ext(list(tmsp), fast=True)
+            box = _ext(list(view_doc.modelspace()), fast=True)
             pw, ph = _pick_size(box, width)
         except Exception:
             pw, ph = width, int(width * 0.6)
 
         fname = f"{code}.jpg"
         fpath = out_dir / fname
-        cfg = None
-        try:
-            from ezdxf.addons.drawing.config import (
-                BackgroundPolicy,
-                ColorPolicy,
-                Configuration,
-                LineweightPolicy,
-            )
-            cfg = Configuration(
-                lineweight_policy=LineweightPolicy.RELATIVE_FIXED,
-                lineweight_scaling=1.0,
-                min_lineweight=MIN_LINEWEIGHT,
-                color_policy=ColorPolicy.BLACK,
-                background_policy=BackgroundPolicy.WHITE,
-            )
-        except Exception:
-            cfg = None
-
-        # ---- 渲染主流程（含文字降级）----
-        def _draw(target_doc) -> Path:
-            """把 target_doc 渲染到 fpath，返回 fpath。"""
-            f = plt.figure(figsize=(pw / dpi, ph / dpi), dpi=dpi)
-            try:
-                a = f.add_axes([0, 0, 1, 1])
-                a.set_axis_off()
-                a.set_facecolor("white")
-                Frontend(RenderContext(target_doc), MatplotlibBackend(a),
-                         config=cfg).draw_layout(
-                             target_doc.modelspace(), finalize=True)
-                f.savefig(str(fpath), format="jpg", facecolor="white",
-                          dpi=dpi, pil_kwargs={"quality": JPEG_QUALITY})
-            finally:
-                plt.close(f)
-            return fpath
+        cfg = _render_config()
 
         try:
-            try:
-                _draw(tmp)
-            except Exception as exc:
-                # 标注文字渲染失败不该让整张柜型图挂掉。
-                #
-                # 实测踩坑（真实样本 20 个柜型**全部**失败）：
-                #   1.首次报的是 MTEXT 的字体查找失败
-                #      (``fonts.find_font_file_name`` →
-                #       ``AttributeError: 'NoneType' object has no
-                #       attribute 'filename'``）；
-                #   2. 剥掉 TEXT/MTEXT 后仍然失败 —— 因为柜型区域内
-                #      一个 TEXT 都没有，真正触发字体查找的是
-                #      **50 个 DIMENSION**，标注文字同样要查字体。
-                #
-                # 降级：把 DIMENSION / LEADER / TEXT 等「带文字的实体」
-                # 全部删掉，只留线条与块图形重渲。图里少了标注说明，
-                # 但柜型排布、表位、结构都完整 —— 对「看清柜型」这个
-                # 用途来说远比一张白图有用。
-                log.warning("柜型 %s 标注渲染失败(%s)，降级为纯几何渲染",
-                            code, exc)
-                res.text_render_failed = True
-                stripped_doc, stripped = _clone_without_text(doc, inside)
-                res.stripped_count = stripped
-                if not stripped:
-                    raise
-                _draw(stripped_doc)
+            _draw_one(view_doc, fpath, pw, ph, cfg, dpi)
         except Exception as exc:
             plt.close("all")
             res.error = f"渲染失败: {type(exc).__name__}: {exc}"

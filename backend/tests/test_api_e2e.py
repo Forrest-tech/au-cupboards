@@ -470,3 +470,88 @@ def test_batch_delete_reports_in_use(client):
     body = r.json()
     assert used in body["in_use"], "被选用的柜型应进 in_use 而不是被删"
     assert any(v["id"] == used for v in client.get("/api/variants").json())
+
+
+# ---------------------------------------------------------------- 重复入库
+
+
+def test_commit_replace_updates_existing_variant(client):
+    """「库里已有相同的图」→ 用户选「替换」时改写原记录，不新建重复。
+
+    用户诉求原文：「如果库里面已经有一样的图，那么就提示说已经存在，
+    是否要替换，或者放弃这个入库。」
+
+    关键边界：替换**只许改图与尺寸**，绝不许改套数 —— 套数由柜体几何
+    决定，换一张图不该改变一个柜能装几套。
+    """
+    # 先造一条已存在的柜型
+    r = client.post("/api/variants", json={
+        "code": "TEST-DUP-A", "rows": 1, "cols": 2, "w": 1000, "h": 2000,
+        "positions": 2,
+    })
+    assert r.status_code in (200, 409), r.text
+    vid = r.json()["id"] if r.status_code == 200 else next(
+        v["id"] for v in client.get("/api/variants").json()
+        if v["code"] == "TEST-DUP-A")
+    before = next(v for v in client.get("/api/variants").json() if v["id"] == vid)
+    n_before = len(client.get("/api/variants").json())
+
+    # 用「替换」模式提交一条同尺寸但新图/新尺寸的柜型
+    up = client.post("/api/cupboards/from-dwg", json={
+        "source_file": "test.dwg",
+        "source_name": "test",
+        "dup_mode": "replace",
+        "renders": [],
+        "variants": [{
+            "code": "TEST-DUP-A-NEW", "rows": 1, "cols": 2,
+            "w": 1010, "h": 2010, "positions": 2,
+            "replace_id": vid,
+        }],
+    })
+    assert up.status_code == 200, up.text
+    assert up.json()["replaced"] == 1, "替换分支没被走到"
+    assert up.json()["created"] == 0, "替换模式不该新建记录"
+
+    after = next(v for v in client.get("/api/variants").json() if v["id"] == vid)
+    assert after["w"] == 1010 and after["h"] == 2010, "尺寸没被替换"
+    # 套数必须原样不动
+    assert after["positions"] == before["positions"], (
+        f"替换把套数改了：{before['positions']} -> {after['positions']}")
+    assert len(client.get("/api/variants").json()) == n_before, "替换却新增了记录"
+    client.delete(f"/api/variants/{vid}")
+
+
+def test_commit_without_replace_still_creates(client):
+    """默认（add）模式行为不变 —— 首次入库必须能正常新增。"""
+    n_before = len(client.get("/api/variants").json())
+    up = client.post("/api/cupboards/from-dwg", json={
+        "source_file": "test.dwg",
+        "source_name": "test",
+        "variants": [{"code": "TEST-ADD-1", "rows": 1, "cols": 1,
+                      "w": 800, "h": 1800, "positions": 1}],
+    })
+    assert up.status_code == 200, up.text
+    assert up.json()["created"] == 1
+    assert len(client.get("/api/variants").json()) == n_before + 1
+    vid = next(v["id"] for v in client.get("/api/variants").json()
+               if v["code"] == "TEST-ADD-1")
+    client.delete(f"/api/variants/{vid}")
+
+
+def test_replace_with_unknown_id_falls_back(client):
+    """replace_id 指向不存在的记录时不能崩，也不能新建。"""
+    up = client.post("/api/cupboards/from-dwg", json={
+        "source_file": "test.dwg",
+        "source_name": "test",
+        "dup_mode": "replace",
+        "variants": [{"code": "TEST-GHOST-1", "rows": 1, "cols": 1,
+                      "w": 900, "h": 1900, "positions": 1,
+                      "replace_id": 999999}],
+    })
+    assert up.status_code == 200, up.text
+    # 找不到目标 → replaced 不计数
+    assert up.json()["replaced"] == 0
+    vid = next((v["id"] for v in client.get("/api/variants").json()
+                if v["code"] == "TEST-GHOST-1"), None)
+    if vid:
+        client.delete(f"/api/variants/{vid}")

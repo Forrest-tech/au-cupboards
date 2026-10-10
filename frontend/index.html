@@ -66,6 +66,19 @@ nav button.on{background:var(--accent);color:#fff}
   display:grid;grid-template-columns:repeat(auto-fill,minmax(184px,1fr));
   gap:10px;padding:0 12px 14px;
 }
+/* 图库网格里卡片**按图片实际比例**排版，不留固定高度的空白。
+   之前 .thumb 写死 height:124px + img max-height:124pxobject-fit:contain，
+   于是竖长的柜型图（如 13Units 447×502）在184px 宽的格子里只占
+   几十px 宽，四周全是空白 —— 用户诉求「留白太多了，需要与其他保持一致」。
+   现在改成：图片按宽度铺满卡片，高度自适应；卡片高度由图片决定。 */
+.cupgrid .cupcard{height:auto}
+.cupgrid .cupcard .thumb{
+  height:auto;min-height:0;background:#fff;padding:5px;
+  align-items:flex-start;justify-content:flex-start;
+}
+.cupgrid .cupcard .thumb img{
+  width:100%;height:auto;max-height:none;object-fit:contain;display:block;
+}
 .cupcard{
   border:1px solid var(--line);border-radius:8px;background:var(--panel);
   overflow:hidden;cursor:pointer;transition:border-color .12s,box-shadow .12s;
@@ -120,6 +133,29 @@ nav button.on{background:var(--accent);color:#fff}
 .rejlist>div{display:flex;gap:8px;padding:2px 0;border-bottom:1px solid #f0f0f0}
 .rejlist code{font-size:11px;color:var(--txt);flex:1;word-break:break-all}
 .rejlist span{font-size:10.5px;color:var(--dim);white-space:nowrap}
+/* ---- 楼层×柜型矩阵里的柜型缩略图 ----
+   用户诉求：「右侧这个楼层x柜型……这个改成缩略图」。
+   缩略图按**固定高度 + 宽度自适应**排布，跟柜型库卡片一致，
+   不给固定宽度留白。 */
+.mtxcell{display:flex;gap:9px;align-items:flex-start}
+.mthumb{
+  flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+  height:62px;padding:3px;background:#fff;cursor:zoom-in;
+  border:1px solid var(--line);border-radius:5px;transition:border-color .12s;
+}
+.mthumb:hover{border-color:var(--accent)}
+.mthumb.on{border-color:var(--accent);box-shadow:0 0 0 2px #2563eb33}
+.mthumb img{max-height:56px;width:auto;display:block}
+.mthumb.no{color:var(--dim);cursor:default;opacity:.5}
+.mthumb.no .ic{width:18px;height:18px}
+.mtxinfo{flex:1 1 auto;min-width:0}
+/* 每层「units 数 → 柜型库里全部可选柜型」的缩略图带 */
+.mtxlib{border-left:3px solid var(--accent);padding-left:9px}
+.mtxlibhd{font-size:11px;color:var(--accent2);font-weight:600;margin-bottom:6px}
+.mtxlib .cupgrid{grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:7px}
+.mtxlib .cupcard .thumb{padding:3px}
+.mtxlib .cupcard .thumb img{width:100%;height:auto}
+.mtxlib .cupcard .meta{padding:5px 7px 7px}
 /* ---- 柜型库批量管理条 ---- */
 .mgmt{
   display:flex;align-items:center;gap:8px;margin:0 0 8px;padding:6px 9px;
@@ -375,6 +411,34 @@ tr.floor-row td{background:#eef2f7;font-weight:700;border-top:2px solid var(--li
   display:flex;align-items:center;justify-content:space-between;
 }
 .mbody{padding:16px;overflow-y:auto;flex:1}
+/* 上传确认弹窗：外层不滚，滚动条只出现在下方的图库区域。
+   用户诉求：「弹窗右侧的滚动条不要整个页面，只需要在下面的图库这里显示」。
+   之前 .mbody 整体 overflow-y:auto，23 张柜型图把弹窗撑得很长，
+   标题栏和「确认入库」按钮都被顶出可视区。 */
+.modal.split{max-width:980px}
+/* 必须给一个确定的高度，否则 .mbody 会被 23 张图撑到 2121px，
+   .gallery 拿不到受限高度 → 自身不滚动，底部卡片被 overflow:hidden 裁掉。 */
+.modal.split{height:92vh}
+/* 视口很矮时图库会被压到几十像素。这里给一个下限，
+   溢出则由 .mbody 自己兜底滚动（总比图库看不见强）。 */
+.modal.split .mbody{overflow-y:auto;display:flex;flex-direction:column;min-height:0}
+/* #rendbox 是 .mbody 的最后一个 flex 子项：分掉剩余空间并允许收缩，
+   内部的 .gallery 才有条件变成真正的滚动容器。 */
+.modal.split #rendbox{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+.modal.split #prog{flex:0 0 auto}
+/* 一旦进入「解析/渲染」阶段，上方的拖拽区、已选文件摘要、PDF 预览
+   就变成无用信息了。实测它们合计占掉 407px 里的全部高度，
+   把 .gallery 挤成 12px（图库等于看不见）。渲染一开始就把它们收起。 */
+.modal.split .mbody.busy #dz,
+.modal.split .mbody.busy #upbox,
+.modal.split .mbody.busy #preview{display:none}
+/* 图库独立滚动区*/
+.gallery{
+  overflow-y:auto;overflow-x:hidden;min-height:200px;flex:1 1 auto;
+  border:1px solid var(--line);border-radius:8px;background:var(--panel2);
+  padding:10px 0 2px;
+}
+.gallery .cupgrid{padding-left:10px;padding-right:10px}
 .mfoot{padding:11px 16px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end}
 .x{font-size:18px;color:var(--dim);line-height:1}
 .x:hover{color:var(--txt)}
@@ -591,6 +655,7 @@ const I18N = {
     'up.ok': '已入库', 'up.fail': '入库失败', 'up.parsefail': '解析失败',
     'up.done': '解析完成', 'up.hint': '大图纸需10-30 秒，请勿关闭窗口',
     'up.busy': '正在解析，请等待完成',
+    'up.rendering': '柜型图渲染中…',
     'dwg.backend': '解析后端', 'dwg.integ': '完整性', 'dwg.iok': '完整性通过',
     'dwg.ideg': '可用但存疑', 'dwg.icor': '数据损坏', 'dwg.un': '未知',
     'dwg.layer': '图层', 'dwg.block': '块定义', 'dwg.entity': '实体总数',
@@ -659,6 +724,7 @@ const I18N = {
     'up.ok': 'Imported', 'up.fail': 'Import failed', 'up.parsefail': 'Parse failed',
     'up.done': 'Parse complete', 'up.hint': 'Large drawings take 10-30s — keep this window open',
     'up.busy': 'Parsing in progress, please wait',
+    'up.rendering': 'Rendering cupboard images…',
     'dwg.backend': 'Backend', 'dwg.integ': 'Integrity', 'dwg.iok': 'Passed',
     'dwg.ideg': 'Usable with doubts', 'dwg.icor': 'Corrupted', 'dwg.un': 'Unknown',
     'dwg.layer': 'Layers', 'dwg.block': 'Block defs', 'dwg.entity': 'Entities',
@@ -736,7 +802,13 @@ async function api(path, opt = {}) {
   }
   return r.json();
 }
-function modal(html) { $('#modal').innerHTML = html; $('#mask').classList.add('on'); }
+function modal(html, cls = '') {
+  const m = $('#modal');
+  m.className = 'modal' + (cls ? ' ' + cls : '');
+  m.innerHTML = html;
+  $('#mask').classList.add('on');
+}
+
 
 /* ============================================================ 版本错配横幅
  *  前端是单文件 HTML，浏览器缓存住旧版本是最难查的一类故障：
@@ -1182,7 +1254,11 @@ function vLabel(v, dflt) {
  *  取整到 1mm —— 实测尺寸本身精度远不到 1mm。
  */
 function fmtMM(x) {
-  if (x === null || x === undefined || x === '') return '—';
+  // 后端偶尔把「无值」序列化成字符串 "null"（不是 null 本身），
+  // 直接 Number("null") 得到 NaN 会漏到界面上变成 "nullD"。
+  // 这里统一当空值处理。
+  if (x === null || x === undefined || x === '' || x === 'null'
+      || x === 'None' || x === 'undefined') return '—';
   const n = Math.round(Number(x));
   return Number.isFinite(n) ? String(n) : '—';
 }
@@ -1647,10 +1723,19 @@ function renderMatrix() {
   }
 
   // 楼层矩阵表：每层一行，内含各柜型
+  //
+  // 用户诉求：「右侧这个楼层x柜型，需要每层显示units的数量，然后对应的
+  // cupboards 的种类。这个改成缩略图」。
+  //
+  // 之前这里只有纯文字的柜型编码 + 尺寸，看不出柜子长什么样；
+  // 现在每个柜型前面挂一张柜型图缩略图（DWG 直接渲出来的那张，
+  // 不做二次绘制），点击看中栏大图。图片缺失时退回占位图标。
   h += `<div class="sec" style="padding-left:0">${t('mtx.title')}</div>`;
   h += `<table><thead><tr><th>${t('mtx.floor')}</th><th class="num">${t('mtx.units')}</th><th class="num">COLIVING</th>`
      + `<th class="num">${t('mtx.area')}</th><th>${t('mtx.cup')}</th></tr></thead><tbody>`;
 
+  // 缩略图点开大图：走中栏的 showCupImage，与柜型库一致
+  const mtxThumbs = [];
   for (const f of (j.floors || [])) {
     const units = (j.units || []).filter(u => u.floor === f.floor_code);
     const groups = {};
@@ -1660,28 +1745,79 @@ function renderMatrix() {
       groups[k].u.push(u.unit_label);
     }
     const nVar = Object.keys(groups).length;
+    // 本层 units 数对应的**全部**柜型种类（不只是本层实际用到的那些），
+    // 用户要的是「这层需要几个 units，柜型库里有哪几种摆法可选」。
+    const n = Number(f.unit_count || 0);
+    const all = cupboardsForUnits(n);
+    // 本层实际用到的柜型（units 数与本层相符的那些）
+    const usedHere = all.filter(x => groups[x.code]);
     h += `<tr class="floor-row"><td>${esc(f.floor_code)}</td>
       <td class="num">${f.unit_count}</td>
       <td class="num">${f.communal_count || 0}</td>
       <td class="num">${num(f.total_area_m2, 1)}</td>
-      <td>${nVar} ${t('mtx.kind')}</td></tr>`;
+      <td>${usedHere.length || nVar} ${t('mtx.kind')}</td></tr>`;
     for (const [code, g] of Object.entries(groups).sort((a, b) => b[1].n - a[1].n)) {
       const v = g.v || {};
+      // 缩略图来源：``unit.variant`` 里**没有 image_url**（job 接口不返回
+      // 图片路径），所以按 variant id 去已加载的 S.variants 里查图。
+      // 查不到再退回「本层 units 数匹配的柜型图」。
+      const img = S.variants.find(x =>
+        String(x.id) === String(v.id) && x.image_url)?.image_url
+        || all.find(x => x.code === code)?.image_url || '';
+      if (img) mtxThumbs.push([img, code]);
       h += `<tr>
         <td style="padding-left:16px;color:var(--dim)">└</td>
         <td class="num muted">${g.n}</td>
         <td colspan="2" class="muted">${g.u.length > 8 ? g.u.slice(0, 8).join(' ') + ' …' : g.u.join(' ')}</td>
         <td>
-          <div><b class="mono">${esc(code)}</b>
-            ${v.name ? '<span class="muted"> — ' + esc(v.name) + '</span>' : ''}
-            ${g.u.some(x => x.startsWith('CLA')) ? '<span class="tag com">COLIVING</span>' : ''}
+          <div class="mtxcell">
+            ${img
+              ? `<span class="mthumb" data-mt="${esc(img)}" title="${esc(code)}">
+                   <img loading="lazy" src="${esc(img)}" alt="${esc(code)}"></span>`
+              : `<span class="mthumb no" title="${esc(t('lib.noimg'))}">${ic('image-off')}</span>`}
+            <span class="mtxinfo">
+              <div><b class="mono">${esc(code)}</b>
+                ${v.name ? '<span class="muted"> — ' + esc(v.name) + '</span>' : ''}
+                ${g.u.some(x => x.startsWith('CLA')) ? '<span class="tag com">COLIVING</span>' : ''}
+              </div>
+              <div class="muted" style="font-size:10.5px">
+                ${v.w ? `${fmtMM(v.w)} W × ${fmtMM(v.h)} H${
+                  // 后端可能给字符串 "null"，直接 v.d 判断会当成有值
+                  (v.d && v.d !== 'null') ? ' × ' + fmtMM(v.d) + ' D' : ''} mm` : t('mtx.nosize')}
+                · ${v.positions ?? '?'} ${t('lib.units')}${v.grid ? ' · ' + esc(v.grid) : ''}
+              </div>
+              ${all.length > 1 ? `<div class="muted" style="font-size:10.5px">${
+                LANGNOW === 'zh'
+                  ? `${f.floor_code} 需 ${n} Units，库中 ${all.length} 种摆法`
+                  : `${f.floor_code} needs ${n} units, ${all.length} layouts in library`}</div>` : ''}
+            </span>
           </div>
-          <div class="muted" style="font-size:10.5px">
-            ${v.w ? `${v.w}W × ${v.h}H × ${v.d}D mm` : t('mtx.nosize')}
-            · ${v.positions ?? '?'} 表位 · ${v.grid ?? ''}
-          </div>
-          ${v.description ? `<div class="muted" style="font-size:10.5px">${esc(v.description.slice(0, 60))}</div>` : ''}
         </td></tr>`;
+    }
+    // ---- 本层 units 数在柜型库里的**全部**可选柜型（缩略图）----
+    // 用户诉求：「右侧这个楼层x柜型，需要每层显示units 的数量，
+    // 然后对应的 cupboards 的种类。这个改成缩略图」。
+    // 上面的分组是「解析器实际派给各户的柜型」，这里补的是
+    // 「这一层需要 N 户，柜型库里到底有几种 N Units 的柜可选」——
+    // 两者不是一回事，缺一不可。
+    if (all.length) {
+      h += `<tr><td colspan="5" style="padding:8px 0 12px">
+        <div class="mtxlib">
+          <div class="mtxlibhd">${LANGNOW === 'zh'
+            ? `${f.floor_code} · ${n} Units → 柜型库中 ${all.length} 种`
+            : `${f.floor_code} · ${n} units → ${all.length} layouts in library`}</div>
+          <div class="cupgrid" style="padding:0">
+            ${all.map(v => `<div class="cupcard${v.image_url ? ' has-img' : ''}"
+              data-mtimg="${esc(v.image_url || '')}">
+              <div class="thumb">${v.image_url
+                ? `<img loading="lazy" src="${esc(v.image_url)}" alt="${esc(v.code)}">`
+                : `<div class="noph">${t('lib.noimg')}</div>`}</div>
+              <div class="meta">
+                <div class="code mono">${esc(v.code)}</div>
+                <div class="dim">${fmtMM(v.w)} × ${fmtMM(v.h)} mm</div>
+              </div></div>`).join('')}
+          </div>
+        </div></td></tr>`;
     }
   }
   h += '</tbody></table>';
@@ -1692,6 +1828,28 @@ function renderMatrix() {
     h += `<span><b style="background:var(--accent)"></b>${esc(c)} × ${n}</span>`;
   h += '</div></div>';
   $('#rpane').innerHTML = h;
+  // 缩略图 → 点开看中栏大图（矩阵内的两种：.mthumb 小图 + .cupcard 卡片）
+  const openBig = (url, el) => {
+    const v = S.variants.find(x => x.image_url === url);
+    showCupImage(url, v
+      ? `<b>${fmtMM(v.w)} × ${fmtMM(v.h)} mm</b>${
+          v.label ? ' · ' + esc(v.label) : ''}<div class="muted">${
+          v.positions ?? '?'} ${t('lib.units')}</div>`
+      : '');
+    if (el) {
+      $$('#rpane .mthumb, #rpane .cupcard[data-mtimg]')
+        .forEach(y => y.classList.toggle('on', y === el));
+    }
+  };
+  $$('#rpane .mthumb[data-mt]').forEach(el => {
+    el.onclick = () => openBig(el.dataset.mt, el);
+  });
+  $$('#rpane .cupcard[data-mtimg]').forEach(el => {
+    el.onclick = () => {
+      if (!el.dataset.mtimg) { toast(t('lib.noclue'), 'err'); return; }
+      openBig(el.dataset.mtimg, el);
+    };
+  });
 }
 
 function renderDetail() {
@@ -1977,7 +2135,7 @@ function showUnitsGroup(key, keepScroll) {
     // 套数在下面那行已经写了 —— 之前这里回退成「5 Units」，
     // 渲染出来是「1065 × 2350 mm · 5 套5 套 · 2x4」这种叠字。
     return `<b>${fmtMM(v.w)} × ${fmtMM(v.h)} mm</b>`
-      + (v.d ? ` · D ${fmtMM(v.d)}` : '')
+      + ((v.d && v.d !== 'null') ? ` · D ${fmtMM(v.d)}` : '')
       + (v.label ? ` · ${esc(v.label)}` : '')
       + `<div class="muted">${n} ${t('lib.units')} · ${esc(v.grid || '-')} · ${tag}</div>`;
   };
@@ -2436,11 +2594,13 @@ function openUpload(kind) {
         </div>
         <div class="muted" style="font-size:11px;margin-top:6px">${t('up.hint')}</div>
       </div>
+      <!-- 图库独立滚动区：滚动条只出现在这里，标题栏和底部按钮始终可见 -->
+      <div id="rendbox"></div>
     </div>
     <div class="mfoot">
       <button class="btn" id="bcancel">${t('up.cancel')}</button>
       <button class="btn pri" id="bgo" disabled>${t('up.go')}</button>
-    </div>`);
+    </div>`, 'split');
   const dz = $('#dz'), fi = $('#fi');
   dz.onclick = () => fi.click();
   dz.ondragover = e => { e.preventDefault(); dz.classList.add('hot'); };
@@ -2449,16 +2609,21 @@ function openUpload(kind) {
   fi.onchange = () => fi.files[0] && doFile(fi.files[0], kind);
   S.uploadKind = kind;
   // 【bug 修复】submitUpload 此前从未被绑定 —— 按钮点了没反应。
-  // 这里显式绑定，并复位按钮文案（showDwgResult 可能改过它）。
-  const btn = $('#bgo');
-  btn.onclick = submitUpload;
-  btn.disabled = true;
-  btn.textContent = t('up.go');
+  // 这里显式绑定，并复位按钮文案（showDwgResult/renderCupboards 改过它）。
+  S.dupList = []; S.dupMode = 'add'; S.dupMap = new Map();
+  S.renders = []; S.selBlocks = [];
+  $('#rendbox') && ($('#rendbox').innerHTML = '');
+  setCommitState('pick');
   $('#bcancel').onclick = closeModal;
 }
 
 async function doFile(f, kind) {
   S.uploadFile = f; S.uploadKind = kind;
+  // 选了新文件 → 状态回到「可点解析」。上一次渲染的重复提示要清掉，
+  // 否则会拿着上一份 DWG 的 S.dupList 误导用户。
+  S.dupList = []; S.dupMode = 'add'; S.dupMap = new Map();
+  S.renders = []; S.selBlocks = [];
+  const rb = $('#rendbox'); if (rb) rb.innerHTML = '';
   const btn = $('#bgo');
   btn.disabled = false;
   btn.onclick = submitUpload;      // 防御：确保任何路径下都可点
@@ -2476,9 +2641,8 @@ async function doFile(f, kind) {
 
 async function submitUpload() {
   if (!S.uploadFile || S.parsing) return;
-  const btn = $('#bgo');
   S.parsing = true;                       // 期间禁止关闭弹窗
-  btn.disabled = true; btn.innerHTML = `<span class="spin"></span> ${t('up.parsing')}`;
+  setCommitState('parsing');
   $('#bcancel').disabled = true;
   // 大文件解析要十几秒以上（实测 37MB/35页 = 18.5 秒），
   // 没有进度条用户会以为卡死并去点关闭 —— 于是「点一下就跳出去」
@@ -2514,22 +2678,27 @@ async function submitUpload() {
     $('#bcancel').disabled = false;
   } catch (e) {
     clearInterval(timer);
-    S.parsing = false;                   // 失败才允许关闭，否则用户被困住
     $('#prog').style.display = 'none';
+    S.parsing = false;                   // 失败才允许关闭，否则用户被困住
     $('#bcancel').disabled = false;
-    btn.disabled = false; btn.textContent = t('up.go'); btn.onclick = submitUpload;
+    setCommitState('pick');
+    $('#bgo').onclick = submitUpload;
     toast(t('up.parsefail') + ': ' + e.message, 'err');
   }
 }
 
 function showDwgResult(r) {
   S.dwgRes = r;
-  // 弹窗未打开时 #bgo 不存在 —— 防御性判空，避免整个渲染函数抛错
+  // 解析成功了，但**柜型图还没渲染完** —— 此时「确认入库」必须保持灰色。
+  // 用户诉求：「在渲染的时候，这个确认的按钮不能点击，需要灰掉，
+  // 等渲染好了，再可以点击」。之前这里直接 btn.disabled = !r.ok，
+  // 于是解析一完成按钮就亮了，用户在渲染没结束时点下去，
+  // commitDwg 拿到的 S.renders 是空的 → 入库 0 个柜型。
   const btn = $('#bgo');
   if (btn) {
-    btn.disabled = !r.ok;
-    btn.textContent = r.ok ? t('up.commit') : t('up.nogo');
-    btn.onclick = () => commitDwg();
+    btn.disabled = true;
+    btn.innerHTML = `${ic('refresh')} ${t('up.rendering')}`;
+    btn.onclick = null;
   }
 
   // 完整性分级：corrupt 必须显式红色警示，不能与 degraded/ok 混为一谈
@@ -2558,8 +2727,7 @@ function showDwgResult(r) {
       <div class="kpi g"><div class="v">${mspTotal + blkTotal}</div><div class="l">${t('dwg.entity')}</div></div>
       <div class="kpi ${r.integrity === 'corrupt' ? 'r' : 'o'}"><div class="v">${(r.warnings || []).length}</div><div class="l">${t('dwg.warn')}</div></div>
     </div>
-    ${(r.integrity_notes || []).map(n => `<div class="alert ${r.integrity === 'corrupt' ? 'err' : 'warn'}">${esc(n)}</div>`).join('')}
-    <div id="rendbox"></div>`;
+    ${(r.integrity_notes || []).map(n => `<div class="alert ${r.integrity === 'corrupt' ? 'err' : 'warn'}">${esc(n)}</div>`).join('')}`;
 }
 
 /** 渲染完成后把缩略图贴进确认弹窗 —— 用户要先看到图再决定要不要入库。
@@ -2575,8 +2743,7 @@ function paintRenders() {
   const rs = (S.renders || []).filter(r => r.ok);
   if (!rs.length) {
     const all = S.renders || [];
-    box.innerHTML = `<div class="sec" style="padding-left:0">${t('lib.title')}</div>`
-      + `<div class="alert err">${esc((all[0] || {}).error || t('lib.noimg'))}</div>`;
+    box.innerHTML = `<div class="alert err">${esc((all[0] || {}).error || t('lib.noimg'))}</div>`;
     return;
   }
   // 默认全选 —— 但只针对**判定为柜型**的那些（renders 已过滤）
@@ -2585,6 +2752,8 @@ function paintRenders() {
   }
   const sel = new Set(S.selBlocks);
   const det = S.detected || {};
+  // 顶部计数与操作条放在滚动区**外面**，永远可见；
+  // 只有下面这23 张图所在的 .gallery 才有滚动条。
   let h = `<div class="sec" style="padding-left:0">${t('lib.title')} · ${rs.length}/${t('lib.picked')}</div>`;
   // 识别摘要 —— 解释「一整张图纸里为什么只切出这几个柜型」
   if (det.rejected !== undefined) {
@@ -2594,11 +2763,29 @@ function paintRenders() {
       ${det.sample ? `<br/><span style="font-size:12px;opacity:.85">${esc(det.sample)}</span>` : ''}
     </div>`;
   }
+  // 重复检测结果（用户诉求：库里已有相同的图要提示）
+  if (S.dupList && S.dupList.length) {
+    h += `<div class="alert warn" id="dupbox">
+      ${ic('copy')} ${LANGNOW==='zh'
+        ? `<b>${S.dupList.length}</b> 个柜型在柜型库里已存在相同尺寸的记录`
+        : `<b>${S.dupList.length}</b> cupboards already exist in the library with the same size`}
+      <div style="margin-top:7px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" id="dupReplace">${ic('refresh')} ${
+          LANGNOW==='zh'?'全部替换（用新图覆盖旧图）':'Replace all'}</button>
+        <button class="btn" id="dupSkip">${LANGNOW==='zh'
+          ?'跳过重复（保留旧图，只新增其余柜型）':'Skip duplicates'}</button>
+        <button class="btn" id="dupAbort">${ic('x')} ${LANGNOW==='zh'
+          ?'放弃本次入库':'Abort import'}</button>
+      </div>
+      <div class="muted" style="font-size:11px;margin-top:6px">${
+        esc(S.dupList.map(d => d.code).join('、'))}</div>
+    </div>`;
+  }
   h += `<div class="rendops">
       <label><input type="checkbox" id="selall" ${sel.size === rs.length ? 'checked' : ''}> ${t('lib.selall')}</label>
       <span class="muted" id="selcnt">${sel.size} / ${rs.length}</span>
       <button class="btn" id="selnone">${t('lib.selnone')}</button>
-    </div><div class="cupgrid" style="padding-left:0">`;
+    </div><div class="gallery"><div class="cupgrid" style="padding-left:0">`;
   // 柜型尺寸/套数明细 —— 后端返回 cupboards 时按柜型展示，
   // 没有就退回旧的「实体数 × 尺寸」写法。
   const cupByCode = new Map((S.cupboards || []).map(c => [c.code, c]));
@@ -2616,11 +2803,12 @@ function paintRenders() {
              alt="${esc(r.block_name)}"><span class="tick">${on ? '✓' : ''}</span></div>
         <div class="meta"><div class="code mono">${esc(r.block_name)}</div>${meta}</div></div>`;
   }
-  h += '</div>';
+  h += '</div></div>';   // /.cupgrid + /.gallery
 
   // 被排除的非柜体区域 —— 折叠起来，让用户能核对而不是被噪声淹没
   if ((S.rejected || []).length) {
-    h += `<details class="rejd"><summary>${LANGNOW==='zh'
+    h += `<details class="rejd"><summary>${
+      LANGNOW==='zh'
       ? `已排除 ${S.rejected.length} 个非柜体区域（点击查看）`
       : `${S.rejected.length} non-cupboard regions filtered (click)`}</summary>`
       + `<div class="rejlist">${S.rejected.slice(0, 80).map(x =>
@@ -2641,6 +2829,41 @@ function paintRenders() {
   if (all) all.onchange = () => cards.forEach(c => c.classList.toggle('on', all.checked));
   const none = $('#selnone');
   if (none) none.onclick = () => { cards.forEach(c => c.classList.remove('on')); sync(); };
+
+  // 重复处理三选一（用户诉求 #E）
+  bindDupActions();
+}
+
+/** 库里已有相同柜型时的三选一：替换 / 跳过 / 放弃入库。
+ *
+ *  「相同」的判定口径与后端 :func:`find_duplicates` 一致：
+ *  宽、高、套数三者全等（容差 1mm / 0套）。渲染出的图已经裁掉白边，
+ *  尺寸一致就意味着是同一个柜型。
+ *
+ *  - replace：把新图绑到已有变体上（update_existing）
+ *  - skip：只入库不重复的那些
+ *  - abort：整个入库取消，柜型库保持原样
+ */
+function bindDupActions() {
+  const box = $('#dupbox');
+  if (!box) return;
+  const mode = (m) => {
+    S.dupMode = m;
+    box.className = 'alert ' + (m === 'abort' ? 'err' : m === 'skip' ? 'info' : 'warn');
+    const b = $('#bgo');
+    // abort 状态下「确认入库」不可点，强制用户先做选择
+    if (b && m === 'abort') { b.disabled = true; }
+    toast(LANGNOW === 'zh'
+      ? { replace: '将替换库中已有的同尺寸柜型图',
+          skip: '将跳过重复柜型，只新增其余柜型',
+          abort: '已选择放弃入库，点「取消」关闭弹窗' }[m]
+      : m, 'ok');
+  };
+  $('#dupReplace')?.addEventListener('click', () => mode('replace'));
+  $('#dupSkip')?.addEventListener('click', () => mode('skip'));
+  $('#dupAbort')?.addEventListener('click', () => mode('abort'));
+  // 默认动作：不替换也不跳过（新增一份），但明确提示用户
+  S.dupMode = S.dupMode || 'add';
 }
 
 async function showPdfResult(r) {
@@ -2677,6 +2900,12 @@ async function showPdfResult(r) {
  *  用户确认入库时一并回传，图片路径才会绑到变体上。 */
 async function renderCupboards(storedName) {
   if (!storedName) return [];
+  // 渲染期间按钮保持灰色 —— 用户诉求 #A。
+  // 之前 showDwgResult 一解析完就把按钮点亮，用户在渲染未完成时点下去，
+  // commitDwg 拿到空 S.renders，入库 0 个柜型还不报错。
+  setCommitState('rendering');
+  // 上部的拖拽区/文件摘要/PDF 预览此刻已无意义，收起它们把高度让给图库。
+  $('.modal.split .mbody')?.classList.add('busy');
   try {
     $('#pm').textContent = t('lib.rendering');
     const r = await api('/cupboards/render', {
@@ -2708,10 +2937,21 @@ async function renderCupboards(storedName) {
       ? `${t('lib.rendered')} ${r.rendered}/${t('lib.of')} ${S.cupboards.length}`
         + (totalUnits ? ` · ${LANGNOW==='zh'?'总套数':'units'} ${totalUnits}` : '')
       : `${t('lib.rendered')} ${r.rendered}/${t('lib.of')} ${r.detected ?? r.rendered}`;
+    // 重复检测（用户诉求 #E）：跟柜型库里已有的变体比对尺寸+套数。
+    await detectDuplicates();
     paintRenders();
+    // 渲染完成才放开按钮
+    setCommitState(S.dupMode === 'abort' ? 'abort' : 'ready');
     return S.renders;
   } catch (e) {
     S.renders = [];
+    // 渲染失败：按钮保持灰色并标成「不可入库」，
+    // 否则用户会点一个必然失败的按钮（诉求 #A）
+    setCommitState('fail');
+    // 收起区块是为了给图库腾高度；失败后图库是空的，把区块放回去，
+    // 否则用户只看到一个空弹窗，不知道还能重新选文件。
+    $('.modal.split .mbody')?.classList.remove('busy');
+    $('#prog').style.display = 'none';
     toast(t('lib.rendering') + ' → ' + e.message, 'err');
     return [];
   }
@@ -2728,6 +2968,62 @@ async function renderCupboards(storedName) {
  *  于是入库的柜型全是「1 行 N 列」，套数也是空的 ——
  *  左树没法按「5 Units / 6 Units」分组，整条链路就断了。
  */
+/** 「确认入库」按钮的三态。
+ *
+ *  用户诉求 #A：「在渲染的时候，这个确认的按钮不能点击，需要灰掉，
+ *  等渲染好了，再可以点击」。
+ *
+ *  - parsing   解析中：灰 + 转圈
+ *  - rendering 解析完了但柜型图还没渲完：灰 + 「渲染中…」
+ *  - ready     渲染完成：可点
+ *  - abort     用户在重复提示里选了「放弃入库」：保持灰，直到改选
+ *  - fail      渲染失败：灰 + 「不可入库」
+ */
+function setCommitState(state) {
+  const b = $('#bgo');
+  if (!b) return;
+  const map = {
+    parsing:   [`<span class="spin"></span> ${t('up.parsing')}`, true],
+    rendering: [`${ic('refresh')} ${t('up.rendering')}`, true],
+    ready:     [t('up.commit'), false],
+    abort:     [`${ic('x')} ${LANGNOW === 'zh' ? '已放弃入库' : 'Import aborted'}`, true],
+    fail:      [t('up.nogo'), true],
+    pick:      [t('up.go'), true],
+  };
+  const [label, dis] = map[state] || map.pick;
+  b.innerHTML = label;
+  b.disabled = dis;
+  if (!dis) b.onclick = () => commitDwg();
+}
+
+/** 检测本次要入库的柜型里，哪些在柜型库中已存在（用户诉求 #E）。
+ *
+ *  判定口径必须与后端一致（宽±1mm、高±1mm、套数相等），
+ *  否则前端提示「已存在」而真入库时后端又新建一条。
+ *  放在前端做是为了**立刻**弹提示；后端仍会再校验一次兜底。
+ */
+async function detectDuplicates() {
+  S.dupList = [];
+  S.dupMode = 'add';
+  S.dupMap = new Map();
+  try {
+    const mine = dwgVariantsFromRenders((S.renders || []).filter(r => r.ok));
+    if (!mine.length) return;
+    const pool = (S.variants || []).filter(v => v.source === 'dwg');
+    for (const v of mine) {
+      const hit = pool.find(x =>
+        Math.abs(Number(x.w) - Number(v.w)) <= 1 &&
+        Math.abs(Number(x.h) - Number(v.h)) <= 1 &&
+        Number(x.positions || 0) === Number(v.positions || 0));
+      if (hit) {
+        S.dupList.push({ code: v.code, id: hit.id, w: v.w, h: v.h,
+                         positions: v.positions, old: hit.code });
+        S.dupMap.set(v.code, hit.id);
+      }
+    }
+  } catch (e) { /* 检测失败不阻塞入库流程 */ }
+}
+
 function dwgVariantsFromRenders(renders) {
   // code ->柜体几何明细
   const geo = new Map((S.cupboards || []).map(c => [c.code, c]));
@@ -2756,13 +3052,32 @@ function dwgVariantsFromRenders(renders) {
 
 async function commitDwg() {
   try {
+    // 用户在重复提示里选了「放弃入库」——直接关弹窗，不动柜型库
+    if (S.dupMode === 'abort') {
+      closeModal();
+      toast(LANGNOW === 'zh' ? '已放弃本次入库，柜型库未改动'
+                            : 'Import aborted, library unchanged', 'ok');
+      return;
+    }
     // 只提交**勾选**的柜型 —— 用户可以在预览里逐个勾，
     // 也可以一键全不勾直接放弃入库。
     const sel = new Set(S.selBlocks || []);
     const hasSel = S.selBlocks && S.selBlocks.length;
-    const renders = (S.renders || []).filter(r =>
+    const dupCodes = new Set((S.dupList || []).map(d => d.code));
+    let renders = (S.renders || []).filter(r =>
       r.ok && (!hasSel || sel.has(r.block_name)));
-    const variants = dwgVariantsFromRenders(renders);
+    // 「跳过重复」：把重复的柜型从提交列表里剔掉
+    if (S.dupMode === 'skip') {
+      renders = renders.filter(r => !dupCodes.has(r.block_name));
+    }
+    // 「替换」：把已有变体 id 带上，走后端的 update_existing 分支
+    let variants = dwgVariantsFromRenders(renders);
+    if (S.dupMode === 'replace') {
+      variants = variants.map(v => {
+        const id = S.dupMap?.get(v.code);
+        return id ? { ...v, replace_id: Number(id) } : v;
+      });
+    }
     if (!variants.length) {
       toast(t('lib.nosel'), 'err');
       return;
@@ -2777,9 +3092,15 @@ async function commitDwg() {
         cupboard_name: '柜型库（' + (S.storedName || 'DWG') + '）',
         variants,
         renders,
+        // 重复处理策略：add（默认新增）/ replace（替换旧图）/ skip（跳过）
+        dup_mode: S.dupMode || 'add',
       }),
     });
-    toast(`${t('up.ok')} ${r.created}`, 'ok');
+    const dupNote = S.dupMode === 'replace' && r.replaced
+      ? ` · ${LANGNOW === 'zh' ? '替换' : 'replaced'} ${r.replaced}` : '';
+    const skipNote = S.dupMode === 'skip' && S.dupList?.length
+      ? ` · ${LANGNOW === 'zh' ? '跳过重复' : 'skipped'} ${S.dupList.length}` : '';
+    toast(`${t('up.ok')} ${r.created}${dupNote}${skipNote}`, 'ok');
     closeModal();
     await loadVariants();
     // 直接跳到柜型库并打开第一组，让用户立刻看到图

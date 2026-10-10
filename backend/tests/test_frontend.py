@@ -83,13 +83,59 @@ class TestUploadButtonWired:
         )
 
     def test_error_path_restores_button(self, script: str):
-        """解析失败必须把按钮恢复可用，否则只能刷新页面。"""
+        """解析失败必须把按钮恢复可用，否则只能刷新页面。
+
+        注意实现已经改成三态函数 :func:`setCommitState` ——
+        「渲染中灰掉、渲染好点亮」（用户诉求 #A）靠它统一管理，
+        所以这里不再找内联的 ``btn.disabled = false``，而是断言
+        错误分支确实把状态复位成了「可选文件」态。
+        """
         fn = re.search(r"async function submitUpload\(.*?\n\}", script, re.S)
         assert fn, "submitUpload 未定义"
         body = fn.group(0)
         assert "catch" in body, "submitUpload 没有错误处理"
-        assert re.search(r"btn\.disabled\s*=\s*false", body), (
-            "解析失败后按钮未恢复可用（disabled 永久卡死）"
+        assert re.search(r"setCommitState\(\s*'pick'\s*\)", body), (
+            "解析失败后按钮未恢复可用（状态永久卡在 parsing，disabled 卡死）"
+        )
+        assert re.search(r"\$\(\s*'#bgo'\s*\)\.onclick\s*=\s*submitUpload", body), (
+            "解析失败后 onclick 未复位回 submitUpload（按钮亮了但点了没反应）"
+        )
+
+    def test_set_commit_state_has_all_states(self, script: str):
+        """三态函数必须覆盖 parsing / rendering / ready / fail。
+
+        少了rendering 就退回「解析一完成按钮就亮」的旧 bug ——
+        用户在渲染未完成时点下去，入库 0 个柜型还不报错。
+        """
+        fn = re.search(r"function setCommitState\(.*?\n\}", script, re.S)
+        assert fn, "setCommitState 未定义"
+        body = fn.group(0)
+        for st in ("parsing", "rendering", "ready", "fail"):
+            assert f"{st}:" in body, f"setCommitState 缺 {st} 态"
+        # ready 态必须解除禁用并绑定 commitDwg
+        assert re.search(r"ready:\s*\[[^]]*,\s*false\s*\]", body), (
+            "ready 态没有解除 disabled —— 渲染完了按钮还是点不动"
+        )
+        assert "commitDwg" in body, "ready 态没有绑定 commitDwg"
+
+    def test_render_phase_locks_commit(self, script: str):
+        """渲染期间按钮必须保持灰 —— 用户诉求 #A 的核心断言。"""
+        fn = re.search(r"async function renderCupboards\(.*?\n\}", script, re.S)
+        assert fn, "renderCupboards 未定义"
+        body = fn.group(0)
+        # 进渲染前上锁
+        assert re.search(r"setCommitState\(\s*'rendering'\s*\)", body), (
+            "渲染开始时没有上锁（按钮仍可点，用户会在渲染未完成时提交）"
+        )
+        # 渲染完成才解锁，且解锁发生在 paintRenders **之后**
+        #（否则按钮先亮、图还没贴上，用户一点就提交了空列表）
+        idx_lock = body.find("setCommitState('rendering')")
+        idx_paint = body.find("paintRenders()")
+        #解锁是上锁之后的**下一次** setCommitState 调用
+        idx_unlock = body.find("setCommitState(", idx_lock + 1)
+        assert idx_lock < idx_paint, "上锁发生在贴图之后"
+        assert idx_unlock > idx_paint, (
+            "解锁发生在 paintRenders 之前 —— 按钮会先亮再贴图，仍可能空提交"
         )
 
 

@@ -271,3 +271,157 @@ class TestLargeDrawing:
         names = [r.image_name for r in res if r.ok and r.image_name]
         assert len(names) == len(set(names)), "缩略图文件名冲突，后一个会覆盖前一个"
         assert all((out_dir / n).is_file() for n in names)
+
+
+# ====================================================================
+# 真实 DWG 回归：柜型图必须还原 water/gas meter 细节 + 渲染耗时
+# ====================================================================
+
+
+class TestRealDwgRenderQuality:
+    """跑在**真实 DWG** 上（用户硬性要求：不许只在合成数据上自测）。
+
+    用户诉求原文：「这个图，我之前的要求是需要使用dwg 里面的原来的图，
+    相当于从 dwg 导出的，可以使用这个 water meter 和 gas meter
+    作为原始的元素」。
+
+    历史故障：``MIN_LINEWEIGHT = 6`` 把 water/gas meter 内部0.05mm 级的
+    细部（表盘、阀门、接管）全糊成实心黑块 —— 用户看到的就是一坨黑。
+    降到 1 之后细部才重新可辨。
+    """
+
+    @pytest.fixture(scope="class")
+    def rendered(self, real_dxf, tmp_path_factory):
+        from app.parsers.cupboard_render import render_cupboard_regions
+        out = tmp_path_factory.mktemp("real_render")
+        res, parsed = render_cupboard_regions(str(real_dxf), out)
+        return res, parsed, out
+
+    def test_all_cupboards_rendered(self, rendered):
+        """23 个柜型必须全部渲出图。"""
+        res, parsed, _ = rendered
+        assert len(res) == 23, f"应产出 23 个柜型，实际 {len(res)}"
+        bad = [(r.block_name, r.error) for r in res if not r.ok]
+        assert not bad, f"渲染失败: {bad[:5]}"
+
+    def test_images_show_internal_detail(self, rendered):
+        """图里必须有**柜内表位**的线条细节，不能是纯边框。
+
+        判据：把图按上下三等分，中带（非柜框区域）必须有着墨像素。
+        糊成黑块的旧图虽然整体ink 多，但中带会连成一大片；
+        更可靠的信号是**中间调像素**（灰度 60~200）的比例 ——
+        纯黑白线图几乎没有中间调，黑块图则中间调极少、两端极端。
+        """
+        from PIL import Image
+        res, _, out = rendered
+        ratios = []
+        for r in res:
+            p = out / r.image_name
+            im = Image.open(p).convert("L")
+            W, H = im.size
+            mid = im.crop((0, H // 3, W, 2 * H // 3))
+            px = list(mid.getdata())
+            dark = sum(1 for v in px if v < 128)
+            # 中带着墨率：柜框只画上下两条边，中间应该几乎没有线。
+            # 但柜内表位就在中带里，所以必须 > 0.5%
+            ratio = dark / len(px)
+            ratios.append((r.block_name, ratio))
+        worst = min(ratios, key=lambda x: x[1])
+        assert worst[1] > 0.005, (
+            f"{worst[0]} 中带几乎无线条（{worst[1]:.4%}）—— "
+            f"柜内表位没画出来，min_lineweight 可能又调粗了"
+        )
+
+    def test_lineweight_is_thin_enough(self):
+        """min_lineweight 必须 ≤ 2，否则 meter 细部会糊成黑块。
+
+        参数矩阵实测（CP-13p-01，1400px 宽）：
+          6 → 32KB，细部糊成黑块（用户截图就是这个）
+          2 → 47KB，能看出 meter 轮廓
+          1 → 70KB，表盘/阀门/接管全部可辨
+        """
+        from app.parsers.cupboard_render import MIN_LINEWEIGHT
+        assert MIN_LINEWEIGHT <= 2, (
+            f"MIN_LINEWEIGHT={MIN_LINEWEIGHT} 太粗，"
+            f"water/gas meter 的细部会糊成实心块（用户诉求 #F）"
+        )
+
+    def test_no_white_border_waste(self, rendered):
+        """裁白边后内容应占画面绝大部分（用户诉求「留白太多」）。"""
+        from PIL import Image
+        res, _, out = rendered
+        for r in res:
+            im = Image.open(out / r.image_name).convert("L")
+            W, H = im.size
+            bb = im.point(lambda v: 0 if v > 245 else 255, "L").getbbox()
+            assert bb, f"{r.block_name} 是白图"
+            x0, y0, x1, y1 = bb
+            cover = (x1 - x0) / W * (y1 - y0) / H
+            assert cover > 0.85, (
+                f"{r.block_name} 内容只占{cover:.1%}，留白仍然过多"
+            )
+
+    def test_render_is_fast_enough(self, real_dxf, tmp_path_factory):
+        """渲染耗时必须收敛（用户诉求 #B「渲染的时间太久了」）。
+
+        实测基线（23 柜，本机 8 workers）：
+          修复前177.0s（串行，且每柜先白跑一次注定失败的文字渲染）
+          修复后   28.8s
+        这里用 60s 作上限，给CI 机器留余量。
+        """
+        import time
+        from app.parsers.cupboard_render import render_cupboard_regions
+        out = tmp_path_factory.mktemp("speed")
+        t = time.time()
+        res, _ = render_cupboard_regions(str(real_dxf), out)
+        el = time.time() - t
+        assert len([r for r in res if r.ok]) == 23, "速度测试里渲染不完整"
+        assert el < 60, f"渲染耗时 {el:.1f}s，超过 60s 上限"
+
+    def test_parallel_and_serial_agree(self, real_dxf, tmp_path_factory):
+        """并行与串行必须产出**同样的柜型集合和顺序**。
+
+        并行是这次提速的核心手段，如果 worker 里的 doc 继承出问题
+        （没重新 bind_document），产出会静默变空或错位。
+        """
+        from app.parsers.cupboard_render import render_cupboard_regions
+        a_out = tmp_path_factory.mktemp("par")
+        b_out = tmp_path_factory.mktemp("ser")
+        par, _ = render_cupboard_regions(str(real_dxf), a_out, workers=4)
+        ser, _ = render_cupboard_regions(str(real_dxf), b_out, workers=1)
+        assert [r.block_name for r in par] == [r.block_name for r in ser], (
+            "并行与串产的柜型顺序不一致"
+        )
+        assert [r.ok for r in par] == [r.ok for r in ser], (
+            "并行与串行的成功/失败不一致"
+        )
+        assert [r.entity_count for r in par] == [r.entity_count for r in ser], (
+            "并行与串行抠出的实体数不一致 —— worker 没拿到正确的 doc"
+        )
+
+
+class TestRenderInternals:
+    """渲染内部辅助函数。"""
+
+    def test_auto_workers_capped(self):
+        """并行度必须封顶（实测 16 workers 反而比 8 慢）。"""
+        from app.parsers.cupboard_render import MAX_RENDER_WORKERS, _auto_workers
+        assert MAX_RENDER_WORKERS == 8
+        assert _auto_workers(1) == 1, "单任务不该并行"
+        assert _auto_workers(100) <= MAX_RENDER_WORKERS
+        assert _auto_workers(0) >= 1, "空任务列表也要返回合法并行度"
+
+    def test_render_config_is_black_on_white(self):
+        """建筑图纸惯例：黑线白底。彩色版实测只有 23KB 且线条丢失。"""
+        from ezdxf.addons.drawing.config import BackgroundPolicy, ColorPolicy
+        from app.parsers.cupboard_render import _render_config
+        cfg = _render_config()
+        assert cfg.color_policy == ColorPolicy.BLACK
+        #背景用的是 BackgroundPolicy 枚举，不是 ColorPolicy
+        assert cfg.background_policy == BackgroundPolicy.WHITE
+        assert cfg.min_lineweight == MIN_LINEWEIGHT
+
+    def test_fonts_available_probe_does_not_raise(self):
+        """字体探测不能抛异常 —— 它决定要不要渲染文字。"""
+        from app.parsers.cupboard_render import _fonts_available
+        assert isinstance(_fonts_available(), bool)
