@@ -50,6 +50,7 @@ from app.parsers.cupboard_render import (
 from app.parsers.cupboard_render import (
     THUMB_DIR,
     render_cupboard_library,
+    render_cupboard_regions,
 )
 from app.parsers.dwg import detect_backends, parse_dwg
 from app.services.pipeline import Pipeline, file_hash
@@ -945,14 +946,19 @@ class RenderRequest(BaseModel):
 
 @app.post("/api/cupboards/render")
 def render_cupboards(body: RenderRequest) -> dict[str, Any]:
-    """把 DWG/DXF 里的每个柜型 block 渲染成 JPG，供柜型库点击查看。
+    """把 DWG/DXF 里的每个**柜体**渲染成 JPG，供柜型库点击查看。
 
     需求：「读取了 dwg 文件，将里面的不同的柜型都导出成 jpg 格式，
     放在 library 里，可以点击查看」。
 
-    只渲染**语义判定为柜型**的 block —— 用户实测一份图纸 141 个 block 里
-    有 130+ 个是 ``Aect_Duct_*`` HVAC 风管零件，全渲进库等于噪声。
-    返回里同时给出 ``rejected`` 及每条的排除理由，用户能自己核对。
+    **粒度（用户实图纠正）**：一张图 = 一个**柜子**，柜内含若干套
+    water+gas，**表位数量就是该层的 units 数**。用户原话：
+    「不是解析单个 water 或者 gas 的表，而是一个 cupboard，
+    里面包含了多套的 water+gas」。
+
+    旧实现按命名 block 逐个渲染，渲出来的是柜内单个表符号 —— 前两轮
+    翻车的根因都是「一个 block = 一个柜型」这个错误前提。
+    详见 :mod:`app.parsers.cupboard_geometry` 的模块文档。
     """
     # 路径只能来自上传目录，不接受外部路径
     src = (UPLOAD_DIR / Path(body.file).name).resolve()
@@ -966,19 +972,10 @@ def render_cupboards(body: RenderRequest) -> dict[str, Any]:
     if dxf is None:
         raise HTTPException(422, f"DWG 转换失败：{err}")
 
-    # 先做语义判定，把「哪些是柜型/ 哪些不是」明确告诉用户
-    from app.parsers.cupboard_classify import judge_library
-
-    try:
-        cups, others = judge_library(dxf)
-    except Exception as exc:
-        cups, others = [], []
-        log.warning("柜型判定失败: %s", exc)
-
-    results = render_cupboard_library(
+    results, parsed = render_cupboard_regions(
         dxf,
         THUMB_DIR_PATH,
-        only_blocks=body.only_blocks or ([v.block_name for v in cups] if cups else None),
+        only_codes=body.only_blocks or None,
         width=body.width,
     )
     ok = [r for r in results if r.ok]
@@ -987,25 +984,34 @@ def render_cupboards(body: RenderRequest) -> dict[str, Any]:
         "rendered": len(ok),
         "failed": len(results) - len(ok),
         "source": src.name,
-        # 判定明细 —— 用户抱怨「为啥会有这些东西」时要能逐条解释
-        "detected": len(cups),
-        "rejected": len(others),
-        "cupboards": [
-            {
-                "block_name": v.block_name,
-                "score": v.score,
-                "reason": v.reason,
-                "entity_count": v.entity_count,
-                "size_mm": list(v.size_mm),
-            }
-            for v in cups
+        # 柜型几何明细 —— 前端按表位数（= units 数）分组展示
+        "cupboards": [_cup_out(c) for c in parsed.cupboards],
+        # 被丢弃的矩形（含理由）—— 用户抱怨「为啥有这些」时要能解释
+        "discarded": [
+            {"size": [round(r.width, 1), round(r.height, 1)],
+             "layer": r.layer, "reason": why}
+            for r, why in parsed.discarded[:120]
         ],
-        "rejected_items": [
-            {"block_name": v.block_name, "reason": v.reason}
-            for v in others[:120]        # 上限 120条，避免响应过大
-        ],
+        "diag": {
+            "entity_total": parsed.entity_total,
+            "rect_total": parsed.rect_total,
+            "cabinet_layer_hits": parsed.cabinet_layer_hits,
+        },
         "items": [RenderOut(**r.__dict__) for r in results],
     }
+
+
+def _cup_out(c) -> dict[str, Any]:
+    """柜型几何信息 → 前端可消费的 dict。
+
+    ``positions_total`` 是**表位数 = units 数**，前端按它分组。
+    """
+    d = c.as_dict()
+    d["code"] = f"CP-{c.positions_total}p"
+    d["notes"] = c.notes
+    d["layer"] = c.layer
+    d["glyph_count"] = c.glyph_count
+    return d
 
 
 @app.get("/api/thumbs/{name}")

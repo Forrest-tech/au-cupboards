@@ -111,13 +111,32 @@ class TestRenderLibrary:
 
 
 class TestRenderConstants:
-    def test_lineweight_is_visible(self):
-        """线宽下限不能是 0 —— 那正是产出空白图的原因之一。"""
-        assert MIN_LINEWEIGHT >= 15, "线宽过细，白底上几乎不可见"
+    def test_lineweight_not_excessive(self):
+        """线宽既不能是 0（白底上消失），也不能过粗。
+
+        实测踩坑：`min_lineweight=25`（0.25mm）是「按 block 渲染」
+        时代的调法 —— 整个 block 缩成一张图，线太细就看不见。
+        改成「按柜体区域」渲染后，一个柜子独占一张图，细节够大，
+        25 反而把 150×190mm 的表位框糊成一块黑斑，完全看不出排布。
+        所以现在的约束是「细但非零」：1~15 之间。
+        """
+        assert 1 <= MIN_LINEWEIGHT <= 15, (
+            f"线宽 {MIN_LINEWEIGHT} 不合适：过细看不见，过粗糊成一团"
+        )
+
+    def test_blank_detection_is_content_based(self):
+        """空白检测必须按像素内容，不能只看文件体积。
+
+        实测踩坑：min_lineweight 25→6 让同一张柜体图从 26KB 掉到
+        7.6KB。固定字节阈值必然在某组参数下误杀合法图，
+        所以主判据是 :func:`_looks_blank` 的非白像素占比。
+        """
+        from app.parsers.cupboard_render import _looks_blank
+        assert callable(_looks_blank), "缺少按内容判空白的检测函数"
 
     def test_blank_threshold_is_sane(self):
-        """空白阈值要介于「纯白图」和「真实图」之间。"""
-        assert 2_000 < MIN_IMAGE_BYTES < 60_000
+        """字节阈值现在只作极端兜底，范围放宽即可。"""
+        assert 1_000 < MIN_IMAGE_BYTES < 60_000
 
 
 class TestThumbEndpointSecurity:

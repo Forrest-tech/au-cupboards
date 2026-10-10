@@ -40,16 +40,32 @@ MAX_SIDE = 2600
 #: JPEG 质量
 JPEG_QUALITY = 88
 
-#: 渲染线宽（1/100 mm）。默认配置太细，白底上几乎不可见。
-MIN_LINEWEIGHT = 25
+#: 渲染线宽（1/100 mm）。
+#:
+#: 历史：默认配置下白底上几乎看不见（产出 4587字节的「空白图」），
+#: 于是把它调到 25（0.25mm）强行加粗 —— 那是在**按 block 渲染**时期，
+#: 因为整个 block 缩到一张图里，线条太细就真的看不见了。
+#:
+#: 现在改回细线：按**柜体区域**渲染后，一个柜子独占一张图，
+#: 细节足够大。实测 min_lineweight=25 会把 150×190mm 的表位框
+#: 糊成一块黑斑，完全看不出柜内排布；改成 6 才能看清
+#: 「水表竖线+圆头」与「气表框」的结构。
+#:
+#: 6 = 0.06mm，在 1400px 宽的图上约 1~2px，清晰且不糊。
+MIN_LINEWEIGHT = 6
 
 #: 产出 JPG 的最小合理字节数。
 #:
-#: 判定「空白图」的依据：一张1400px宽的白底图 JPEG 压到1-2KB；
-#: 有实际线条的柜型图在黑线配置下普遍 >8KB。
-#: 实测踩坑：默认配置渲染出 4587 字节的「看起来空白」的图，
-#: 而代码只判断了文件存在且>512 字节，于是静默入库了空图。
-MIN_IMAGE_BYTES = 6_000
+#: 判定「空白图」的兜底依据。实测踩坑（两次）：
+#:
+#: 1. 默认配置渲染出 4587 字节的「看起来空白」的图，代码只判断
+#:    文件存在且 >512 字节，于是静默入库了空图。
+#: 2. 把min_lineweight 从 25 调到 6 之后，**合法的柜体图也从26KB
+#:    掉到 7.6KB** —— 用固定字节阈值必然误杀。
+#:
+#: 所以现在**主判据是内容**（见 :func:`_looks_blank`），
+#: 字节数只作极端情况下的兜底（小到不可能画出东西）。
+MIN_IMAGE_BYTES = 4_000
 
 
 @dataclass
@@ -73,6 +89,54 @@ class BlockRender:
     #: 标注文字（TEXT/MTEXT/ATTRIB），柜型的「介绍」常写在这里
     texts: list[str] = field(default_factory=list)
     error: str | None = None
+
+
+def _looks_blank(path: Path) -> bool:
+    """按**像素内容**判断是否白图 —— 比看文件字节数可靠。
+
+    实测踩坑：字节数阈值会随线宽、尺寸、压缩参数大幅波动
+    （min_lineweight 25→6 让同一张柜体图从 26KB 掉到 7.6KB），
+    用固定阈值必然在某个参数下误杀合法图，或放过真正的空图。
+
+    这里用 Pillow 数「非白像素占比」：
+      · 占比 < 0.4% → 视为空白（画布上东西太少）
+      · 同时返回非白像素的**包围盒**，全在边缘一圈说明只是画了框
+    """
+    try:
+        from PIL import Image
+    except Exception:
+        return False
+    try:
+        with Image.open(path) as im:
+            im = im.convert("L")
+            # 缩小后再统计 —— 全尺寸逐像素太慢，对判定没帮助
+            w, h = im.size
+            sc = max(1, min(w, h) // 300)
+            small = im.resize((max(1, w // sc), max(1, h // sc)))
+            # Pillow 14 起 getdata() 弃用，改用 get_flattened_data
+            try:
+                px = list(small.get_flattened_data())
+            except AttributeError:
+                px = list(small.getdata())
+    except Exception:
+        return False
+
+    n = len(px)
+    if not n:
+        return True
+    # 阈值 235/255：容忍 JPEG 压缩噪点
+    dark = [i for i, v in enumerate(px) if v < 235]
+    ratio = len(dark) / n
+    if ratio < 0.004:
+        return True
+    # 内容集中在边缘 5% → 只是画了个图框，没有实际内容
+    sw, sh = small.size
+    edge = 0
+    for i in dark:
+        x, y = i % sw, i // sw
+        if (x < sw * 0.05 or x > sw * 0.95 or y < sh * 0.05 or y > sh * 0.95):
+            edge += 1
+    return edge / len(dark) > 0.97
 
 
 def _pick_size(bbox, width: int) -> tuple[int, int]:
@@ -257,30 +321,19 @@ def render_block_to_jpg(
         return res
 
     # ---- 空白图检测 ----
-    # matplotlib 画布上确实画了东西（patches/lines 有值）也可能因为
-    # 颜色/线宽过淡而视觉上不可见。这里用产出体积做二次兜底：
-    # 尺寸明显偏小就判定为可疑，宁可让用户知道「这张没渲染出来」，
-    # 也不能把白图当柜型图存进库里。
-    size = fpath.stat().st_size
-    if size < MIN_IMAGE_BYTES:
-        # 退一步再看：若实体里含文字/圆/填充等强可见图元，
-        # 体积小也可能是真的（内容极少）
-        strong = sum(1 for e in ents
-                     if e.dxftype() in ("TEXT", "MTEXT", "ATTRIB", "ATTDEF",
-                                        "CIRCLE", "ARC", "ELLIPSE",
-                                        "SOLID", "HATCH", "3DFACE"))
-        if strong == 0:
-            res.error = (
-                f"渲染结果疑似空白（{size} 字节 < {MIN_IMAGE_BYTES}），"
-                "已丢弃 —— 图纸可能全部是构造线或不受支持的代理实体"
-            )
-            try:
-                fpath.unlink()
-            except OSError:
-                pass
-            return res
-        log.debug("%s 体积偏小(%d)但含 %d 个强可见图元，保留",
-                  block_name, size, strong)
+    # 主判据是**像素内容**（见 _looks_blank），不看文件体积 ——
+    # 体积会随线宽/画布尺寸/压缩参数大幅波动，用固定阈值必然
+    # 在某组参数下误杀合法图。体积只留作极端兜底。
+    if _looks_blank(fpath):
+        res.error = (
+            "渲染结果疑似空白（画面几乎无内容），已丢弃 —— "
+            "图纸可能全部是构造线或不受支持的代理实体"
+        )
+        try:
+            fpath.unlink()
+        except OSError:
+            pass
+        return res
 
     res.ok = True
     res.image_name = fname
@@ -336,3 +389,207 @@ def render_cupboard_library(
             continue
         results.append(render_block_to_jpg(dxf_path, name, out_dir, width=width))
     return results
+
+# ============================================================ 按柜体渲染
+
+def render_cupboard_regions(
+    dxf_path: str | Path,
+    out_dir: str | Path,
+    only_codes: list[str] | None = None,
+    width: int = DEFAULT_WIDTH,
+    dpi: int = 110,
+    parsed=None,
+) -> tuple[list[BlockRender], object]:
+    """把每个**柜体**渲染成一张 JPG。
+
+    这是正确粒度的渲染入口：一张图 = 一个柜子 = 若干套water+gas。
+    与旧的 :func:`render_cupboard_library`（一个 block 一张图）的区别，
+    就是前两轮反复踩的坑—— 用户要的是**整个柜子**，
+    不是柜子内部的单个 water 表 / gas 表符号。
+
+    实现方式：柜体在 modelspace 里是一个矩形区域，不是一个命名 block。
+    所以把**落在该矩形内的所有实体**复制到临时 modelspace 再渲染，
+    等价于「把柜子这一块单独抠出来画」。
+
+    返回 ``(渲染结果列表, 解析结果)``。
+    """
+    from app.parsers.cupboard_geometry import parse_cupboards
+
+    dxf_path = Path(dxf_path)
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if parsed is None:
+        parsed = parse_cupboards(dxf_path)
+
+    import ezdxf
+    from ezdxf.bbox import extents as _ext
+
+    doc = ezdxf.readfile(str(dxf_path))
+    msp = doc.modelspace()
+    all_ents = list(msp)
+
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from ezdxf.addons.drawing import Frontend, RenderContext
+        from ezdxf.addons.drawing.config import (
+            BackgroundPolicy,
+            ColorPolicy,
+            Configuration,
+            LineweightPolicy,
+        )
+        from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
+    except Exception as exc:
+        return ([BlockRender(block_name="<deps>", ok=False,
+                             error=f"渲染依赖缺失: {exc}")], parsed)
+
+    results: list[BlockRender] = []
+    for idx, cup in enumerate(parsed.cupboards):
+        code = _cabinet_code(cup, idx)
+        res = BlockRender(block_name=code, ok=False)
+        res.layer = cup.layer
+
+        if only_codes and code not in only_codes:
+            continue
+
+        # 抠出柜体区域内的实体。留2mm 外扩，柜框线本身才不会被裁掉。
+        inside = [e for e in all_ents if _entity_near(e, cup.rect, tol=2.0)]
+        res.entity_count = len(inside)
+        if not inside:
+            res.error = "柜体区域内没有实体"
+            results.append(res)
+            continue
+
+        tmp = ezdxf.new()
+        try:
+            tmsp = tmp.modelspace()
+            for e in inside:
+                tmsp.add_entity(e.copy())
+        except Exception as exc:
+            res.error = f"实体复制失败: {exc}"
+            results.append(res)
+            continue
+
+        try:
+            box = _ext(list(tmsp), fast=True)
+            pw, ph = _pick_size(box, width)
+        except Exception:
+            pw, ph = width, int(width * 0.6)
+
+        fname = f"{code}.jpg"
+        fpath = out_dir / fname
+        try:
+            fig = plt.figure(figsize=(pw / dpi, ph / dpi), dpi=dpi)
+            ax = fig.add_axes([0, 0, 1, 1])
+            ax.set_axis_off()
+            ax.set_facecolor("white")
+            cfg = Configuration(
+                lineweight_policy=LineweightPolicy.RELATIVE_FIXED,
+                lineweight_scaling=1.0,
+                min_lineweight=MIN_LINEWEIGHT,
+                color_policy=ColorPolicy.BLACK,
+                background_policy=BackgroundPolicy.WHITE,
+            )
+            Frontend(RenderContext(tmp), MatplotlibBackend(ax),
+                     config=cfg).draw_layout(tmsp, finalize=True)
+            fig.savefig(str(fpath), format="jpg", facecolor="white", dpi=dpi,
+                        pil_kwargs={"quality": JPEG_QUALITY})
+            plt.close(fig)
+        except Exception as exc:
+            plt.close("all")
+            res.error = f"渲染失败: {type(exc).__name__}: {exc}"
+            results.append(res)
+            continue
+        finally:
+            try:
+                plt.close("all")
+            except Exception:
+                pass
+
+        if not fpath.exists() or fpath.stat().st_size < 512:
+            res.error = "渲染产出为空文件"
+            results.append(res)
+            continue
+        if _looks_blank(fpath):
+            # 柜体图必须能看清内部表位，白图等于没渲染出来
+            try:
+                fpath.unlink()
+            except OSError:
+                pass
+            res.error = "渲染结果疑似空白（画面几乎无内容），已丢弃"
+            results.append(res)
+            continue
+
+        w, h = cup.bbox_mm
+        res.ok = True
+        res.image_name = fname
+        res.width_mm = w
+        res.height_mm = h
+        res.texts = list(cup.notes)
+        results.append(res)
+
+    return results, parsed
+
+
+def _cabinet_code(cup, idx: int) -> str:
+    """给柜型生成稳定的编码：``CP-{表位数}p-01``。
+
+    前缀含表位数，便于前端按 units 数分组；
+    序号保证同表位数的多个排布不会撞名。
+    """
+    notes = " ".join(cup.notes).upper()
+    for key, label in (("6 SET", "6"), ("4 SET", "4"), ("2 SET", "2"),
+                       ("3 SET", "3"), ("1 SET", "1"), ("8 SET", "8"),
+                       ("12 SET", "12")):
+        if key in notes:
+            n = label
+            break
+    else:
+        n = str(cup.positions_total)
+    return f"CP-{n}p-{idx + 1:02d}"
+
+
+def _entity_near(e, rect, tol: float = 2.0) -> bool:
+    """实体的参考点是否落在 rect 内（含容差）。"""
+    t = e.dxftype()
+    try:
+        if t == "LINE":
+            a, b = e.dxf.start, e.dxf.end
+            return (rect.x0 - tol <= a.x <= rect.x1 + tol
+                    and rect.y0 - tol <= a.y <= rect.y1 + tol) or (
+                   rect.x0 - tol <= b.x <= rect.x1 + tol
+                   and rect.y0 - tol <= b.y <= rect.y1 + tol)
+        if t in ("CIRCLE", "ARC", "ELLIPSE"):
+            c = e.dxf.center
+            return (rect.x0 - tol <= c.x <= rect.x1 + tol
+                    and rect.y0 - tol <= c.y <= rect.y1 + tol)
+        if t == "POINT":
+            p = e.dxf.location
+            return (rect.x0 - tol <= p.x <= rect.x1 + tol
+                    and rect.y0 - tol <= p.y <= rect.y1 + tol)
+        if t in ("LWPOLYLINE", "POLYLINE", "RECTANG"):
+            r = rect_from_entity_safe(e)
+            if r is None:
+                return False
+            return rect.contains(r, tol=tol)
+        if t == "INSERT":
+            p = e.dxf.insert
+            return (rect.x0 - tol <= p.x <= rect.x1 + tol
+                    and rect.y0 - tol <= p.y <= rect.y1 + tol)
+        if t in ("TEXT", "MTEXT"):
+            p = e.dxf.insert
+            return (rect.x0 - tol <= p.x <= rect.x1 + tol
+                    and rect.y0 - tol <= p.y <= rect.y1 + tol)
+    except Exception:
+        return False
+    return False
+
+
+def rect_from_entity_safe(ent):
+    from app.parsers.cupboard_geometry import rect_from_entity
+    try:
+        return rect_from_entity(ent)
+    except Exception:
+        return None

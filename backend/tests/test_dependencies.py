@@ -32,6 +32,13 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 REQ = ROOT / "requirements.txt"
 
+#: 标准库模块名 —— 直接取解释器给的权威集合。
+#:
+#: 之前这里是手写的 27 项白名单。实测踩坑：新增一个标准库 import
+#: （``importlib``）后，守卫立刻误报「import 了未声明的第三方包」。
+#: 标准库随Python 版本持续增加，手写清单必然再次腐化。
+_STDLIB = set(sys.stdlib_module_names or ())
+
 
 def _declared() -> set[str]:
     """解析 requirements.txt 里显式声明的包名（跳过注释与 -r 引用）。"""
@@ -215,15 +222,7 @@ class TestAppImportsCleanly:
 class TestTopLevelImportsAreDeclared:
     """代码里的第三方顶层 import 必须在清单中。"""
 
-    #: 标准库白名单
-    STDLIB = {
-        "abc", "argparse", "base64", "collections", "contextlib", "copy",
-        "csv", "dataclasses", "datetime", "enum", "functools", "glob",
-        "hashlib", "io", "itertools", "json", "logging", "math", "os",
-        "pathlib", "re", "shutil", "sqlite3", "subprocess", "sys",
-        "tempfile", "textwrap", "time", "typing", "unicodedata",
-        "uuid", "warnings",
-    }
+    #: 标准库白名单见模块级 _STDLIB（取自 sys.stdlib_module_names）
 
     #: import 名 ≠ distribution 名的映射
     ALIAS = {
@@ -252,7 +251,8 @@ class TestTopLevelImportsAreDeclared:
                         continue
                     mod = m.group(1)
                     # `from __future__ import ...` 会被正则截成 "--future--"
-                    if mod.startswith("_") or mod in cls.STDLIB or mod == "app":
+                    if (mod.startswith("_") or mod in _STDLIB
+                            or mod == "app"):
                         continue
                     dist = cls.ALIAS.get(mod, mod.lower().replace("_", "-"))
                     if dist not in declared:

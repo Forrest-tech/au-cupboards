@@ -17,6 +17,15 @@ backend/var/
 !backend/tests/fixtures/*.dxf
 uploads/
 
+# ---- 柜型库真实样本（用户主动提供，用于几何分解规则验证）----
+# 需求文档 2.2 节规定柜型靠「闭合矩形=柜体 + 内部子矩形=表位」识别，
+# 这条规则只能拿真实图纸验证，无法从截图推断。
+# samples/ 默认不入库，需要显式解除忽略：
+#     git add -f samples/<你的图纸>.dwg
+samples/*
+!samples/.gitkeep
+!samples/README.md
+
 # ---- 导出产物 ----
 *.xlsx
 *.docx
