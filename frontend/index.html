@@ -49,6 +49,7 @@ nav button.on{background:var(--accent);color:#fff}
 .hupload{
   padding:6px 13px;border-radius:6px;background:var(--accent);color:#fff;
   font-size:12px;font-weight:600;transition:.15s;white-space:nowrap;
+  display:inline-flex;align-items:center;gap:5px;
 }
 .hupload:hover{background:var(--accent2)}
 .badge{
@@ -132,11 +133,23 @@ nav button.on{background:var(--accent);color:#fff}
 .tag.ok{background:var(--ok-bg);color:var(--ok);border-color:#bbf7d0}
 .tag.warn{background:var(--warn-bg);color:var(--warn);border-color:#fde68a}
 .cupview{
-  display:flex;align-items:center;justify-content:center;
-  min-height:100%;padding:14px;background:var(--panel2);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  min-height:100%;padding:14px;background:var(--panel2);gap:12px
 }
 .cupview img{max-width:100%;height:auto;background:#fff;
-  border:1px solid var(--line);border-radius:6px}
+  border:1px solid var(--line);border-radius:6px;
+  /* zoom 用 transform 缩放，不改布局宽高（改了 flex 会跟着抖）。
+     默认不缩放，避免残留内联样式被裁切。 */
+  transform-origin:center center;transition:transform .08s linear}
+/* 缩放时 scrollable，1 倍时 hidden —— setZoom 里按需切换 overflow */
+.zoomslot{max-width:100%;max-height:calc(100vh - 190px);overflow:hidden;
+  display:flex;align-items:center;justify-content:center}
+/* 图下方的尺寸标注（用户要求「图片 + 下面显示尺寸」）*/
+.cupcap{background:#fff;border:1px solid var(--line);border-radius:8px;
+  padding:9px 16px;font-size:13px;color:var(--fg);text-align:center;
+  box-shadow:0 1px 3px rgba(15,23,42,.06);max-width:92%}
+.cupcap b{font-weight:700;color:var(--accent)}
+.cupcap .muted{font-size:11.5px}
 
 /* ---- 柜型库 / Buildings 的文件列表页 ---- */
 .filelist{padding:10px 12px}
@@ -161,6 +174,19 @@ main{display:flex;height:calc(100% - 52px)}
 #mid{flex:1;min-width:0;display:flex;flex-direction:column;background:#e8edf3;border-right:1px solid var(--line)}
 #right{width:520px;flex-shrink:0;background:var(--panel);overflow-y:auto}
 
+/* ---------- 栏宽拖拽 ----------
+   用户诉求：「所有的页面的这些工作区，都可以左右拖拽」。
+   实现：两条 4px 的拖拽把手，用 pointer 事件改左右栏的 width。
+   为什么用 pointer 事件而不是 mouse —— 触屏也能拖，Chrome 下
+   鼠标 draggable 选中文字的问题也一并没了。 */
+.dragbar{flex:0 0 4px;cursor:col-resize;background:transparent;position:relative;z-index:6}
+.dragbar:hover,.dragbar.on{background:var(--accent)}
+.dragbar::after{content:'';position:absolute;inset:0 -3px}   /* 扩大命中区 */
+body.resizing{cursor:col-resize;user-select:none}
+/* 拖拽把手放在 tree 右边界、right 左边界 */
+#treewrap{position:relative}
+@media (max-width:900px){.dragbar{display:none}}
+
 .sec{padding:9px 12px 4px;font-size:10px;font-weight:700;color:var(--dim);
   letter-spacing:1px;text-transform:uppercase}
 .node{
@@ -184,13 +210,26 @@ main{display:flex;height:calc(100% - 52px)}
    才是真正会被选中的叶子节点，光靠 lv2 的灰色会显得像分类标题。 */
 .node.lv2.lv3{padding-left:54px;color:var(--fg)}
 .node.lv2.lv3:hover{background:#f2f6fb}
-/* 树节点的编辑按钮（改名 / 删除）—— 默认藏起来，hover 整行才出现，
-   免得密密麻麻的小图标干扰阅读树结构 */
-.renam{opacity:0;border:0;background:transparent;cursor:pointer;padding:0 3px;
-  font-size:12px;line-height:1;color:var(--dim);transition:opacity .12s}
-.node:hover>.renam{opacity:1}
-.renam:hover{color:var(--accent)}
-.renam.danger:hover{color:#dc2626}
+/* 树节点的编辑按钮 —— 已改为顶部「编辑」按钮下拉菜单，
+   这里只保留 hover 时高亮当前行，不再有逐项按钮。 */
+.node:hover{background:var(--panel2)}
+
+/* ---- 顶部「编辑」下拉菜单 ---- */
+.editmenu{
+  position:fixed;z-index:60;min-width:190px;background:#fff;
+  border:1px solid var(--line);border-radius:10px;padding:5px;
+  box-shadow:0 10px 28px rgba(15,23,42,.16);
+}
+.editmenu .emitem{
+  display:flex;align-items:center;gap:9px;width:100%;
+  padding:8px 10px;border:0;border-radius:7px;background:transparent;
+  font-size:13px;color:var(--fg);text-align:left;cursor:pointer
+}
+.editmenu .emitem:hover{background:#eff5fb}
+.editmenu .emico{
+  width:20px;height:20px;display:grid;place-items:center;flex-shrink:0;
+  color:var(--dim);font-size:13px
+}
 
 /* ---------- 中栏 ---------- */
 .mid-bar{
@@ -259,6 +298,10 @@ main{display:flex;height:calc(100% - 52px)}
 .rtabs button.on{color:var(--accent);border-bottom-color:var(--accent);background:var(--panel2)}
 .rpane{padding:12px}
 .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
+/* 楼层概览那排只有 2~3 个，用auto-fit 让卡片按内容宽度均分，
+   不然沿用 4 列会在右栏窄的时候挤成两行 */
+.kpirow{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));
+  gap:8px;margin-bottom:12px}
 .kpi{background:#fff;border:1px solid var(--line);border-radius:7px;padding:9px 10px;
   border-left:3px solid var(--accent);box-shadow:var(--shadow)}
 .kpi.g{border-left-color:var(--ok)} .kpi.p{border-left-color:var(--purple)}
@@ -371,9 +414,57 @@ tr.floor-row td{background:#eef2f7;font-weight:700;border-top:2px solid var(--li
 }
 .toast.ok{border-left-color:var(--ok)}
 .toast.err{border-left-color:var(--err)}
+
+/* ============ 开源图标（Lucide, ISC License, © Lucide Contributors）===
+ *用户要求「里面涉及到的所有 icon 都需要从网上找开源免费的使用」。
+ * 之前用的是 ✎🗑 ▦ ▤ ≡ ▾ ▸ 这些 Unicode 字符，不同平台字形不一样
+ *   （🗑 在Windows 上是彩色 emoji，在 Linux 上是黑白），而且不可控。
+ * 现在统一换成 Lucide 的线性 SVG：路径直接内联，不引外部 CDN
+ *   —— 这个应用要能离线跑（现场解析 DWG），CDN 挂了就全崩。
+ * 用法：<svg class="ic"><use href="#i-pencil"></use></svg>
+ */
+.ic{width:1em;height:1em;stroke:currentColor;fill:none;stroke-width:2;
+  stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto;
+  vertical-align:-.125em}
+.ic.lg{width:1.5em;height:1.5em}
+/* 树节点的图标槽：原来是字符，宽度靠字号撑着，换成 SVG 后要固定宽度，
+   否则chevron 展开时整棵树会横向抖动 */
+.tw .ic,.ico .ic{width:13px;height:13px}
+.ph .big .ic{width:34px;height:34px;stroke-width:1.5}
+.btn .ic{width:14px;height:14px}
+.emico .ic{width:14px;height:14px}
+.cupdel .ic{width:12px;height:12px}
 </style>
 </head>
 <body>
+
+<!-- 图标 sprite：Lucide (ISC) —— 全部为 24×24 viewBox 线性图标 -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <g id="i-pencil"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></g>
+  <g id="i-trash"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></g>
+  <g id="i-copy"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></g>
+  <g id="i-eraser"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></g>
+  <g id="i-refresh"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></g>
+  <g id="i-chevron-down"><path d="m6 9 6 6 6-6"/></g>
+  <g id="i-chevron-right"><path d="m9 18 6-6-6-6"/></g>
+  <g id="i-chevron-left"><path d="m15 18-6-6 6-6"/></g>
+  <g id="i-chevron-up"><path d="m18 15-6-6-6 6"/></g>
+  <g id="i-grid"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></g>
+  <g id="i-file-text"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></g>
+  <g id="i-layers"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></g>
+  <g id="i-table"><path d="M12 3v18"/><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/></g>
+  <g id="i-minus"><path d="M5 12h14"/></g>
+  <g id="i-plus"><path d="M5 12h14"/><path d="M12 5v14"/></g>
+  <g id="i-zoom-in"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6"/><path d="M8 11h6"/></g>
+  <g id="i-zoom-out"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="M8 11h6"/></g>
+  <g id="i-x"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></g>
+  <g id="i-upload"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></g>
+  <g id="i-image-off"><path d="m2 2 20 20"/><path d="M10.66 5H14a2 2 0 0 1 2 2v2.5l2.44 2.44A2 2 0 0 1 19 12.5V16a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 1.28-1.8"/><path d="M8 7V5a2 2 0 0 0-2-2"/><path d="m2 13 3-3 3 3"/><path d="m14 18 3-3 3 3"/></g>
+  <g id="i-folder"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></g>
+  <g id="i-search"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></g>
+  <g id="i-download"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></g>
+  <g id="i-more"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></g>
+</defs></svg>
 
 <header>
   <div class="logo">AU<span>·</span>Cupboards</div>
@@ -383,7 +474,7 @@ tr.floor-row td{background:#eef2f7;font-weight:700;border-top:2px solid var(--li
     <button data-view="building" data-i18n="nav.building">建筑图纸</button>
   </nav>
   <!-- 工作台不放上传入口，默认隐藏，由 gotoView 按 tab 控制 -->
-  <button class="hupload" id="bup" data-i18n="btn.upload" style="display:none">⬆ 上传图纸</button>
+  <button class="hupload" id="bup" style="display:none"><svg class="ic" aria-hidden="true"><use href="#i-upload"></use></svg><span data-i18n="btn.upload">上传图纸</span></button>
   <div class="langsw">
     <button id="lzh" class="on">中文</button>
     <button id="len">EN</button>
@@ -394,19 +485,21 @@ tr.floor-row td{background:#eef2f7;font-weight:700;border-top:2px solid var(--li
 <main>
   <!-- ============ 左：树导航 ============ -->
   <div id="tree"></div>
+  <div class="dragbar" id="dragL" title="拖拽调整左栏宽度"></div>
 
   <!-- ============ 中：文档原样预览 ============ -->
   <div id="mid">
     <div class="mid-bar">
       <span class="fn" id="mfn"></span>
-      <button class="btn" id="bprev" data-i18n-title="ui.prevpage">◀</button>
+      <button class="btn" id="bedit" title="编辑"><svg class="ic" aria-hidden="true"><use href="#i-pencil"></use></svg></button>
+      <button class="btn" id="bprev" data-i18n-title="ui.prevpage"><svg class="ic" aria-hidden="true"><use href="#i-chevron-left"></use></svg></button>
       <span class="badge" id="bpage">– / –</span>
-      <button class="btn" id="bnext" data-i18n-title="ui.nextpage">▶</button>
+      <button class="btn" id="bnext" data-i18n-title="ui.nextpage"><svg class="ic" aria-hidden="true"><use href="#i-chevron-right"></use></svg></button>
       <span class="hint" id="bhelp" data-i18n="ui.scrollhint"></span>
       <span style="width:6px"></span>
-      <button class="btn" id="bzout" title="zoom out">−</button>
+      <button class="btn" id="bzout" title="zoom out"><svg class="ic" aria-hidden="true"><use href="#i-zoom-out"></use></svg></button>
       <span class="badge" id="bzoom">100%</span>
-      <button class="btn" id="bzin" title="zoom in">+</button>
+      <button class="btn" id="bzin" title="zoom in"><svg class="ic" aria-hidden="true"><use href="#i-zoom-in"></use></svg></button>
       <button class="btn pri" id="bparse" data-i18n="btn.reparse">重新解析</button>
     </div>
     <div style="display:flex;flex:1;min-height:0">
@@ -414,10 +507,12 @@ tr.floor-row td{background:#eef2f7;font-weight:700;border-top:2px solid var(--li
       <div class="viewer" id="viewer">
         <!-- 静态 HTML 里的 ${...} 不会被求值，必须给真实文本，
              boot() 会用 t('mid.ph') 覆盖 -->
-        <div class="ph"><div class="big">▤</div><div>上传建筑图纸后在此原样预览</div></div>
+        <div class="ph"><div class="big"><svg class="ic" aria-hidden="true"><use href="#i-file-text"></use></svg></div><div>上传建筑图纸后在此原样预览</div></div>
       </div>
     </div>
   </div>
+
+  <div class="dragbar" id="dragR" title="拖拽调整右栏宽度"></div>
 
   <!-- ============ 右：工作区 ============ -->
   <div id="right">
@@ -440,7 +535,7 @@ const LANG = { zh: '中文', en: 'English' };
 const I18N = {
   zh: {
     'nav.work': '工作台', 'nav.cupboard': '柜型库', 'nav.building': '建筑图纸',
-    'btn.upload': '⬆ 上传图纸', 'btn.reparse': '重新解析',
+    'btn.upload': '上传图纸', 'btn.reparse': '重新解析',
     'ui.prevpage': '上一页（PageUp）', 'ui.nextpage': '下一页（PageDown）',
     'ui.scrollhint': '连续滚动 ·⌘/Ctrl+滚轮 整页跳',
     'tab.matrix': '楼层 × 柜型', 'tab.detail': '单元明细', 'tab.prov': '溯源诊断',
@@ -506,7 +601,7 @@ const I18N = {
   },
   en: {
     'nav.work': 'Workbench', 'nav.cupboard': 'Cupboard Library', 'nav.building': 'Buildings',
-    'btn.upload': '⬆ Upload', 'btn.reparse': 'Re-parse',
+    'btn.upload': 'Upload', 'btn.reparse': 'Re-parse',
     'ui.prevpage': 'Previous page (PageUp)', 'ui.nextpage': 'Next page (PageDown)',
     'ui.scrollhint': 'Scroll continuously · ⌘/Ctrl+wheel = page jump',
     'tab.matrix': 'Floor × Cupboard', 'tab.detail': 'Unit Detail', 'tab.prov': 'Provenance',
@@ -600,6 +695,7 @@ const S = {          // 全局状态
   lfOpen: {},
   openDrawing: null, // 哪张图纸处于展开状态（drawing id）
   fold: {},          // 楼的折叠状态：key 'b<buildingId>' -> true=折叠
+  floorSel: null,    // 建筑图纸 tab 当前选中的楼层（L1 / GROUND …）
   parsing: false,    // 正在解析 —— 用于禁止关闭弹窗
   dwgHint: null,     // 后端 /health 返回的 DWG 安装指引原文
   renders: [],       // 柜型block → JPG 的渲染结果
@@ -614,6 +710,10 @@ const S = {          // 全局状态
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+/** 内联一个开源图标（Lucide, ISC）。名字见上方 sprite 里的 #i-* */
+const ic = (n, cls = '') =>
+  `<svg class="ic${cls ? ' ' + cls : ''}" aria-hidden="true"><use href="#i-${n}"></use></svg>`;
+const twIcon = (open) => ic(open ? 'chevron-down' : 'chevron-right');
 const num = (v, d = 2) => (v === null || v === undefined || v === '') ? '—' : Number(v).toFixed(d);
 
 function toast(msg, kind = '') {
@@ -729,6 +829,20 @@ async function boot() {
   }
   await loadTree();
   await loadVariants();
+  // 恢复上次所在 tab 与选中项 —— 用户诉求「刷新维持在当前 tab，
+  // 不要直接跳转到工作台」。用 localStorage（跨会话）而不是
+  // sessionStorage（关掉标签页就没了，刷新诉求要的是后者也行，
+  // 但存localStorage 顺手也满足「关掉再开还在」）。
+  let resume = null;
+  try { resume = JSON.parse(localStorage.getItem('cupView') || 'null'); }
+  catch (e) { /* 隐私模式 */ }
+  if (resume && ['work', 'cupboard', 'building'].includes(resume.view)) {
+    S.view = resume.view;
+    S.treeSel = resume.sel ?? null;
+    S.openDrawing = resume.dwg ?? null;
+    S.floorFilter = resume.floor ?? null;
+    S.floorSel = resume.fsel ?? null;
+  }
   // 自动恢复最近一次解析结果 —— 否则刷新后界面是空的
   try {
     const jobs = await api('/jobs?limit=1');
@@ -741,6 +855,56 @@ async function boot() {
   // 统一走 gotoView 归位：首屏也必须把上传按钮、树、中栏按 tab 摆对，
   // 否则默认可见 #bup（工作台不该有上传入口）
   gotoView(S.view);
+  // 进入 tab 自动选中树里第一个 item（用户诉求：「进入这个 tab 后，
+  // 默认会显示树状结构第一个的 item，选中」）
+  autoSelectFirstInView();
+  saveViewState();
+}
+
+/** 记住当前所在 tab 与选中项，供刷新后恢复。
+ *  用户诉求：「这个页面刷新，维持在当前的 tab 内容，
+ *  不要直接跳转到工作台」。 */
+function saveViewState() {
+  try {
+    localStorage.setItem('cupView', JSON.stringify({
+      view: S.view, sel: S.treeSel, dwg: S.openDrawing, floor: S.floorFilter,
+      fsel: S.floorSel,
+    }));
+  } catch (e) { /* 隐私模式下写不了，忽略 */ }
+}
+
+/** 进入 tab 时自动选中树里第一个 item。
+ *  用户诉求：「进入这个 tab 后，默认会显示树状结构第一个的 item，
+ *  选中，然后中间位置显示完整的内容」。 */
+function autoSelectFirstInView() {
+  // 建筑图纸 tab：刷新恢复来的楼层选中要直接兑现（否则右栏停在项目列表）
+  if (S.view === 'building' && S.treeSel === 'floors' && S.floorSel) {
+    const f = (S.job?.floors || []).find(x => x.floor_code === S.floorSel);
+    if (f) { showFloorPanel(S.floorSel); return; }
+    S.floorSel = null;
+  }
+  if (S.treeSel) return;             // 已有选中（刷新恢复来的），不动
+  // 建筑图纸 tab：第一个 item 是楼栋，直接点它只会展开、不会加载内容。
+  // 用户要的是「默认选中第一个 item，中间显示完整 PDF，右边显示楼层
+  // 信息」—— 所以这里自动往下钻到楼层列表，钻到第一个真实楼层。
+  if (S.view === 'building') {
+    const p = S.projects[0];
+    if (!p) { renderHub(); return; }
+    const d = (p.drawings || [])[0];
+    if (!d) { renderHub(); return; }
+    S.curBuilding = p.id;
+    S.openDrawing = d.id;
+    S.treeSel = 'floors';
+    renderTree();
+    const f0 = (S.job?.floors || [])[0];
+    if (f0) { S.floorSel = f0.floor_code; showFloorPanel(f0.floor_code); }
+    else { renderHub(); if (S.jobId) showPdf(S.jobId, S.pages || []); }
+    return;
+  }
+  const first = $('#tree .node');
+  if (first) { first.click(); return; }
+  // 树是空的（柜型库没数据 / 没解析过）—— 中右两栏也别留上一 tab 的残影
+  if (S.view !== 'work') renderHub();
 }
 
 async function loadTree() {
@@ -766,8 +930,8 @@ function renderTree() {
     // 楼栋节点上的箭头：折叠/展开。展开后每张图纸各占一个 item
     const open = !S.fold['b' + p.id];
     h += `<div class="node${on}" data-b="${p.id}">
-      <span class="tw" data-fold="b${p.id}">${open ? '▾' : '▸'}</span>
-      <span class="ico">▦</span><span class="nm">${esc(p.name)}</span>
+      <span class="tw" data-fold="b${p.id}">${twIcon(open)}</span>
+      <span class="ico">${ic('folder')}</span><span class="nm">${esc(p.name)}</span>
       <span class="ct">${dw.length}${t('tree.drawings')}</span></div>`;
     if (!open) continue;
     // ---- 每张图纸一个 item ----
@@ -775,19 +939,23 @@ function renderTree() {
       const sel = S.treeSel === 'floors' && S.openDrawing === d.id ? ' on' : '';
       const dopen = S.openDrawing === d.id;
       h += `<div class="node lv1${sel}" data-sel="d${d.id}">
-        <span class="tw">${d.latest_job_id ? (dopen ? '▾' : '▸') : '·'}</span>
-        <span class="ico">▤</span><span class="nm">${esc(d.title || t('nav.building'))}</span>
+        <span class="tw">${d.latest_job_id ? twIcon(dopen) : '·'}</span>
+        <span class="ico">${ic('file-text')}</span><span class="nm">${esc(d.title || t('nav.building'))}</span>
         <span class="ct">${d.page_count || 0}p</span></div>`;
       // 图纸展开 -> 该图纸自己的楼层（按 latest_job_id 过滤）
       const djob = (d.latest_job_id === S.jobId) ? job : null;
       if (dopen && djob) {
         h += `<div class="node lv1${S.treeSel === 'floors' ? ' on' : ''}" data-sel="floors">
-          <span class="tw">▸</span>
-          <span class="ico">≡</span><span class="nm">${t('tree.floors')}</span>
+          <span class="tw">${twIcon(false)}</span>
+          <span class="ico">${ic('layers')}</span><span class="nm">${t('tree.floors')}</span>
           <span class="ct">${djob.floors?.length || 0}</span></div>`;
         if (S.treeSel === 'floors') {
           for (const f of (djob.floors || [])) {
-            h += `<div class="node lv2" data-floor="${esc(f.floor_code)}">
+            // 建筑图纸 tab 下当前楼层要高亮 —— 用户靠这个判断
+            //「右栏这批柜型是给哪一层看的」
+            const fo = S.view === 'building' && S.floorSel === f.floor_code
+              ? ' on' : '';
+            h += `<div class="node lv2${fo}" data-floor="${esc(f.floor_code)}">
               <span class="nm">${esc(f.floor_code)}</span>
               <span class="ct">${f.unit_count}${LANGNOW==='zh'?'户':' u'}${f.communal_count ? '+' + f.communal_count : ''}</span></div>`;
           }
@@ -797,7 +965,7 @@ function renderTree() {
     if (!dw.length && job) {
       // 兼容：老数据只有 job 没有 drawing 记录
       h += `<div class="node lv1${S.treeSel === 'floors' ? ' on' : ''}" data-sel="floors">
-        <span class="tw">▸</span><span class="ico">≡</span>
+        <span class="tw">${twIcon(false)}</span><span class="ico">${ic('layers')}</span>
         <span class="nm">${t('tree.floors')}</span>
         <span class="ct">${job.floors?.length || 0}</span></div>`;
     }
@@ -826,8 +994,17 @@ function renderTree() {
  */
 function libraryGroups() {
   // 先按来源图纸分组（一个库里可能有多份 DWG 都导过柜型）
+  //
+  // **只收DWG 实测柜型**（source === 'dwg'）
+  // ------------------------------------------
+  // 库里还有 11 条 `seed_poc` 演示数据（CP-TRI-1x3 之类），它们是
+  // Stage2 表位推导的基线，尺寸全是 estimated、也没有渲染图。
+  // 它们一混进来，树上就会冒出「1 套」「2 套」这些用户口径里
+  // 根本不存在的套数（真实 DWG 只有 3~14 Units），同一个 3 Units
+  // 也会显示成 5 种柜型。柜型库是给用户选型用的，只该看真实图纸。
   const byFile = new Map();
   for (const v of S.variants) {
+    if (v.source !== 'dwg') continue;
     const fname = v.source_name || v.dwg_name || t('tree.library');
     if (!byFile.has(fname)) byFile.set(fname, []);
     byFile.get(fname).push(v);
@@ -880,67 +1057,86 @@ function libraryGroups() {
 }
 
 function renderTreeLibrary() {
-  const groups = libraryGroups();
-  // 展开态字典必须先兜住：S 是普通对象，S.lfOpen 在用户点开任何节点
-  // 之前是 undefined，直接读会抛
-  // "Cannot read properties of undefined"（实测：切到柜型库时树整个不渲染）。
+  // 柜型库树：**根节点 = units 数量**，子节点 = Model A/B/C。
+  //
+  //  用户口径（明确要求）：
+  //    3 Units
+  //      Model A
+  //      Model B
+  //    4 Units
+  //      Model A
+  //    5 Units
+  //      Model A
+  //      Model B
+  //  点父节点（3 Units）→ 右侧显示该套数下**全部** model；
+  //  点子节点（Model A）→ 只看那一个。
+  //
+  //  为什么不再以 DWG 文件名为根
+  //  --------------------------
+  //  这个库里实际只有一份 DWG，文件名当根等于多加一层无意义的壳；
+  //  用户真正要按units 找柜型。而且多个 DWG 时units 会重名，
+  //  按文件分组反而看不清。先按 DWG 归组、再把 units 提到最外层，
+  //  既满足口径又保留了多图纸时的归属信息。
+  const files = libraryGroups();
   S.lfOpen = S.lfOpen || {};
+  S.mdOpen = S.mdOpen || {};
+
+  // 先把各 DWG 的 units 组摊平成「units -> 各 DWG 的 model」
+  const byUnits = new Map();
+  for (const f of files) {
+    for (const u of f.units) {
+      if (!byUnits.has(u.n)) byUnits.set(u.n, { n: u.n, files: [] });
+      byUnits.get(u.n).files.push({ f, u });
+    }
+  }
+  const unitsList = [...byUnits.values()].sort((a, b) => a.n - b.n);
+
   let h = `<div class="sec">${t('tree.library')}</div>`;
-  if (!groups.length) {
+  if (!unitsList.length) {
     h += `<div class="node lv1" style="color:var(--dim)">${t('dwg.empty')}</div>`;
     $('#tree').innerHTML = h;
     return;
   }
-  for (const f of groups) {
-    // 「展开」和「选中」必须是**两个独立状态**。
-    //
-    // 实测 bug（用户报「点一下左侧树就自动收起来了」）：早先把展开
-    // 也存在 S.treeSel 上，于是点子节点时 treeSel 从 'f:file' 变成
-    // 'file#7'，重渲染时根节点 fopen 判false -> 整个子树收起。
-    // 现在展开态放S.lfOpen（按 fileKey 记忆），treeSel 只管高亮。
-    const fopen = !!S.lfOpen[f.fileKey];
-    const fsel = fopen && isSelUnder(f.fileKey) ? ' on' : '';
-    h += `<div class="node lv1${fsel}" data-lf="${esc(f.fileKey)}">
-      <span class="tw">${fopen ? '▾' : '▸'}</span><span class="ico">⊞</span>
-      <span class="nm" title="${esc(f.name)}">${esc(dispName(f.fileKey))}</span>
-      <span class="ct">${f.count}</span>
-      <button class="renam" data-rename="${esc(f.fileKey)}"
-        title="${t('lib.rename')}">✎</button>
-      <button class="renam danger" data-del-file="${esc(f.fileKey)}"
-        title="${t('lib.delfile')}">🗑</button></div>`;
-    if (fopen) {
-      for (const u of f.units) {
-        // 只有一个摆法时不加后缀；有多个时逐个列成
-        // 「6 Units - A」「6 Units - B」…（「13 Units」有三个）
-        const rows = u.labels.length === 1
-          ? [{ key: u.key, label: `${u.n} ${t('lib.units')}`, ct: 1, v: u.labels[0].v }]
-          : u.labels.map(x => ({
-            key: u.key + '@' + x.v.id,
-            label: `${u.n} ${t('lib.units')}${x.suffix}`,
-            ct: null,
-            v: x.v,
-          }));
-        for (const r of rows) {
-          const on = S.treeSel === r.key ? ' on' : '';
-          const ct = r.ct === null ? '' : `<span class="ct">${r.ct}</span>`;
-          const disp = vLabel(r.v, r.label);
-          // 每个变体都能改名 / 删除（用户诉求：「有编辑的功能，
-          // 可以删除元素，或者重命名」）
-          h += `<div class="node lv2${on}${r.ct === null ? ' lv3' : ''}"
-            data-lg="${esc(r.key)}" data-vid="${esc(r.v.id)}">
-            <span class="nm">${esc(disp)}</span>${ct}
-            <button class="renam" data-rename-vid="${esc(r.v.id)}"
-              data-vname="${esc(disp)}" title="${t('lib.rename')}">✎</button>
-            <button class="renam danger" data-del-vid="${esc(r.v.id)}"
-              data-vname="${esc(disp)}" title="${t('lib.delone')}">🗑</button>
-          </div>`;
-        }
+
+  for (const grp of unitsList) {
+    const ukey = 'u' + grp.n;
+    const uopen = !!S.lfOpen[ukey];
+    // 父子都要显示的计数：这个套数下一共有几个柜
+    const total = grp.files.reduce((a, x) => a + x.u.labels.length, 0);
+    const usel = S.treeSel === ukey;
+    h += `<div class="node${uopen || usel ? ' on' : ''}" data-lu="${grp.n}">
+      <span class="tw">${twIcon(uopen)}</span>
+      <span class="ico">${ic('grid')}</span>
+      <span class="nm">${grp.n} ${t('lib.units')}</span>
+      <span class="ct">${total}</span></div>`;
+    if (!uopen) continue;
+
+    // 该套数下的每个 model
+    for (const { f, u } of grp.files) {
+      for (const lb of u.labels) {
+        const key = u.key + '@' + lb.v.id;
+        const on = S.treeSel === key ? ' on' : '';
+        const disp = vLabel(lb.v, lb.suffix.replace(/^-\s*/, 'Model '));
+        h += `<div class="node lv2${on}" data-lg="${esc(key)}" data-vid="${esc(lb.v.id)}">
+          <span class="nm">${esc(disp)}</span>
+          <span class="ct">${fmtMM(lb.v.w)}×${fmtMM(lb.v.h)}</span></div>`;
       }
     }
   }
   $('#tree').innerHTML = h;
   bindTree();
-  bindTreeRename();
+}
+
+/** 某个 units 数对应的 group key（showUnitsGroup 要用）。
+ *  这个库里通常只有一份 DWG，取第一个匹配的文件名即可；
+ *  多份图纸时 units 会重名，这里返回第一个，右侧会把所有同名 units
+ *  的柜型都列出来（用户按套数找柜，本来就不关心来自哪份图）。 */
+function unitsGroupKey(nUnits) {
+  for (const f of libraryGroups()) {
+    const u = f.units.find(x => x.n === nUnits);
+    if (u) return u.key;
+  }
+  return '';
 }
 
 /** 柜型的用户自定义名（后端 ``meter_counts.label``），没有则回退默认标签 */
@@ -1101,6 +1297,175 @@ function dispName(fname) {
   return (S.renames || {})[fname] || fname;
 }
 
+/* ============================================================ 三栏拖拽
+   用户诉求：「所有的页面的这些工作区，都可以左右拖拽」。
+   宽度存sessionStorage —— 刷新后还在，但换浏览器/新会话回到默认。 */
+const COL_MIN = 180, COL_MAX_RATIO = 0.6;
+
+function initColumnResize() {
+  // 用 querySelector 显式取 main —— <main> 的 id 虽能撞出同名全局变量，
+  // 但那取决于别的脚本有没有给 main 赋值，不可靠。
+  const mainEl = document.querySelector('main');
+  const spec = [
+    { bar: $('#dragL'), pane: $('#tree'), sign: +1, min: COL_MIN,
+      key: 'wTree', maxOf: () => mainEl.clientWidth * COL_MAX_RATIO },
+    { bar: $('#dragR'), pane: $('#right'), sign: -1, min: 280,
+      key: 'wRight', maxOf: () => mainEl.clientWidth * COL_MAX_RATIO },
+  ];
+  // 恢复上次宽度（要在页面有布局宽度之后，所以用 rAF 兜一手）
+  requestAnimationFrame(() => {
+    for (const s of spec) {
+      const v = Number(sessionStorage.getItem(s.key));
+      if (v >= s.min) s.pane.style.width = v + 'px';
+    }
+  });
+
+  for (const s of spec) {
+    let startX = 0, startW = 0;
+    s.bar.addEventListener('pointerdown', ev => {
+      startX = ev.clientX;
+      startW = s.pane.getBoundingClientRect().width;
+      s.bar.classList.add('on');
+      document.body.classList.add('resizing');
+      s.bar.setPointerCapture(ev.pointerId);   // 指针捕获：拖出把手也不丢
+      ev.preventDefault();
+    });
+    s.bar.addEventListener('pointermove', ev => {
+      if (!s.bar.hasPointerCapture?.(ev.pointerId) && !s.bar.classList.contains('on')) return;
+      // 左栏往右拖变宽，右栏往左拖变宽 -> sign 不同
+      const w = Math.max(s.min, Math.min(s.maxOf(), startW + (ev.clientX - startX) * s.sign));
+      s.pane.style.width = Math.round(w) + 'px';
+      // 中栏宽度变了，PDF 页的缩放要跟着重排，否则留白/裁切错位
+      reflowPages();
+    });
+    const end = ev => {
+      if (!s.bar.classList.contains('on')) return;
+      s.bar.classList.remove('on');
+      document.body.classList.remove('resizing');
+      try { s.bar.releasePointerCapture(ev.pointerId); } catch (e) { /* 已释放 */ }
+      try { sessionStorage.setItem(s.key, String(Math.round(s.pane.getBoundingClientRect().width))); }
+      catch (e) { /* 隐私模式 */ }
+      reflowPages();
+    };
+    s.bar.addEventListener('pointerup', end);
+    s.bar.addEventListener('pointercancel', end);
+  }
+}
+
+/** 顶部「编辑」按钮：点开一个操作清单菜单。
+ *
+ *  用户诉求（参考截图里的 Materials 面板）：
+ *  「不要每个 item 后面默认的两个功能按钮，需要在顶部有一个编辑的
+ *   按钮，点击后，在后面会有功能的清单」
+ *
+ *  菜单项随当前选中项变化：选中 Model 就给「重命名 / 删除 / 复制」，
+ *  选中 units 根就给「批量删除该套数」。没有选中时只给全局操作。
+ */
+function bindEditMenu() {
+  const btn = $('#bedit');
+  if (!btn) return;
+  btn.onclick = ev => {
+    ev.stopPropagation();
+    const open = $('#editmenu');
+    if (open) { open.remove(); return; }
+    const sel = S.treeSel || '';
+    const isModel = sel.includes('@');
+    const vid = isModel ? Number(sel.split('@')[1]) : null;
+    const v = vid ? S.variants.find(x => +x.id === vid) : null;
+    const units = S.view === 'cupboard'
+      ? Number(String(sel).split('#').pop()?.replace(/@.*/, '')) || 0 : 0;
+
+    const items = [];
+    if (S.view === 'cupboard') {
+      if (v) {
+        items.push(['rename', ic('pencil'), LANGNOW === 'zh' ? '重命名' : 'Rename']);
+        items.push(['dup', ic('copy'), LANGNOW === 'zh' ? '复制为新 model' : 'Duplicate']);
+        items.push(['del', ic('trash'), LANGNOW === 'zh' ? '删除' : 'Delete']);
+      } else if (units) {
+        items.push(['delall', ic('trash'),
+          (LANGNOW === 'zh' ? '删除该' : 'Delete all ') + units + ' '
+          + (LANGNOW === 'zh' ? '套的全部柜型' : 'cupboards')]);
+      }
+      items.push(['clear', ic('eraser'), LANGNOW === 'zh' ? '清空柜型库' : 'Clear library']);
+    } else {
+      items.push(['bparse', ic('refresh'), LANGNOW === 'zh' ? '重新解析' : 'Re-parse']);
+      items.push(['clear', ic('eraser'), LANGNOW === 'zh' ? '清空解析结果' : 'Clear results']);
+    }
+
+    const menu = document.createElement('div');
+    menu.id = 'editmenu';
+    menu.className = 'editmenu';
+    menu.innerHTML = items.map(([act, ic, label]) =>
+      `<button class="emitem" data-act="${act}"><span class="emico">${ic}</span>${esc(label)}</button>`
+    ).join('');
+    document.body.appendChild(menu);
+
+    // 贴着按钮下方；贴边时收进窗口内
+    const r = btn.getBoundingClientRect();
+    menu.style.left = Math.min(r.left, window.innerWidth - menu.offsetWidth - 8) + 'px';
+    menu.style.top = (r.bottom + 6) + 'px';
+
+    menu.onclick = me => {
+      const b = me.target.closest('.emitem');
+      if (!b) return;
+      menu.remove();
+      doEditAction(b.dataset.act, { vid, v, units });
+    };
+    // 点别处关闭
+    setTimeout(() => document.addEventListener('click', function h2(e) {
+      if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('click', h2); }
+    }), 0);
+  };
+}
+
+async function doEditAction(act, ctx) {
+  const { vid, v, units } = ctx;
+  if (act === 'rename' && v) {
+    const name = prompt(LANGNOW === 'zh' ? '修改柜型名称：' : 'Rename variant:', vLabel(v, v.code));
+    if (name === null) return;
+    const clean = String(name).trim();
+    if (clean && clean !== vLabel(v, v.code)) renameVariant(vid, clean);
+  } else if (act === 'dup' && v) {
+    // 复制成一个新 model：同尺寸不同 code，方便当备选摆法留着
+    const code = v.code + '-COPY';
+    try {
+      await api('/variants', { method: 'POST', body: {
+        code, rows: v.rows, cols: v.cols, positions: v.positions,
+        grid: v.grid, w: v.w, h: v.h, d: v.d,
+        description: v.description, block_name: v.code,
+      }});
+      toast((LANGNOW === 'zh' ? '已复制为 ' : 'Duplicated as ') + code, 'ok');
+      await loadVariants();
+    } catch (e) { toast('duplicate failed: ' + e.message, 'err'); }
+  } else if (act === 'del' && v) {
+    if (confirm((LANGNOW === 'zh' ? '删除这个柜型？' : 'Delete this variant?')
+      + `\n${vLabel(v, v.code)}`)) await delVariant(vid);
+  } else if (act === 'delall' && units) {
+    const ids = S.variants.filter(x => Number(x.positions) === units).map(x => x.id);
+    if (ids.length && confirm(
+      (LANGNOW === 'zh' ? `删除 ${units} 套的 ${ids.length} 个柜型？`
+                        : `Delete ${ids.length} cupboards of ${units} units?`))) {
+      await api('/variants/delete', { method: 'POST', body: { ids } });
+      toast(t('lib.deldone'), 'ok');
+      S.treeSel = null;
+      await loadVariants();
+      renderHub();
+    }
+  } else if (act === 'clear') {
+    if (confirm(LANGNOW === 'zh'
+      ? '清空柜型库（只清从 DWG 解析进来的，保留手工录入的）？'
+      : 'Clear the cupboard library?')) {
+      const r = await api('/variants/clear', { method: 'POST', body: { only_dwg: true } });
+      toast(`${t('lib.deldone')} ${r.deleted ?? ''}`, 'ok');
+      S.treeSel = null;
+      await loadVariants();
+      renderHub();
+    }
+  } else if (act === 'bparse') {
+    $('#bparse')?.click();
+  }
+}
+
 function bindTree() {
   $$('#tree .node').forEach(n => n.onclick = ev => {
     // 点箭头只折叠/展开，不触发选中
@@ -1112,6 +1477,19 @@ function bindTree() {
       return;
     }
     if (n.dataset.b) { S.curBuilding = +n.dataset.b; S.treeSel = null; renderTree(); }
+    else if (n.dataset.lu !== undefined) {
+      // 柜型库根节点 = units 数量。点它 -> 右侧显示该套数下**全部** model。
+      const nUnits = Number(n.dataset.lu);
+      S.lfOpen = S.lfOpen || {};
+      const ukey = 'u' + nUnits;
+      // 展开的同时把该组选中：用户口径是「点击父节点，右侧可以显示这个
+      // units 下面所有的 cupboard model」
+      S.lfOpen[ukey] = true;
+      S.treeSel = ukey;
+      renderTree();
+      showUnitsGroup(unitsGroupKey(nUnits));
+      return;
+    }
     else if (n.dataset.lf) {
       // 点根节点：只切换展开，**不动选中态**。
       //
@@ -1158,7 +1536,19 @@ function bindTree() {
       S.treeSel = S.treeSel === k ? null : k;
       renderTree();
     }
-    else if (n.dataset.floor) filterFloor(n.dataset.floor);
+    else if (n.dataset.floor) {
+      // 建筑图纸 tab：点楼层 -> 右栏显示该层 units 数对应的柜型种类；
+      // 工作台 tab：沿用原来的户表筛选。
+      if (S.view === 'building') {
+        S.treeSel = 'floors';
+        S.floorSel = S.floorSel === n.dataset.floor ? null : n.dataset.floor;
+        renderTree();
+        if (S.floorSel) showFloorPanel(S.floorSel);
+        else { S.floorFilter = null; renderHub(); }
+      } else {
+        filterFloor(n.dataset.floor);
+      }
+    }
     else if (n.dataset.vg) {
       S.treeSel = S.treeSel === n.dataset.vg ? null : n.dataset.vg;
       renderTree();
@@ -1321,11 +1711,145 @@ function renderProv() {
 
 /** 参数原名 t/s 会遮蔽全局 i18n 函数 t()，故改名为 _t/_s */
 function emptyBox(_t, _s) {
-  $('#rpane').innerHTML = `<div class="empty"><div class="big">◫</div><b>${esc(_t)}</b><div style="margin-top:5px">${esc(_s)}</div></div>`;
+  $('#rpane').innerHTML = `<div class="empty"><div class="big">${ic('table')}</div><b>${esc(_t)}</b><div style="margin-top:5px">${esc(_s)}</div></div>`;
 }
 
 // ============================================================ 动作
 function filterFloor(code) { S.floorFilter = S.floorFilter === code ? null : code; S.pane = 'detail'; syncTabs(); renderDetail(); }
+
+/** 某楼层要用哪些柜型 —— 按「该层 units 数」去柜型库里取。
+ *
+ *  用户口径：「这个区域，会根据每层楼的 units 的数量，显示对应的柜的
+ *  所有的种类，比如 L4 有 3 个 units，会显示两个不同样式的 cupboards，
+ *  这个是从柜型图里面获取」。
+ *
+ *  也就是**按套数匹配**：L4 是 3 户 -> 柜型库里 3 Units 那一组有几种
+ *  摆法就显示几种（L4 恰好命中 2 种）。柜型来自 DWG 解析入库的
+ *  variants，不做任何虚构。
+ *
+ *  排序与libraryGroups() 保持一致（宽 -> 高 -> code），
+ *  这样这里的 Model A/B 字母与柜型库里看到的顺序对得上。
+ */
+function cupboardsForUnits(n) {
+  const want = Number(n || 0);
+  return S.variants
+    // 只认 DWG 实测柜型。库里还躺着 11 条早期 seed_poc 演示数据
+    //（尺寸 estimated、无渲染图），把它们算进来会让「L4 有 3 户」
+    // 冒出 5 种柜型 —— 演示数据不是真实选型依据。
+    .filter(v => v.source === 'dwg' && v.image_url)
+    .filter(v => Number(v.positions || 0) === want)
+    .sort((a, b) => (Number(a.w) - Number(b.w)) || (Number(a.h) - Number(b.h))
+      || String(a.code).localeCompare(String(b.code)));
+}
+
+/** 建筑图纸 tab：选中某楼层后右栏的内容。
+ *
+ *  三块信息，按用户「右边是显示楼层的信息，每层楼的 units 的数量」：
+ *    1. 楼层概览（units 数 /  communal 数）
+ *    2. 该层每一户的柜型（来自解析结果的variant）
+ *    3. **该层 units 数对应的全部柜型种类**（来自柜型库/DWG，带缩略图）
+ */
+function showFloorPanel(code) {
+  const j = S.job;
+  const f = (j?.floors || []).find(x => x.floor_code === code);
+  if (!f) { filterFloor(code); return; }
+
+  // 同步楼层选中态。函数也可能被直接调用（不经过树的点击分支），
+  // 这里自己兜住，否则 saveViewState 存的是上一次的旧楼层 ——
+  // 表现为「刷新后跳回 L4 而不是刚才看的 L2」。
+  S.floorSel = code;
+  S.floorFilter = code;
+  const n = Number(f.unit_count || 0);
+  const list = cupboardsForUnits(n);
+  const units = (j.units || []).filter(u => u.floor === code);
+  const suffixOf = (v) => {
+    if (list.length <= 1) return '';
+    const i = list.findIndex(x => String(x.id) === String(v.id));
+    return i >= 0 ? ' - ' + String.fromCharCode(65 + i) : '';
+  };
+
+  // ---- 中栏：建筑图纸 tab 也要能看到图纸本身 ----
+  $('#mfn').textContent = code + ' · ' + n + (LANGNOW === 'zh' ? ' 户' : ' units');
+  $('#pagelist').innerHTML = '';
+  resetViewer();
+  $('#bparse').style.display = 'none';
+  if (S.jobId) showPdf(S.jobId, S.pages?.length ? S.pages : []);
+
+  let h = '';
+  // ---- 1. 楼层概览 ----
+  h += `<div class="sec" style="padding-left:0">${esc(code)}</div>
+    <div class="kpirow">
+      <div class="kpi"><div class="v">${n}</div><div class="l">${t('kpi.units')}</div></div>
+      <div class="kpi"><div class="v">${f.communal_count || 0}</div>
+        <div class="l">${LANGNOW === 'zh' ? '公共' : 'Communal'}</div></div>
+      <div class="kpi"><div class="v">${list.length}</div>
+        <div class="l">${LANGNOW === 'zh' ? '柜型种类' : 'Cupboards'}</div></div>
+    </div>`;
+
+  // ---- 2. 该层每户的柜型 ----
+  if (units.length) {
+    h += `<div class="sec" style="padding-left:0">${
+      LANGNOW === 'zh' ? '本层各户配置' : 'Units on this floor'}</div>
+      <table><thead><tr><th>${t('d.empty')}</th><th>${t('d.type')}</th>
+      <th>${t('d.cup')}</th><th class="num">${t('d.size')}</th></tr></thead><tbody>`;
+    for (const u of units) {
+      const v = u.variant || {};
+      h += `<tr><td class="mono"><b>${esc(u.unit_label)}</b>${
+        u.is_communal ? ' <span class="tag com">C</span>' : ''}</td>
+        <td>${esc(u.unit_type || '—')}</td>
+        <td class="mono">${esc(v.code || t('mtx.nomatch'))}</td>
+        <td class="num" style="font-size:10.5px">${
+          v.w ? `${fmtMM(v.w)}×${fmtMM(v.h)}` : '—'}</td></tr>`;
+    }
+    h += '</tbody></table>';
+  }
+
+  // ---- 3. 该 units 数对应的全部柜型种类（用户核心诉求）----
+  h += `<div class="sec" style="padding-left:0">${
+    LANGNOW === 'zh' ? `柜型库中 ${n} Units 的全部种类`
+                    : `All ${n}-unit cupboards in the library`}</div>`;
+  if (!list.length) {
+    h += `<div class="empty"><div class="big">${ic('image-off')}</div><b>${
+      LANGNOW === 'zh' ? '柜型库里还没有这个套数的柜型'
+                      : 'No cupboard of this size in the library'}</b></div>`;
+  } else {
+    if (list.length > 1) {
+      h += `<div class="alert ok" style="margin-bottom:10px">${
+        LANGNOW === 'zh'
+          ? `${code} 每层 ${n} 户，需要 ${n} Units 的柜；柜型库里有 ${list.length} 种不同摆法可选。`
+          : `${code} has ${n} units per floor; the library holds ${list.length} layouts.`}</div>`;
+    }
+    h += '<div class="cupgrid">';
+    for (const v of list) {
+      h += `<div class="cupwrap"><div class="cupcard${v.image_url ? ' has-img' : ''}"
+        data-img="${esc(v.image_url || '')}">
+        <div class="thumb">${v.image_url
+          ? `<img loading="lazy" src="${esc(v.image_url)}" alt="${esc(v.code)}">`
+          : `<div class="noph">${t('lib.noimg')}</div>`}</div>
+        <div class="meta">
+          <div class="code mono">${esc(vLabel(v, n + ' ' + t('lib.units')) + suffixOf(v))}</div>
+          <div class="dim">${n} ${t('lib.units')}${esc(suffixOf(v))} · ${esc(v.grid || '-')}</div>
+          <div class="dim">${fmtMM(v.w)} × ${fmtMM(v.h)} × ${fmtMM(v.d)} mm</div>
+        </div></div></div>`;
+    }
+    h += '</div>';
+  }
+  $('#rpane').innerHTML = h;
+  // 楼层选中也要持久化 —— 刷新后要回到这一层。saveViewState 原本
+  // 只在 gotoView 末尾调，那时 floorSel 还是上一次的旧值。
+  saveViewState();
+
+  // 点缩略图 -> 中栏看大图（直接用 DWG 渲出来的原版图，不做二次绘制）
+  $$('#rpane .cupcard').forEach(x => x.onclick = () => {
+    const u = x.dataset.img;
+    if (!u) { toast(t('lib.noclue'), 'err'); return; }
+    const v = list.find(y => y.image_url === u);
+    showCupImage(u, v ? `${esc(vLabel(v, ''))}${esc(suffixOf(v))}<div class="muted">${
+      fmtMM(v.w)} × ${fmtMM(v.h)} mm · ${n} ${t('lib.units')}</div>` : '');
+    $$('#rpane .cupcard').forEach(y => y.classList.toggle('on', y === x));
+  });
+  applyZoomToImages();
+}
 
 /** 柜型库详情：柜型卡片带缩略图，点卡片看中栏大图。
  *  需求：「将里面的不同的柜型都导出成jpg 格式，放在 library 里，可以点击查看」 */
@@ -1345,9 +1869,17 @@ function showUnitsGroup(key, keepScroll) {
   const hash = base.lastIndexOf('#');
   const fname = hash >= 0 ? base.slice(0, hash) : base;
   const n = hash >= 0 ? Number(base.slice(hash + 1)) : 0;
+  // 按 units 找，不限定来自哪份 DWG —— 树上根节点就是 units，
+  // 同一套数下多份图纸的柜型都该列出来（用户按套数找柜，不关心来源）。
+  // 同样只取 DWG 实测柜型，理由同 libraryGroups()：seed_poc 演示数据
+  // 不是选型依据，混进来会让同一套数凭空多出几种「柜型」。
   const pool = S.variants.filter(v => {
-    const vf = v.source_name || v.dwg_name || t('tree.library');
-    return vf === fname && Number(v.positions || 0) === n;
+    if (v.source !== 'dwg') return false;
+    if (fname && !onlyId) {
+      const vf = v.source_name || v.dwg_name || t('tree.library');
+      if (vf !== fname) return false;
+    }
+    return Number(v.positions || 0) === n;
   });
   // 与 libraryGroups() 保持同样的排序，树上第 i 个字母对应这里第 i 个
   const sortedPool = [...pool].sort((a, b) =>
@@ -1374,8 +1906,21 @@ function showUnitsGroup(key, keepScroll) {
   if (withImg.length) $('#bpage').textContent = `${withImg.length} ${t('lib.img')}`;
   $('#bparse').style.display = 'none';
 
-  if (withImg.length) showCupImage(withImg[0].image_url);
-  else $('#viewer').innerHTML = `<div class="ph"><div class="big">⊞</div>
+  // 尺寸标注块：图下方直接写实际尺寸（用户要求「图片 + 下面显示尺寸」）
+  const capOf = (v) => {
+    if (!v) return '';
+    const src = v.size_source || 'estimated';
+    const tag = src === 'measured' ? (LANGNOW === 'zh' ? 'DWG 实测' : 'measured')
+      : src === 'manual' ? (LANGNOW === 'zh' ? '人工录入' : 'manual')
+      : (LANGNOW === 'zh' ? '待实测' : 'estimated');
+    return `<b>${fmtMM(v.w)} × ${fmtMM(v.h)} mm</b>`
+      + (v.d ? ` · D ${fmtMM(v.d)}` : '')
+      + ` · ${esc(vLabel(v, n + ' ' + t('lib.units')))}`
+      + `<div class="muted">${n} ${t('lib.units')} · ${esc(v.grid || '-')} · ${tag}</div>`;
+  };
+
+  if (withImg.length) showCupImage(withImg[0].image_url, capOf(withImg[0]));
+  else $('#viewer').innerHTML = `<div class="ph"><div class="big">${ic('image-off')}</div>
     <div>${t('lib.noimg')}</div></div>`;
 
   let h = `<div class="sec" style="padding-left:0">
@@ -1410,7 +1955,7 @@ function showUnitsGroup(key, keepScroll) {
         ${v.description ? `<div class="desc">${esc(v.description)}</div>` : ''}
       </div></div>
       <button class="cupdel" data-del="${v.id}" data-code="${esc(v.code)}"
-        title="${t('lib.del')}">×</button></div>`;
+        title="${t('lib.del')}">${ic('x')}</button></div>`;
   }
   h += '</div>';
   $('#rpane').innerHTML = h;
@@ -1437,7 +1982,7 @@ function showVariantGroup(key) {
 
   // 默认展示第一张有图的柜型
   if (withImg.length) showCupImage(withImg[0].image_url);
-  else $('#viewer').innerHTML = `<div class="ph"><div class="big">⊞</div>
+  else $('#viewer').innerHTML = `<div class="ph"><div class="big">${ic('image-off')}</div>
     <div>${t('lib.noimg')}</div></div>`;
 
   let h = `<div class="sec" style="padding-left:0">${t('lib.title')}</div>`;
@@ -1460,7 +2005,7 @@ function showVariantGroup(key) {
         ${v.description ? `<div class="desc">${esc(v.description)}</div>` : ''}
       </div></div>
       <button class="cupdel" data-del="${v.id}" data-code="${esc(v.code)}"
-        title="${t('lib.del')}">×</button></div>`;
+        title="${t('lib.del')}">${ic('x')}</button></div>`;
   }
   h += '</div>';
   $('#rpane').innerHTML = h;
@@ -1503,10 +2048,21 @@ function bindCupDelete() {
 }
 
 /** 中栏展示柜型大图 —— 直接用服务端渲染的 JPG，不做二次加载 */
-function showCupImage(url) {
+/** 中栏显示柜型图。
+ *
+ *  user 诉求：「这个图不要自己绘制，直接使用 dwg 里面的图」——
+ *  src 就是后端从 DWG 抠出来渲的那张 JPG，这里不做任何二次绘制。
+ *  图下方标尺寸（用户要求「图片 + 下面显示尺寸」）。
+ */
+function showCupImage(url, cap) {
   $('#viewer').innerHTML =
-    `<div class="cupview"><img id="cupimg" src="${esc(url)}" alt="cupboard"></div>`;
+    `<div class="cupview"><div class="zoomslot">
+       <img id="cupimg" src="${esc(url)}" alt="cupboard">
+     </div>
+     ${cap ? `<div class="cupcap">${cap}</div>` : ''}</div>`;
   $('#viewer').scrollTop = 0;
+  // 重建了 DOM，重新贴一次当前缩放（否则切图后缩放被重置成 100%）
+  applyZoomToImages();
 }
 
 async function loadVariants() {
@@ -1553,7 +2109,7 @@ function renderPane() {
 
 // ============================================================ 预览
 function showPlaceholder() {
-  $('#viewer').innerHTML = `<div class="ph"><div class="big">▤</div><div>${t('mid.ph')}</div></div>`;
+  $('#viewer').innerHTML = `<div class="ph"><div class="big">${ic('file-text')}</div><div>${t('mid.ph')}</div></div>`;
   $('#pagelist').innerHTML = '';
 }
 
@@ -1595,7 +2151,7 @@ function showPdf(jobId, pages) {
   if (!pages?.length) {
     $('#viewer').classList.remove('scrollmode');
     $('#viewer').innerHTML =
-      `<div class="ph"><div class="big">▤</div><div>${t('mid.ph')}</div></div>`;
+      `<div class="ph"><div class="big">${ic('file-text')}</div><div>${t('mid.ph')}</div></div>`;
     $('#pagelist').innerHTML = '';
     $('#bpage').textContent = `0 / 0`;
     return;
@@ -1741,6 +2297,27 @@ function setZoom(z) {
   S.zoom = Math.max(0.4, Math.min(4, z));
   $('#bzoom').textContent = `${Math.round(S.zoom * 100)}%`;
   reflowPages();
+  // 柜型图 / 图纸缩略图不是走 renderPages 的 PDF 页，只改 S.zoom
+  // 对它们完全没有作用 —— 这就是用户报的「zoom in out 都没用」。
+  // 用 CSS 变量统一缩放，任何 .zoomable 元素都跟着变。
+  applyZoomToImages();
+}
+
+/** 把当前缩放应用到所有图片（柜型图、图纸预览等）。
+ *  用 transform 而不是改 width/height —— 改布局宽高会让 flex 容器
+ *  重排，拖动过程里抖动明显；transform 只做视觉缩放，跟手。 */
+function applyZoomToImages() {
+  const z = S.zoom || 1;
+  // 中栏的柜型图（showCupImage 渲染的 #cupimg）与右栏卡片缩略图都缩放。
+  // 用 transform 而非改 width/height：改布局宽高会让 flex 容器跟着
+  // 重排，拖动过程里抖得厉害；transform 是纯视觉缩放，跟手。
+  $$('#cupimg, #rpane .thumb img').forEach(im => {
+    im.style.transform = z === 1 ? '' : `scale(${z})`;
+  });
+  // 放大后要能滚到四周，给承载块显式 overflow + 预留缩放余量
+  $$('.cupview, .zoomslot').forEach(sl => {
+    sl.style.overflow = z > 1 ? 'auto' : 'hidden';
+  });
 }
 
 // ============================================================ 导出
@@ -2162,7 +2739,7 @@ function renderHub() {
     // 柜型库：中栏不该再预览楼栋图纸，改为展示分组说明
     $('#mfn').textContent = t('tree.library');
     $('#pagelist').innerHTML = '';
-    $('#viewer').innerHTML = `<div class="ph"><div class="big">⊞</div>
+    $('#viewer').innerHTML = `<div class="ph"><div class="big">${ic('image-off')}</div>
       <div>${t('mid.cup.hint')}</div></div>`;
     $('#bparse').style.display = 'none';
   }
@@ -2174,7 +2751,7 @@ function renderHub() {
     const nImg = S.variants.filter(v => v.image_url).length;
     h += `<div class="sec" style="padding-left:0">${t('tree.library')}</div>`;
     if (!groups.length) {
-      h += `<div class="empty"><div class="big">⊞</div><b>${t('dwg.empty')}</b></div>`;
+      h += `<div class="empty"><div class="big">${ic('image-off')}</div><b>${t('dwg.empty')}</b></div>`;
     } else {
       // 批量管理工具条 —— 用户诉求：「里面不需要的数据，我需要可以删除」
       h += `<div class="mgmt">
@@ -2186,7 +2763,7 @@ function renderHub() {
       h += '<div class="filelist">';
       for (const g of groups) {
         h += `<div class="row-item" data-vg="${esc(g.key)}">
-          <div class="ico">⊞</div>
+          <div class="ico">${ic('grid')}</div>
           <div class="nm"><div class="t">${esc(g.title)}</div>
             <div class="s">${g.count} ${t('mtx.kind')}</div></div>
           <span class="badge">${t('bld.open')} ›</span></div>`;
@@ -2196,13 +2773,13 @@ function renderHub() {
   } else {
     h += `<div class="sec" style="padding-left:0">${t('tree.projects')}</div>`;
     if (!S.projects.length) {
-      h += `<div class="empty"><div class="big">▦</div><b>${t('bld.empty')}</b></div>`;
+      h += `<div class="empty"><div class="big">${ic('folder')}</div><b>${t('bld.empty')}</b></div>`;
     } else {
       h += '<div class="filelist">';
       for (const p of S.projects) {
         const d = (p.drawings || [])[0];
         h += `<div class="row-item" data-b="${p.id}">
-          <div class="ico">▦</div>
+          <div class="ico">${ic('folder')}</div>
           <div class="nm"><div class="t">${esc(p.name)}</div>
             <div class="s">${(p.drawings || []).length} ${t('bld.count')}${d?.title ? ' · ' + esc(d.title) : ''}</div></div>
           <span class="badge">${t('bld.open')} ›</span></div>`;
@@ -2300,12 +2877,19 @@ function syncTabsForView() {
     return;
   }
   bar.style.display = '';
-  $$('.rtabs button').forEach(b => b.style.toggleProperty('display', false));
-  $$('.rtabs button').forEach(b => b.classList.toggle('on', b.dataset.pane === S.pane));
+  //用 removeProperty 而不是 style.toggleProperty ——
+  // 后者在部分浏览器上不是函数，抛TypeError 会让整个 syncTabsForView
+  // 中断，gotoView 连带失败 → 切tab 后中栏还留着上一个 tab 的内容
+  // （用户报的「从柜型图切到建筑图纸，还是显示柜型图的内容」）。
+  $$('.rtabs button').forEach(b => {
+    b.style.removeProperty('display');
+    b.classList.toggle('on', b.dataset.pane === S.pane);
+  });
 }
 
 /** 统一切换 tab：三个 tab 的树/ 中栏 / 右栏整体切换，避免串内容 */
 function gotoView(v) {
+  const prev = S.view;
   S.view = v;
   $$('nav button').forEach(x => x.classList.toggle('on', x.dataset.view === v));
   // 上传按钮只在「柜型库」「建筑图纸」两个 tab 出现 ——
@@ -2313,6 +2897,15 @@ function gotoView(v) {
   $('#bup').style.display = v === 'work' ? 'none' : 'inline-block';
   // 滚动提示只在工作台的连续预览里才有意义
   $('#bhelp').style.display = v === 'work' ? '' : 'none';
+  // 切 tab 时把左栏选中清掉：不同 tab 的树结构完全不同（柜型库是
+  // units→model，工作台/建筑图纸是楼栋→图纸→楼层），留着上一次的
+  // 高亮会让用户以为「这个 item 还选中着」。
+  // 违反直觉但这是用户明确要的：切回来时自动选中第一个 item。
+  if (v !== prev) S.treeSel = null;
+  S.viewLast = v;
+  // 楼层选中态是「建筑图纸 tab 专属」的，换 tab 必须扔掉，
+  // 否则回到建筑图纸时右栏还挂着上一 tab 点的楼层内容
+  if (v !== 'building') S.floorSel = null;
   syncTabsForView();
   if (v === 'work') {
     renderTree();
@@ -2337,12 +2930,25 @@ function gotoView(v) {
     $('#bhelp').style.display = S.jobId && S.pages?.length ? '' : 'none';
     renderPane();
   } else {
+    // 换tab 必须把中栏和右栏都清干净 —— 用户报的
+    // 「从柜型图切换到建筑图纸，还是显示柜型图的内容」：
+    // 中栏留着 #cupimg（柜型图），切过去依然在。resetViewer 清中栏，
+    // renderHub 重画右栏，两者缺一不可。
+    resetViewer();
+    $('#rpane').innerHTML = '';
+    $('#mfn').textContent = '';
     renderTree();     // 树也切：柜型库时只显示柜型分组
     renderHub();
+    // 用户诉求：进入 tab 自动选中第一个 item
+    autoSelectFirstInView();
   }
+  saveViewState();
+  applyZoomToImages();
 }
 
 $$('nav button').forEach(b => b.onclick = () => gotoView(b.dataset.view));
+initColumnResize();
+bindEditMenu();
 $('#bup').onclick = () => openUpload(S.view === 'cupboard' ? 'cupboard' : 'building');
 $('#lzh').onclick = () => { LANGNOW = 'zh'; applyI18n(); };
 $('#len').onclick = () => { LANGNOW = 'en'; applyI18n(); };
