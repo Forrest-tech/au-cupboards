@@ -21,7 +21,7 @@
 在假数据上「配对成功率 100%」的规则，真实图纸上一个都配不出来。
 
 所以现在：**柜型识别的所有测试都跑在真实 DWG 上**，Ground Truth 是
-用户人工统计的 22 套柜（见 :data:`GROUND_TRUTH`）。
+用户人工统计并复核确认的 23 套柜（见 :data:`GROUND_TRUTH`）。
 
 真实 DWG 太大（1.4MB DWG → 6.2MB DXF）不适合直接进 git，所以：
 - ``samples/`` 存DWG（已入库）；
@@ -53,19 +53,24 @@ SAMPLE_DWG = REPO_ROOT / "samples" / (
 _CACHE = REPO_ROOT / ".pytest_cache" / "real_dxf"
 
 
-#: **Ground Truth —— 用户人工统计的 22 套柜**
+#: **Ground Truth —— 用户人工统计的 23 套柜**
 #:
-#: 用户原话（2026-10）：图纸里共 22 套柜，按户数分布如下。
+#: 用户原话（2026-10）：图纸里共 23 套柜，按户数分布如下。
 #: 关键约束：**所有水表、气表外观样式完全一样**，不能靠表的外观特征
 #: 区分柜型，只能靠数量 + 空间排布。
+#:
+#: 历史修正：最初人工统计记的是 22 柜 / 191 套（7 Units 记 2 套），
+#: 解析器实测到 23 柜 / 198 套且多出的那个 7 Units 柜有独立上下边线、
+#: 真实 DIMENSION 标注、7 gas + 7 water，不与另外两个 7 Units 柜重叠。
+#: 用户复核原始 DWG 后确认 **7 Units 确实是 3 套**，人工统计漏数一柜。
 GROUND_TRUTH: dict[int, int] = {
-    3: 2, 4: 1, 5: 2, 6: 2, 7: 2, 8: 1,
+    3: 2, 4: 1, 5: 2, 6: 2, 7: 3, 8: 1,
     9: 2, 10: 2, 11: 2, 12: 2, 13: 3, 14: 1,
 }
 
 #: Ground Truth 的柜型总数与总套数（用于汇总断言）
-GT_CABINETS = sum(GROUND_TRUTH.values())          # 22
-GT_UNITS = sum(n * k for n, k in GROUND_TRUTH.items())  # 191
+GT_CABINETS = sum(GROUND_TRUTH.values())          # 23
+GT_UNITS = sum(n * k for n, k in GROUND_TRUTH.items())  # 198
 
 
 def _dwg2dxf() -> str | None:

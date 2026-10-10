@@ -37,13 +37,15 @@ samples/Cold and hot water and gs meter cupboard detail 1.dwg
 在假数据上「配对成功率 100%」的规则，真实图纸上一个都配不出来。合成
 样本与生成脚本已删除，不要再重建。
 
-### Ground Truth 与实测的差异
+### Ground Truth 的复核过程（已闭环）
 
-`GROUND_TRUTH` 是用户人工统计的结果。当前解析在该图纸上识别出
-**23 个柜型 / 198 套**，与之相差一个 7 Units 柜：Ground Truth 记
-`7: 2`，实测 `7: 3`。
+`GROUND_TRUTH` 是用户人工统计的结果。最终口径为 **23 个柜型 / 198 套**，
+与解析器在该真实 DWG 上的实测结果**完全一致**。
 
-三个 7 Units 柜已逐一核实（详见 `test_cupboard_geometry.py`）：
+这里曾有一个 7 Units 的分歧，已解决，记录如下以免重蹈：
+
+最初人工统计记的是 22 柜 / 191 套（`7: 2`），解析器实测 `7: 3`。三个
+7 Units 柜逐一核实如下：
 
 | 位置 | 尺寸 (mm) | gas | water | DIMENSION 标注 |
 |---|---|---|---|---|
@@ -52,8 +54,12 @@ samples/Cold and hot water and gs meter cupboard detail 1.dwg
 | `x=-2370..-955, y=-10173..-7873` | 1415×2300 | 7 | 7 | 1415×2350 ✓ |
 
 三者互不重叠、各带真实尺寸标注、渲染确认各含 7 gas + 7 water。
-**在用户确认之前，Ground Truth 保持原值不改** —— 测试失败是刻意保留的
-信号，用来提醒这里存在未对齐的差异，而不是把它改绿。
+**用户复核原始 DWG 后确认 7 Units 确实是 3 套**，属人工统计漏数一柜，
+`GROUND_TRUTH` 已据此更新。
+
+这条经验值得记住：**Ground Truth 本身也会错**。当时测试保持失败、逐柜
+贴红框叠加图给人眼验收，而不是把断言改绿去迁就代码 —— 最后证明代码是对的。
+以后再遇到实测与人工统计不一致，同样先贴图验收再改哪一边。
 
 ## `neg_truncated_by_dxf2dwg.dwg` — 反向夹具（必须被拒绝）
 

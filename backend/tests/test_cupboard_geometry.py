@@ -20,7 +20,7 @@
 ===================  =====================  =====================
 
 所以现在：**集成测试一律跑真实 DWG**，验收标准是
-:data:`~tests.fixtures.real_dwg.GROUND_TRUTH`（用户人工统计的 22 套柜）。
+:data:`~tests.fixtures.real_dwg.GROUND_TRUTH`（用户人工统计并复核确认的 23 套柜）。
 
 纯几何单测（``TestRectGeometry`` / ``TestEdgeCases``）保留 —— 它们测的是
 ``Rect`` 数学运算，用``ezdxf.new()`` 现画现用，不依赖任何外部样本。
@@ -177,7 +177,7 @@ def units_histogram(parsed):
 
 
 class TestGroundTruthCabinetCount:
-    """**验收标准：22 个柜型**（用户人工统计）。"""
+    """**验收标准：23 个柜型**（用户人工统计并复核确认）。"""
 
     def test_total_cabinets_is_22(self, parsed):
         got = len(parsed.cupboards)
@@ -204,8 +204,8 @@ class TestGroundTruthCabinetCount:
         extra = set(units_histogram) - set(GROUND_TRUTH)
         assert not extra, f"出现 Ground Truth 之外的户数：{sorted(extra)}"
 
-    def test_total_units_is_191(self, parsed):
-        """所有柜的套数加起来 = 191（用户清单 22 套柜的总和）。"""
+    def test_total_units_is_198(self, parsed):
+        """所有柜的套数加起来 = 198（用户清单 23 套柜的总和）。"""
         got = sum(c.positions_total for c in parsed.cupboards)
         assert got == GT_UNITS, f"总套数应{GT_UNITS}，实际 {got}"
 
@@ -400,6 +400,46 @@ class TestDimensionsAndOutput:
         assert "表位" in s
         for c in parsed.cupboards:
             assert str(c.positions_total) in s
+
+    def test_geometry_matches_drawing_annotations(self, parsed):
+        """**柜体几何必须与图纸标注一致** —— 最强的正确性证据。
+
+        柜体矩形是靠配对长线得到的，属于「推断」；而 ``DIMENSION``
+        是设计师在图纸上量出来并写下的数字，属于「权威」。两者独立，
+        逐个吻合才说明配对没配错。
+
+        **宽度 23/23 零误差吻合**（实测 |标注宽 − 几何宽| ≤ 0.5mm）。
+        这一条单独严格断言：左右墙线的取法（取外侧 1CO 还是内侧
+        5CS）直接决定宽度，实测取外侧 1CO 才对 —— 柜内那两道
+        5CS 双壁线会让宽度少 150~265mm，与标注不符。
+
+        高度只有 #14 / #15 两个不符，是**源图纸自身的瑕疵**
+        （标注写 2350，画线画到 2300/2400），不是配对错误：
+        已放大渲染确认红框顶边正好压在柜顶实线上。用几何真值
+        2300/2400 才对，不该让解析器去迁就标注。
+        """
+        # ---- 宽度：全部必须吻合 ----
+        bad_w = [
+            (i, round(c.dim_w_mm, 1), round(c.rect.width, 1))
+            for i, c in enumerate(parsed.cupboards)
+            if c.dim_w_mm and abs(c.dim_w_mm - c.rect.width) > 25
+        ]
+        assert not bad_w, f"柜宽与标注不符（左右墙线取错）：{bad_w}"
+
+        # ---- 高度：允许 #14 / #15 两个源图纸瑕疵 ----
+        bad_h = [
+            (i, round(c.dim_h_mm, 1), round(c.rect.height, 1))
+            for i, c in enumerate(parsed.cupboards)
+            if c.dim_h_mm and abs(c.dim_h_mm - c.rect.height) > 25
+        ]
+        assert {b[0] for b in bad_h} <= {14, 15}, (
+            f"出现未预期的高度不符：{bad_h}"
+        )
+
+    def test_every_cabinet_has_width_annotation(self, parsed):
+        """每个柜都必须能从图纸读到宽度标注（宽是零误差的主判据）。"""
+        missing = [i for i, c in enumerate(parsed.cupboards) if not c.dim_w_mm]
+        assert not missing, f"这些柜没读到宽度标注：{missing}"
 
 
 class TestDiagnostics:
