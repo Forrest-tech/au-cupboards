@@ -79,12 +79,13 @@ JUNK_LAYER_KEYWORDS: tuple[str, ...] = (
 #:
 #: 保留通用关键词作为兜底，应对不同项目的图层命名。
 CABINET_FRAME_LAYERS: frozenset[str] = frozenset({
-    "1CO", "2CONC", "HVAL___1DA", "HWAT___1DD", "50L",
+    "1CO", "2CONC", "HVAL___1DA", "HWAT___1DD", "HWAT___5CS", "50L",
 })
 
 #: 柜框线的图层关键词（白名单之外的通用匹配）。
 CABINET_FRAME_KEYWORDS: tuple[str, ...] = (
     "conc", "1co", "2co", "_co", "wall", "cab", "cup", "meter_board",
+    "5cs",
 )
 
 #: 一条边要长到多少毫米才可能是柜框。真实柜体最小865mm 宽，
@@ -94,12 +95,30 @@ MIN_FRAME_SIDE_MM = 300.0
 #: 成对长线的坐标对齐容差（mm）。CAD 里同一根线的两段常常差零点几。
 FRAME_ALIGN_TOL_MM = 3.0
 
+#: 同一列柜的上下边**中点**允许差多少（mm）才算同一列。
+#:
+#: 真实样本里同一个柜的上下边长度会差几十毫米（画的是顶板跨度，
+#: 墙线在净宽内侧），按两端精确匹配会让上下边分到不同组、一个柜都配不出来。
+#: 实测同一列的横线只有 1065 / 1095 两个值，中点差 15mm，取 30mm 足够。
+FRAME_GROUP_TOL_MM = 30.0
+
 #: 长线端点需覆盖对方多少比例才算成对。同一个柜子的上下边长度
 #: 可能差几十毫米（图里画的其实是墙厚线），卡太严会一个柜型都配不出。
 FRAME_COVER_RATIO = 0.55
 
 #: 一个柜体最小边长（mm）。低于此值的多半是表位框或零件，不是柜体。
 MIN_CABINET_SIDE_MM = 400.0
+
+#: 柜体高度的合理区间（mm）。
+#:
+#: 真实样本实测20 个柜型的净高落在 2050~2400mm，宽度 865~2165mm。
+#: 卡这个区间是为了排除两类误配：
+#:
+#: - **太矮**：相邻两个柜之间常有短横线（分隔线 / 标注引线），
+#:   高度只有几百毫米，配上两侧的墙线就会被误当成一个矮柜。
+#: - **太高**：上下边若取到了隔着另一个柜的两条线，高度会翻倍。
+MIN_CABINET_H_MM = 1800.0
+MAX_CABINET_H_MM = 2600.0
 
 #: 一个表位框的合理尺寸区间（mm）。截图里红框约 150×190。
 MIN_POSITION_SIDE_MM = 60.0
@@ -443,47 +462,85 @@ def _covers(outer: float, inner: float) -> bool:
 def pair_frame_segments(hs: list[_Seg], vs: list[_Seg]) -> list[Rect]:
     """把长线配成柜体矩形。
 
-    配对逻辑（与真实文件实测一致）：
+    配对逻辑（真实文件实测校正过）：
       1. 两条**水平线** x 起止一致、y 不同 → 它们是某个柜体的上下边；
       2. 在左右端点 x 处各找一条**垂直线**，其 y 范围要覆盖上下边；
       3. 上下左右四条都齐 → 得到一个柜体矩形。
 
-    真实样本实测：46 条水平长线 + 46 条垂直长线 → **20 个矩形**，
-    与图纸上肉眼可见的 20 个柜型一一对应。
+    **第2 步的垂直线允许内缩**（关键修正）
+    ------------------------------------
+    真实样本里865×2400 那个柜子，上下边在 ``2CONC`` 图层、跨度 x=-2768..-1903，
+    但左右墙在 ``HWAT___5CS`` 图层、位于 x=-2718 与 x=-2618 —— **右侧墙内缩了
+    715mm**，与上下边端点根本不对齐。早期实现要求垂直线严格对齐端点
+    （容差3mm），这类柜子会被整批漏掉（3/4/5/9 Units 全都识别不到）。
+
+    所以改成：垂直线落在水平边的 x 区间内（允许内缩），矩形宽度取
+    「两条垂直线之间的实际间距」，高度取上下边间距。柜体真实宽度以
+    垂直线为准 —— 上下边是混凝土顶板，画得比净宽宽是正常的。
+
+    另外加了柜高下限 :data:`MIN_CABINET_H_MM`：相邻两个柜之间常有
+    一小段横线（标注线、分隔线），高度不够就不会被误配成柜体。
     """
     out: list[Rect] = []
     seen: set[tuple] = set()
     tol = FRAME_ALIGN_TOL_MM
 
-    # 按 x 起止（量化到 5mm）分组，同组内才可能是同一个柜子的上下边
-    groups: dict[tuple, list[_Seg]] = {}
-    for h in hs:
-        groups.setdefault((round(h.a0 / 5.0), round(h.a1 / 5.0)), []).append(h)
+    # ---- 上下边分组 ----------------------------------------------------
+    #
+    # 同一个柜的上下边**长度常常不一样**：图里画的是混凝土顶板 + 两侧
+    # 墙线，墙线在净宽内侧，所以横线跨度 = 净宽 + 两侧各 50mm 左右。
+    # 真实样本实测同一列相邻柜的横线只有1065 / 1095 两个值，差 30mm。
+    #
+    # 所以不能按 (x0, x1) 两端精确匹配 —— 那会把上下边分到不同组，
+    # 一个柜都配不出来。改成按**中点**分组（中点差 <= 30mm 视为同一列），
+    # 配对后净宽一律取垂直墙线之间的间距。
+    groups: list[list[_Seg]] = []
+    for h in sorted(hs, key=lambda s: (s.a0 + s.a1) / 2.0):
+        mid = (h.a0 + h.a1) / 2.0
+        for grp in groups:
+            gm = sum((s.a0 + s.a1) / 2.0 for s in grp) / len(grp)
+            if abs(gm - mid) <= FRAME_GROUP_TOL_MM:
+                grp.append(h)
+                break
+        else:
+            groups.append([h])
 
-    for segs in groups.values():
+    for segs in groups:
         if len(segs) < 2:
             continue
         ys = sorted({round(s.pos, 1) for s in segs})
+        # x 区间取这一组所有横线的并集（墙线要落在并集内）
+        x0 = min(s.a0 for s in segs)
+        x1 = max(s.a1 for s in segs)
+        # 区间内所有可能当侧墙的垂直线（允许内缩）
+        inner = [v for v in vs if x0 - tol <= v.pos <= x1 + tol]
+        if len(inner) < 2:
+            continue
+        # 一个 x 组里可能堆叠着**多个**柜（上下边逐段画），
+        # 所以要把所有合法的 (y下, y上) 组合都试出来，不能只取第一对。
         for i in range(len(ys)):
             for j in range(i + 1, len(ys)):
                 y0, y1 = ys[i], ys[j]
-                if y1 - y0 < MIN_FRAME_SIDE_MM:
+                h = y1 - y0
+                # 柜高区间：太矮的是分隔线/标注线，太高的是两个柜叠在一起
+                if not (MIN_CABINET_H_MM <= h <= MAX_CABINET_H_MM):
                     continue
-                x0, x1 = segs[0].a0, segs[0].a1
-                left = next((v for v in vs if abs(v.pos - x0) <= tol
-                             and v.a0 <= y0 + tol and v.a1 >= y1 - tol), None)
-                if left is None:
+                walls = [v for v in inner
+                         if v.a0 <= y0 + tol and v.a1 >= y1 - tol]
+                if len(walls) < 2:
                     continue
-                right = next((v for v in vs if abs(v.pos - x1) <= tol
-                              and v.a0 <= y0 + tol and v.a1 >= y1 - tol), None)
-                if right is None:
+                walls.sort(key=lambda v: v.pos)
+                left, right = walls[0], walls[-1]
+                # 两条墙之间的净宽必须像个柜子
+                if right.pos - left.pos < MIN_CABINET_SIDE_MM:
                     continue
-                key = (round(x0), round(y0), round(x1), round(y1))
+                key = (round(left.pos), round(y0), round(right.pos), round(y1))
                 if key in seen:
                     continue
                 seen.add(key)
                 out.append(Rect(
-                    x0=x0, y0=y0, x1=x1, y1=y1,
+                    # 净宽以左右墙为准；净高以上下边为准
+                    x0=left.pos, y0=y0, x1=right.pos, y1=y1,
                     layer=left.layer or right.layer,
                     source_type="LINE_PAIR",
                 ))
@@ -790,6 +847,79 @@ def _scattered_water_marks(ents, cab: Rect, inside, margin: float) -> list[Meter
         log.debug("柜 %s：补充识别到 %d 个炸开画的 water 表头",
                   f"{cab.width:.0f}x{cab.height:.0f}", len(marks))
     return marks
+
+
+def collect_meter_positions_all(ents, frames: list[Rect],
+                                margin: float = 30.0) -> list[list[MeterPosition]]:
+    """把表位分配给各个柜体，**每个表位只归属一个柜**。
+
+    为什么需要这个函数
+    ------------------
+    :func:`collect_meter_positions` 是「框内就算」，单看一个柜没问题。
+    但真实样本里相邻两个柜**共用一条横线**（图上画成连续一列柜），
+    上柜的下半和下柜的上半会被两个框同时覆盖 —— 同一张 gas 表被数两次，
+    22 个柜的套数加起来会变成 204，而实际是 191。
+
+    归属规则：中心点落入 + 最近者胜
+    ------------------------------
+    1. 先对每个柜单独调一次 :func:`collect_meter_positions`（它内部那条
+       「有 gas 没 water 就补扫炸开 water」的启发式只在单柜语境下成立，
+       不能拿一个横跨全图的并集矩形去调 —— 那样每个柜都能"看见"全图的
+       water 表，启发式永远不触发）；
+    2. 汇总去重（同一个表位会被多个框收集到，靠 :attr:`MeterPosition.rect`
+       的坐标 + kind 唯一标识）；
+    3. 落进多个框时按归一化距离 ``(dx/宽)² + (dy/高)²`` 最小的那一个胜出。
+
+    归一化的意义是抵消柜体尺寸差异 —— 大柜里偏移 300mm 和小柜里偏移
+    300mm 完全是两回事，不归一化的话大柜会抢走小柜的表位。
+    """
+    if not frames:
+        return []
+    # (1) 每个柜单独收集
+    per: list[list[MeterPosition]] = [
+        collect_meter_positions(ents, r, margin) for r in frames
+    ]
+    # (2) 汇总去重
+    uniq: dict[tuple, MeterPosition] = {}
+    for lst in per:
+        for m in lst:
+            k = (round(m.rect.x0), round(m.rect.y0),
+                 round(m.rect.x1), round(m.rect.y1), m.kind)
+            uniq.setdefault(k, m)
+    marks = list(uniq.values())
+
+    # (3) 归到唯一的一个柜
+    buckets: list[list[MeterPosition]] = [[] for _ in frames]
+
+    def norm_dist(m: MeterPosition, r: Rect) -> float:
+        dx = (m.rect.cx - r.cx) / max(r.width, 1.0)
+        dy = (m.rect.cy - r.cy) / max(r.height, 1.0)
+        return dx * dx + dy * dy
+
+    for m in marks:
+        best, best_d = -1, None
+        for i, r in enumerate(frames):
+            # 用**中心点**判定归属，而不是包围盒四角全在框内。
+            # 全在框内的话，两个共边重叠的柜会把边界上那排表位都算进去，
+            # 同一个表位被两个柜抢走。中心点唯一，天然不重叠。
+            if not (r.x0 - margin <= m.rect.cx <= r.x1 + margin
+                    and r.y0 - margin <= m.rect.cy <= r.y1 + margin):
+                continue
+            d = norm_dist(m, r)
+            if best_d is None or d < best_d:
+                best, best_d = i, d
+        if best >= 0:
+            buckets[best].append(m)
+    return buckets
+
+
+def _union_rect(rects: list[Rect]) -> Rect:
+    """把所有柜框并成一个大矩形，用于一次性收集表位。"""
+    x0 = min(r.x0 for r in rects)
+    y0 = min(r.y0 for r in rects)
+    x1 = max(r.x1 for r in rects)
+    y1 = max(r.y1 for r in rects)
+    return Rect(x0=x0, y0=y0, x1=x1, y1=y1)
 
 
 def _is_closed_polyline(ent) -> bool:
@@ -1195,8 +1325,18 @@ def parse_cupboards(dxf_path) -> ParsedCupboard:
             cands.append(r)
         frames = _dedupe_overlapping(cands, out)
 
-    for cab in frames:
-        marks = collect_meter_positions(all_ents, cab)
+    # ---- 表位归属：每个表位只算进「离它最近的那个柜」--------------------
+    #
+    # 真实样本实测：相邻两个柜常常**共用一条横线**（图上画成连续的一列），
+    # 于是上柜的下半部分和下柜的上半部分会被两个柜框同时覆盖。
+    # 如果「凡是框内就算」，同一张 gas 表会被两个柜各数一次 ——
+    # 22 个柜的套数加起来会变成 204，而实际是 191。
+    #
+    # 归属规则：按「归一化距离」最近者胜。归一化的意义是抵消柜体尺寸差异
+    # （大柜的 300mm 和小柜的 300mm 意义完全不同），
+    # 用 (dx/宽, dy/高) 的平方和再比较。
+    marks_all = collect_meter_positions_all(all_ents, frames)
+    for cab, marks in zip(frames, marks_all):
         if not marks:
             # 空柜体（图框、混凝土剖面）直接丢弃，不进柜型库
             out.discarded.append((cab, "柜内无 gas/water 表位"))
