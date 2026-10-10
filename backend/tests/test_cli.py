@@ -44,6 +44,24 @@ class TestHealth:
 
 
 class TestVariants:
+    """``variants`` 必须真的把库里的柜型列出来。
+
+    实测踩坑：这两个用例原先直接 ``main(["variants"])`` 然后断言
+    ``CP-TRI-1x3`` 在输出里。本地开发时``var/aucup.db`` 早就被灌过种子，
+    所以一直是绿的；但 ``var/`` 在 .gitignore 里，**干净 clone / CI 上
+    数据库根本不存在** —— 断言必然失败。这里改成用例自己先把种子灌进
+    一个临时库，让断言不再依赖机器状态。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _seeded(self):
+        from app.cli import _pipeline
+
+        # 必须走 pipeline.ensure_variants() —— seed_variants() 只返回内存对象，
+        # 真正落库的是 ensure_variants（幂等，已存在则跳过）。
+        _pipeline().ensure_variants()
+        yield
+
     def test_variants_lists_seed_data(self, capsys):
         assert main(["variants"]) == 0
         out = capsys.readouterr().out
@@ -56,8 +74,22 @@ class TestVariants:
         """尺寸列必须用 w/h/d（不是 width/height/depth）。"""
         main(["variants"])
         out = capsys.readouterr().out
-        assert "×" in out          # 形如 1200×800×200
+        assert "×" in out# 形如 1200×800×200
         assert "None" not in out   # 字段错会导致 None 混入表格
+
+    def test_variants_on_empty_library_prints_guidance(self, capsys):
+        """空库不该崩，且必须告诉用户怎么灌种子。"""
+        from app.models.entities import CupboardVariant
+
+        from app.cli import _pipeline
+        from sqlalchemy.orm import Session
+
+        with Session(_pipeline().engine) as s:
+            s.query(CupboardVariant).delete()
+            s.commit()
+        assert main(["variants"]) == 0
+        out = capsys.readouterr().out
+        assert "柜型库为空" in out and "种子" in out
 
 
 class TestRun:
