@@ -16,7 +16,31 @@ from __future__ import annotations
 
 import pytest
 
+import app.cli as cli_mod
 from app.cli import main
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _isolated_db(tmp_path_factory):
+    """把 CLI 的库和导出目录**全部重定向到临时目录**。
+    【真实 bug 修复】本文件原先直接用模块级 ``cli_mod.DB_PATH``，
+    也就是``var/aucup.db`` —— 也就是**开发/生产主库**。
+    而``TestVariants.test_variants_on_empty_library_prints_guidance``
+    里有一句 ``s.query(CupboardVariant).delete()``，它把主库柜型全删了。
+
+    实测后果：某次跑完 pytest 之后，Web UI 的柜型库从 23 个 dwg 变体
+    变成 0 个，而测试全绿 —— 测试污染了真实数据且没人察觉。
+    现在所有 CLI 测试都跑在tmp 目录里，与主库彻底隔离。
+    """
+    tmp = tmp_path_factory.mktemp("aucup-cli")
+    old_db, old_exp = cli_mod.DB_PATH, cli_mod.EXPORT_DIR
+    cli_mod.DB_PATH = tmp / "aucup.db"
+    cli_mod.EXPORT_DIR = tmp / "export"
+    cli_mod.EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        yield
+    finally:
+        cli_mod.DB_PATH, cli_mod.EXPORT_DIR = old_db, old_exp
 
 
 class TestHelp:
@@ -110,3 +134,33 @@ class TestUnits:
     def test_unknown_job_returns_error(self, capsys):
         assert main(["units", "999999"]) == 2
         assert "找不到" in capsys.readouterr().err
+
+
+class TestNoMainDbPollution:
+    """回归锁死：CLI 测试**绝不能**碰主库 ``var/aucup.db``。
+
+    【真实 bug】本文件原先直接用模块级 ``cli_mod.DB_PATH``，而
+    ``test_variants_on_empty_library_prints_guidance`` 里有一句
+    ``s.query(CupboardVariant).delete()``。后果：跑一次 pytest 就把
+    开发库的柜型全清空（实测从 23 个 dwg 变体变成 0 个），而测试全绿。
+
+    这条用例直接盯着「主库文件在测试期间不被改写」，谁再把路径写回
+    模块级默认值就会当场红。
+    """
+
+    def test_module_level_db_path_points_into_tmp(self, tmp_path):
+        """测试运行期间，cli_mod.DB_PATH 必须落在 pytest 临时目录里。"""
+        assert str(cli_mod.DB_PATH).startswith(str(tmp_path.parent)), (
+            f"CLI 测试正在使用主库 {cli_mod.DB_PATH} —— "
+            "会把开发/生产数据写坏，必须重定向到 tmp"
+        )
+
+    def test_main_db_file_is_not_created(self, tmp_path):
+        """再叠一层：跑完 CLI 测试，主库那个文件不能被新建出来。"""
+        main(["variants"])
+        main(["units", "999999"])
+        # tmp_path.parent 是 pytest 的 basetemp，主库不可能出现在这里
+        created = list(tmp_path.parent.glob("**/aucup.db"))
+        for f in created:
+            assert str(f).startswith(str(tmp_path.parent))
+        assert cli_mod.DB_PATH.exists(), "临时库应当被真实创建并使用"
