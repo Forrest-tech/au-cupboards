@@ -1263,6 +1263,20 @@ function fmtMM(x) {
   return Number.isFinite(n) ? String(n) : '—';
 }
 
+/** 柜体尺寸文案：**只显示实际量到的尺寸**。
+ *
+ *  用户诉求「留白太多了，只需要显示实际的尺寸」。深度 `d` 是可选字段，
+ * 解析器量不到时是 null，之前直接 `fmtMM(v.d)` 会把兜底的 '—' 印出来，
+ * 界面上就成了「865 × 2350 × — mm」—— 那个「× —」既不是尺寸也不是
+ * 留白，纯属脏输出。这里只在真有深度时才追加。
+ */
+function sizeMM(v) {
+  const w = fmtMM(v && v.w), h = fmtMM(v && v.h);
+  const d = (v && v.d !== null && v.d !== undefined && v.d !== ''
+            && v.d !== 'null' && v.d !== 'None') ? fmtMM(v.d) : null;
+  return d ? `${w} × ${h} × ${d} mm` : `${w} × ${h} mm`;
+}
+
 /** 当前选中项是否挂在某个文件节点下 —— 用来给展开的根节点加高亮 */
 function isSelUnder(fileKey) {
   return S.treeSel === 'f:' + fileKey
@@ -1872,7 +1886,7 @@ function renderDetail() {
       <td>${esc(u.unit_type || '—')}</td>
       <td class="mono">${esc(v.code || t('mtx.nomatch'))}</td>
       <td class="mono">${esc(v.grid || '—')}</td>
-      <td class="num" style="font-size:10.5px">${v.w ? `${fmtMM(v.w)}×${fmtMM(v.h)}×${fmtMM(v.d)}` : '—'}</td>
+      <td class="num" style="font-size:10.5px">${v.w ? sizeMM(v).replace(' mm','') : '—'}</td>
       <td style="font-size:10px">
         <span class="tag ${u.confidence_tier}">${t('tier.'+(u.confidence_tier||''))||'—'}</span>
         ${d.bucket ? `<div class="muted">${esc(d.bucket)} ${esc(d.bucket_label || '')}</div>` : ''}
@@ -2045,7 +2059,7 @@ function showFloorPanel(code) {
         <div class="meta">
           <div class="code mono">${esc(vLabel(v, n + ' ' + t('lib.units')) + suffixOf(v))}</div>
           <div class="dim">${n} ${t('lib.units')}${esc(suffixOf(v))} · ${esc(v.grid || '-')}</div>
-          <div class="dim">${fmtMM(v.w)} × ${fmtMM(v.h)} × ${fmtMM(v.d)} mm</div>
+          <div class="dim">${sizeMM(v)}</div>
         </div></div></div>`;
     }
     h += '</div>';
@@ -2172,7 +2186,7 @@ function showUnitsGroup(key, keepScroll) {
       <div class="meta">
         <div class="code mono">${esc(v.code)}</div>
         <div class="dim">${n} ${t('lib.units')}${esc(suffixOf(v))} · ${esc(v.grid || '-')}</div>
-        <div class="dim">${fmtMM(v.w)} × ${fmtMM(v.h)} × ${fmtMM(v.d)} mm ${srcTag}</div>
+        <div class="dim">${sizeMM(v)}${srcTag}</div>
         ${v.description ? `<div class="desc">${esc(v.description)}</div>` : ''}
       </div></div>
       <button class="cupdel" data-del="${v.id}" data-code="${esc(v.code)}"
@@ -2222,7 +2236,7 @@ function showVariantGroup(key) {
       <div class="meta">
         <div class="code mono">${esc(v.code)}</div>
         <div class="dim">${v.positions} ${t('dwg.pos')} · ${esc(v.grid || '-')}</div>
-        <div class="dim">${fmtMM(v.w)} × ${fmtMM(v.h)} × ${fmtMM(v.d)} mm ${srcTag}</div>
+        <div class="dim">${sizeMM(v)}${srcTag}</div>
         ${v.description ? `<div class="desc">${esc(v.description)}</div>` : ''}
       </div></div>
       <button class="cupdel" data-del="${v.id}" data-code="${esc(v.code)}"
@@ -3340,6 +3354,15 @@ function gotoView(v) {
     // 导出栏在 hub tab 里被 loadExports 跳过了（loadExports 是异步的，
     // 切回工作台时它不会自己再跑一遍），这里补一次。
     if (S.jobId && !document.querySelector('#bexp')) loadExports(S.jobId);
+    // 用户诉求：「进入这个 tab 后，默认会显示树状结构第一个的 item，
+    // 选中，然后中间位置显示完整的 pdf 的内容，右边是显示楼层的信息」。
+    // 这一条正是说工作台 —— 之前只有 hub 分支（柜型库/建筑图纸）调了
+    // autoSelectFirstInView()，工作台这条路径被漏掉，切回来时树里
+    // 没有任何高亮、中栏也不自动定位到第一页。
+    //
+    // 必须放在 renderPane() 之后：它会触发 restoreSelection / renderTree，
+    // 需要右栏容器已经是最终状态。
+    if (!S.treeSel) autoSelectFirstInView();
   } else {
     // 换tab 必须把中栏和右栏都清干净 —— 用户报的
     // 「从柜型图切换到建筑图纸，还是显示柜型图的内容」：
