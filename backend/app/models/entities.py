@@ -307,6 +307,11 @@ class CupboardVariant(Base):
     # 必须区分 —— 之前所有尺寸都是 estimated，用户无法判断可信度
     size_source: Mapped[str] = mapped_column(String(16), default="estimated")
 
+    # 来源 DWG 的显示名（不含扩展名）。
+    # 左树按它分组：根节点 = DWG 文件名（可改显示名），子节点 = N Units。
+    # 不存的话所有柜型只能挂在一个虚拟分组下，分不出来源图纸。
+    source_name: Mapped[str | None] = mapped_column(String(128), index=True)
+
     cupboard: Mapped["Cupboard"] = relationship(back_populates="variants")
 
 

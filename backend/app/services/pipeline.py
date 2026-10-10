@@ -68,6 +68,7 @@ _ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("cupboard_variants", "image_path", "TEXT"),
     ("cupboard_variants", "image_dpi", "INTEGER DEFAULT 110"),
     ("cupboard_variants", "size_source", "TEXT DEFAULT 'estimated'"),
+    ("cupboard_variants", "source_name", "TEXT"),
 )
 
 

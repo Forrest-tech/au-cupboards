@@ -26,6 +26,8 @@ from pathlib import Path
 import ezdxf
 from ezdxf.bbox import extents
 
+from .cupboard_geometry import _entity_extents, bind_document
+
 log = logging.getLogger(__name__)
 
 #: 渲染输出目录名（相对 var/）
@@ -68,6 +70,73 @@ MIN_LINEWEIGHT = 6
 MIN_IMAGE_BYTES = 4_000
 
 
+def _clone_into_cabinet_view(src_doc, tmp_doc, ents) -> tuple[int, list[str]]:
+    """把 ``ents`` 连同所需的块定义一起搬进 ``tmp_doc``。
+
+    为什么不能直接 ``msp.add_entity(e.copy())``
+    -------------------------------------------
+    ezdxf 1.4.4 的 ``add_entity`` / ``add_foreign_entity`` **不接受
+    INSERT**，会抛 ``DXFTypeError: unsupported DXF type: INSERT``。
+
+    而真实样本里柜内的 gas 表 / water 表**全是 INSERT**（393 个），
+    只有柜框是 LINE。于是旧代码里的::
+
+        for e in inside:
+            tmsp.add_entity(e.copy())
+
+    会在第一个 INSERT 上就抛异常，被外层 ``except Exception`` 吞掉后
+    返回 ``"实体复制失败"``；更糟的是有的版本里前面几个 LINE 已经
+    加进去了，于是渲出一张**只有柜框、内部空无一物**的图 ——
+    这正是「柜型预览里只有个空框，看不到表」的直接原因。
+
+    正确做法分两步：
+      1. 把用到的**块定义**整体搬进 ``tmp_doc``；
+      2. 实体用 ``layout.entity_space.add(e.copy())`` 写入——
+         它走 entitydb，不做类型白名单校验。
+
+    返回 ``(成功写入数, 失败原因列表)``。有失败原因时调用方可决定
+    是否继续 —— 不再像以前那样静默丢实体。
+    """
+    errors: list[str] = []
+
+    used: set[str] = set()
+    for e in ents:
+        if e.dxftype() == "INSERT":
+            try:
+                used.add(str(e.dxf.name))
+            except Exception:
+                pass
+
+    for name in used:
+        try:
+            src_block = src_doc.blocks.get(name)
+        except Exception:
+            continue
+        try:
+            dst_block = tmp_doc.blocks.get(name)
+            if dst_block is None:
+                dst_block = tmp_doc.blocks.new(name)
+        except Exception as exc:
+            errors.append(f"块 {name}: {exc}")
+            continue
+        dst_space = dst_block.entity_space
+        for be in src_block:
+            try:
+                dst_space.add(be.copy())
+            except Exception as exc:
+                errors.append(f"块 {name}/{be.dxftype()}: {exc}")
+
+    ok = 0
+    target = tmp_doc.modelspace().entity_space
+    for e in ents:
+        try:
+            target.add(e.copy())
+            ok += 1
+        except Exception as exc:
+            errors.append(f"{e.dxftype()}: {exc}")
+    return ok, errors
+
+
 @dataclass
 class BlockRender:
     """单个 block 的渲染结果。"""
@@ -88,7 +157,80 @@ class BlockRender:
     layer_counts: dict[str, int] = field(default_factory=dict)
     #: 标注文字（TEXT/MTEXT/ATTRIB），柜型的「介绍」常写在这里
     texts: list[str] = field(default_factory=list)
+    #: 实体/块搬运失败的原因 —— 非空说明图可能不完整，别当成正常产出
+    clone_errors: list[str] = field(default_factory=list)
+    #: 是否因为字体问题降级成了「无文字」渲染
+    text_render_failed: bool = False
+    #: 降级时删掉了多少个带文字的实体（DIMENSION/TEXT/…）
+    stripped_count: int = 0
     error: str | None = None
+
+
+#: 会触发字体查找、渲染时可安全丢掉的实体类型。
+#:
+#: 关键是 ``DIMENSION`` —— 真实柜型区域里一个 TEXT 都没有，
+#: 但有 50 个 DIMENSION，而标注文字同样要查 ezdxf 字体库，
+#: 于是照样抛 ``AttributeError: 'NoneType' object has no attribute
+#: 'filename'``。
+TEXTUAL_TYPES: frozenset[str] = frozenset({
+    "TEXT", "MTEXT", "ATTRIB", "ATTDEF",
+    "DIMENSION", "LEADER", "MLEADER", "MULTILEADER",
+})
+
+
+def _clone_without_text(src_doc, ents, drop: frozenset[str] = TEXTUAL_TYPES):
+    """重建一个「不含带文字实体」的临时文档，返回 ``(doc, 丢弃数)``。
+
+    为什么必须重建而不是删除
+    ------------------------
+    :func:`_clone_into_cabinet_view` 用 ``entity_space.add()`` 写入，
+    这些实体 ``dxf.handle`` 全是 ``None``、**不在 entitydb 里**。
+    ``delete_entity`` 找不到句柄会抛 ``ValueError: list.remove(x):
+    x not in list`` —— 实测 victims 有 50 个，实际删掉 **0** 个，
+    于是降级重渲时字体问题依旧，整个柜型直接失败。
+
+    与其和 entitydb 较劲，不如**一开始就只搬需要的实体**：
+    顺带还省一次遍历。块定义也要同步过滤，否则块内的 DIMENSION
+    照样触发字体查找。
+    """
+    tmp_doc = ezdxf.new()
+    kept = [e for e in ents if e.dxftype() not in drop]
+
+    used: set[str] = set()
+    for e in kept:
+        if e.dxftype() == "INSERT":
+            try:
+                used.add(str(e.dxf.name))
+            except Exception:
+                pass
+
+    for name in used:
+        try:
+            src_block = src_doc.blocks.get(name)
+        except Exception:
+            continue
+        try:
+            dst_block = tmp_doc.blocks.get(name)
+            if dst_block is None:
+                dst_block = tmp_doc.blocks.new(name)
+        except Exception:
+            continue
+        dst_space = dst_block.entity_space
+        for be in src_block:
+            if be.dxftype() in drop:
+                continue
+            try:
+                dst_space.add(be.copy())
+            except Exception:
+                continue
+
+    target = tmp_doc.modelspace().entity_space
+    for e in kept:
+        try:
+            target.add(e.copy())
+        except Exception:
+            continue
+    return tmp_doc, len(ents) - len(kept)
 
 
 def _looks_blank(path: Path) -> bool:
@@ -263,10 +405,8 @@ def render_block_to_jpg(
 
     tmp_doc = ezdxf.new()
     try:
+        _clone_into_cabinet_view(doc, tmp_doc, ents)
         tmsp = tmp_doc.modelspace()
-        for e in ents:
-            #COPY 走 ezdxf 的深拷贝，保留图层/颜色/线型
-            tmsp.add_entity(e.copy())
     except Exception as exc:
         res.error = f"实体复制到临时图失败: {exc}"
         return res
@@ -426,6 +566,10 @@ def render_cupboard_regions(
     from ezdxf.bbox import extents as _ext
 
     doc = ezdxf.readfile(str(dxf_path))
+    # 必须重新绑定：上面 readfile 得到的是**新** doc 对象，而
+    # _entity_extents 的块定义缓存还指着 parse_cupboards 那次的 doc。
+    # 不重绑的话 INSERT 的包围盒会算错，柜内表全被判为「不在区域内」。
+    bind_document(doc)
     msp = doc.modelspace()
     all_ents = list(msp)
 
@@ -464,13 +608,15 @@ def render_cupboard_regions(
 
         tmp = ezdxf.new()
         try:
+            _cloned, clone_errs = _clone_into_cabinet_view(doc, tmp, inside)
             tmsp = tmp.modelspace()
-            for e in inside:
-                tmsp.add_entity(e.copy())
         except Exception as exc:
             res.error = f"实体复制失败: {exc}"
             results.append(res)
             continue
+        if clone_errs:
+            # 不再静默：记进诊断信息，便于判断是不是块搬运失败导致空图
+            res.clone_errors = clone_errs[:5]
 
         try:
             box = _ext(list(tmsp), fast=True)
@@ -480,11 +626,14 @@ def render_cupboard_regions(
 
         fname = f"{code}.jpg"
         fpath = out_dir / fname
+        cfg = None
         try:
-            fig = plt.figure(figsize=(pw / dpi, ph / dpi), dpi=dpi)
-            ax = fig.add_axes([0, 0, 1, 1])
-            ax.set_axis_off()
-            ax.set_facecolor("white")
+            from ezdxf.addons.drawing.config import (
+                BackgroundPolicy,
+                ColorPolicy,
+                Configuration,
+                LineweightPolicy,
+            )
             cfg = Configuration(
                 lineweight_policy=LineweightPolicy.RELATIVE_FIXED,
                 lineweight_scaling=1.0,
@@ -492,11 +641,53 @@ def render_cupboard_regions(
                 color_policy=ColorPolicy.BLACK,
                 background_policy=BackgroundPolicy.WHITE,
             )
-            Frontend(RenderContext(tmp), MatplotlibBackend(ax),
-                     config=cfg).draw_layout(tmsp, finalize=True)
-            fig.savefig(str(fpath), format="jpg", facecolor="white", dpi=dpi,
-                        pil_kwargs={"quality": JPEG_QUALITY})
-            plt.close(fig)
+        except Exception:
+            cfg = None
+
+        # ---- 渲染主流程（含文字降级）----
+        def _draw(target_doc) -> Path:
+            """把 target_doc 渲染到 fpath，返回 fpath。"""
+            f = plt.figure(figsize=(pw / dpi, ph / dpi), dpi=dpi)
+            try:
+                a = f.add_axes([0, 0, 1, 1])
+                a.set_axis_off()
+                a.set_facecolor("white")
+                Frontend(RenderContext(target_doc), MatplotlibBackend(a),
+                         config=cfg).draw_layout(
+                             target_doc.modelspace(), finalize=True)
+                f.savefig(str(fpath), format="jpg", facecolor="white",
+                          dpi=dpi, pil_kwargs={"quality": JPEG_QUALITY})
+            finally:
+                plt.close(f)
+            return fpath
+
+        try:
+            try:
+                _draw(tmp)
+            except Exception as exc:
+                # 标注文字渲染失败不该让整张柜型图挂掉。
+                #
+                # 实测踩坑（真实样本 20 个柜型**全部**失败）：
+                #   1.首次报的是 MTEXT 的字体查找失败
+                #      (``fonts.find_font_file_name`` →
+                #       ``AttributeError: 'NoneType' object has no
+                #       attribute 'filename'``）；
+                #   2. 剥掉 TEXT/MTEXT 后仍然失败 —— 因为柜型区域内
+                #      一个 TEXT 都没有，真正触发字体查找的是
+                #      **50 个 DIMENSION**，标注文字同样要查字体。
+                #
+                # 降级：把 DIMENSION / LEADER / TEXT 等「带文字的实体」
+                # 全部删掉，只留线条与块图形重渲。图里少了标注说明，
+                # 但柜型排布、表位、结构都完整 —— 对「看清柜型」这个
+                # 用途来说远比一张白图有用。
+                log.warning("柜型 %s 标注渲染失败(%s)，降级为纯几何渲染",
+                            code, exc)
+                res.text_render_failed = True
+                stripped_doc, stripped = _clone_without_text(doc, inside)
+                res.stripped_count = stripped
+                if not stripped:
+                    raise
+                _draw(stripped_doc)
         except Exception as exc:
             plt.close("all")
             res.error = f"渲染失败: {type(exc).__name__}: {exc}"
@@ -552,39 +743,31 @@ def _cabinet_code(cup, idx: int) -> str:
 
 
 def _entity_near(e, rect, tol: float = 2.0) -> bool:
-    """实体的参考点是否落在 rect 内（含容差）。"""
-    t = e.dxftype()
+    """实体是否落在 ``rect`` 内（含容差）。
+
+    INSERT 必须按**真实几何包围盒**判断，不能用 ``e.dxf.insert``
+    --------------------------------------------------------------
+    真实 DWG 里仪表 block 的内部顶点用的是绝对图纸坐标，
+    ``base_point`` 又是 ``(0,0,0)``，于是 ``insert`` 点与真实位置
+    能差 6500mm（实测：``gas meter 1`` 的 insert 在 (2200, 1872)，
+    真实位置 (-4279, 4619)）。
+
+    旧代码对 INSERT 直接用 insert 点判断，导致 **393 个 INSERT 全部
+    被判为「不在柜体内」**，每个柜型只抠到 8 个 LINE（纯柜框）——
+    这就是预览图里只有空框、看不到任何表的原因。
+
+    现在统一走 :func:`_entity_extents`（与柜型识别用的是同一个函数，
+    保证「数出14 套」和「渲出 14 个表」必然一致）。
+    """
     try:
-        if t == "LINE":
-            a, b = e.dxf.start, e.dxf.end
-            return (rect.x0 - tol <= a.x <= rect.x1 + tol
-                    and rect.y0 - tol <= a.y <= rect.y1 + tol) or (
-                   rect.x0 - tol <= b.x <= rect.x1 + tol
-                   and rect.y0 - tol <= b.y <= rect.y1 + tol)
-        if t in ("CIRCLE", "ARC", "ELLIPSE"):
-            c = e.dxf.center
-            return (rect.x0 - tol <= c.x <= rect.x1 + tol
-                    and rect.y0 - tol <= c.y <= rect.y1 + tol)
-        if t == "POINT":
-            p = e.dxf.location
-            return (rect.x0 - tol <= p.x <= rect.x1 + tol
-                    and rect.y0 - tol <= p.y <= rect.y1 + tol)
-        if t in ("LWPOLYLINE", "POLYLINE", "RECTANG"):
-            r = rect_from_entity_safe(e)
-            if r is None:
-                return False
-            return rect.contains(r, tol=tol)
-        if t == "INSERT":
-            p = e.dxf.insert
-            return (rect.x0 - tol <= p.x <= rect.x1 + tol
-                    and rect.y0 - tol <= p.y <= rect.y1 + tol)
-        if t in ("TEXT", "MTEXT"):
-            p = e.dxf.insert
-            return (rect.x0 - tol <= p.x <= rect.x1 + tol
-                    and rect.y0 - tol <= p.y <= rect.y1 + tol)
+        r = _entity_extents(e)
     except Exception:
+        r = None
+    if r is None:
         return False
-    return False
+    # 有交集即算命中：柜框线正好压在边界上，纯 contains 会漏
+    return not (r.x1 < rect.x0 - tol or r.x0 > rect.x1 + tol
+                or r.y1 < rect.y0 - tol or r.y0 > rect.y1 + tol)
 
 
 def rect_from_entity_safe(ent):

@@ -635,6 +635,9 @@ def list_variants() -> list[dict[str, Any]]:
                 "description": v.description,
                 "source": v.source,
                 "meter_combo": v.meter_combo,
+                # 来源 DWG 名—— 左树根节点用它分组（显示名可改，
+                # 改名只动前端 sessionStorage，不改这里的值）
+                "source_name": v.source_name,
                 # 柜型缩略图（需求 2：柜型库可点击查看）
                 # image_url 是给 <img src> 直接用的完整路径，
                 # image_path 保留库里的相对值便于排查
@@ -806,6 +809,11 @@ class VariantIn(BaseModel):
     meter_combo: str | None = None
     #: 对应 DWG 里的 block 名 —— 用于把渲染图关联到变体
     block_name: str | None = None
+    #: **套数（units）** —— 一套 = 1 个 water + 1 个 gas。
+    #: 必须由解析层给出真实值；不能用 rows×cols代替（那是网格容量）。
+    positions: int | None = None
+    #: 排布字符串，如 "5x4"（5 列 × 4 行）
+    grid: str | None = None
 
 
 @app.post("/api/variants")
@@ -930,6 +938,12 @@ class RenderOut(BaseModel):
     layer_counts: dict[str, int] = {}
     texts: list[str] = []
     error: str | None = None
+    #: 往临时文档搬实体时的失败记录（块定义缺失等）。
+    clone_errors: list[str] = []
+    #: 标注文字渲染失败、已降级为纯几何渲染。
+    text_render_failed: bool = False
+    #: 降级时被剥离的带文字实体数量。
+    stripped_count: int = 0
 
 
 class RenderRequest(BaseModel):
@@ -985,32 +999,50 @@ def render_cupboards(body: RenderRequest) -> dict[str, Any]:
         "failed": len(results) - len(ok),
         "source": src.name,
         # 柜型几何明细 —— 前端按表位数（= units 数）分组展示
-        "cupboards": [_cup_out(c) for c in parsed.cupboards],
-        # 被丢弃的矩形（含理由）—— 用户抱怨「为啥有这些」时要能解释
+        "cupboards": [
+            {**_cup_out(c, i), "code": _cab_code(c, i)} for i, c
+            in enumerate(parsed.cupboards)
+        ],
+        # 被丢弃的区域（含理由）—— 用户抱怨「为啥有这些」时要能解释
         "discarded": [
-            {"size": [round(r.width, 1), round(r.height, 1)],
+            {"w": round(r.width, 1), "h": round(r.height, 1),
+             "size": [round(r.width, 1), round(r.height, 1)],
              "layer": r.layer, "reason": why}
             for r, why in parsed.discarded[:120]
         ],
         "diag": {
             "entity_total": parsed.entity_total,
             "rect_total": parsed.rect_total,
+            "cabinet_frame_pairs": parsed.cabinet_frame_pairs,
             "cabinet_layer_hits": parsed.cabinet_layer_hits,
+            "units_total": sum(c.positions_total for c in parsed.cupboards),
         },
         "items": [RenderOut(**r.__dict__) for r in results],
     }
 
 
-def _cup_out(c) -> dict[str, Any]:
+def _cab_code(c, idx: int) -> str:
+    """柜型编码 —— 必须与 :func:`_cabinet_code` 完全一致。
+
+    两边不一致会让前端按 code 关联柜型明细时全部落空（卡片退回
+    显示「实体数 × 尺寸」，套数信息丢失），所以这里复用渲染侧的
+    同一个函数，而不是各写一份 f-string。
+    """
+    from app.parsers.cupboard_render import _cabinet_code
+    return _cabinet_code(c, idx)
+
+
+def _cup_out(c, idx: int = 0) -> dict[str, Any]:
     """柜型几何信息 → 前端可消费的 dict。
 
-    ``positions_total`` 是**表位数 = units 数**，前端按它分组。
+    ``positions_total`` 是**套数 = max(gas 表数, water 表数)**，
+    前端按它分组显示「N 套 · CxR 排布」。
     """
     d = c.as_dict()
-    d["code"] = f"CP-{c.positions_total}p"
     d["notes"] = c.notes
     d["layer"] = c.layer
     d["glyph_count"] = c.glyph_count
+    d["code"] = _cab_code(c, idx)
     return d
 
 
@@ -1030,6 +1062,8 @@ class DwgCommitIn(BaseModel):
     """需求 2：用户在预览确认后提交入库。"""
 
     source_file: str
+    #: 来源 DWG 的显示名（不含扩展名）—— 左树根节点用它，可改显示名
+    source_name: str | None = None
     variants: list[VariantIn] = []
     cupboard_name: str | None = None
     note: str | None = None
@@ -1076,14 +1110,24 @@ def commit_from_dwg(body: DwgCommitIn) -> dict[str, Any]:
             # 比让用户手填「2套 water+gas 排布」有价值得多
             desc = v.description or (
                 " / ".join(r.texts[:4]) if r and r.texts else None)
+            # 套数优先用解析出的真实值（= max(gas 表数, water 表数)）
+            # 绝对不能用 rows*cols —— 那只是网格容量，不是套数。
+            # 真实样本实测：13 Units 的柜是 5列×4行 = 20 格，
+            # 但只填了 13 套，rows*cols 会把它报成 20 套。
+            if v.positions:
+                positions = int(v.positions)
+            else:
+                positions = max(1, int(v.rows) * int(v.cols))
+            grid = v.grid or f"{v.rows}x{v.cols}"
             s.add(
                 CupboardVariant(
                     cupboard_id=c.id,
                     variant_code=v.code,
+                    source_name=body.source_name or body.source_file,
                     layout_rows=v.rows,
                     layout_cols=v.cols,
-                    positions_total=v.rows * v.cols,
-                    grid_aspect=f"{v.rows}x{v.cols}",
+                    positions_total=positions,
+                    grid_aspect=grid,
                     w=w, h=h, d=v.d,
                     meter_spacing_h=v.spacing_h,
                     meter_spacing_v=v.spacing_v,

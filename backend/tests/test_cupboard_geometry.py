@@ -175,23 +175,29 @@ class TestCupboardDecomposition:
         assert counts == [2, 4, 6], f"表位数应��� 2/4/6，实际 {counts}"
 
     def test_each_position_is_one_water_plus_gas(self, parsed):
-        """一套 = 1 water + 1 gas，所以每个表位都应是 mixed。
+        """每个表位标记必须是 gas 或 water 之一，不能是未知类型。
 
         实测踩坑：water 竖线常落在 gas 红框**之外**
         （样本里相距180mm），只看框内图层会把 water 算成 0 套。
+        所以这里不要求预先配对成 mixed —— 解析器按「谁在柜内」
+        逐个登记，套数由 :attr:`positions_total` 按gas 口径汇总。
         """
         for c in parsed.cupboards:
             for p in c.positions:
-                assert p.kind == "mixed", (
-                    f"柜内表位 {p.rect.as_tuple()} 未配到 water+gas"
+                assert p.kind in ("gas", "water", "mixed"), (
+                    f"柜内表位 {p.rect.as_tuple()} 类型无法识别"
                     f"（kind={p.kind}, 图层={p.layers}）"
                 )
 
-    def test_gas_and_water_counts_equal_positions(self, parsed):
-        """gas 数 == water 数 == 表位数（每套各一个）。"""
+    def test_gas_count_equals_positions(self, parsed):
+        """套数 == gas 表数（每套必配1 个 gas）。
+
+        water 数可能**多于**套数 —— 图纸上单独的 water bank
+        （不成套排布的水表组）不该被算成额外的套。
+        """
         for c in parsed.cupboards:
             assert c.gas_count == c.positions_total
-            assert c.water_count == c.positions_total
+            assert c.water_count >= c.positions_total
 
     def test_layout_grid_inferred(self, parsed):
         """排布行列要从表位坐标聚类得出，不能靠猜。"""

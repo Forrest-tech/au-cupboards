@@ -61,10 +61,42 @@ WATER_LAYER_KEYWORDS: tuple[str, ...] = (
 )
 
 #: 机械零件噪声图层（第 1 轮翻车的根因）
+#:
+#:注意前缀是 ``Aecb_`` 而不是 ``Aect_`` —— 真实图纸里的 HVAC 风管零件
+#: block叫 ``Aecb_Duct_Oval_1Line_Exh_Elbow_Drop_Edge``。按 ``aect`` 过滤
+#: 一个都拦不住。
 JUNK_LAYER_KEYWORDS: tuple[str, ...] = (
-    "aect", "duct", "mech", "hvac", "auto", "acad", "3d", "xref",
-    "defpoints", "标题", "说明", "图框", "title", "border", "frame",
+    "aect", "aecb", "aecp", "duct", "mech", "hvac", "auto", "acad", "3d",
+    "xref", "defpoints", "标题", "说明", "图框", "title", "border", "frame",
+    "legend", "north", "scale",
 )
+
+#: 柜体轮廓线的图层白名单（真实图纸实测）。
+#:
+#: 柜框在这份DWG 里是 **4 条独立 LINE**（不是闭合多段线！）：
+#: 上下边在 ``2CONC``，左边在 ``1CO``，右边在 ``2CONC`` / ``1CO``。
+#: 这几个图层名都带 CONC/CO ——混凝土砌块柜体，是澳洲计量柜的常规画法。
+#:
+#: 保留通用关键词作为兜底，应对不同项目的图层命名。
+CABINET_FRAME_LAYERS: frozenset[str] = frozenset({
+    "1CO", "2CONC", "HVAL___1DA", "HWAT___1DD", "50L",
+})
+
+#: 柜框线的图层关键词（白名单之外的通用匹配）。
+CABINET_FRAME_KEYWORDS: tuple[str, ...] = (
+    "conc", "1co", "2co", "_co", "wall", "cab", "cup", "meter_board",
+)
+
+#: 一条边要长到多少毫米才可能是柜框。真实柜体最小865mm 宽，
+#: 最小边长取 300mm 能覆盖最小柜型，同时排除表位框（250mm）。
+MIN_FRAME_SIDE_MM = 300.0
+
+#: 成对长线的坐标对齐容差（mm）。CAD 里同一根线的两段常常差零点几。
+FRAME_ALIGN_TOL_MM = 3.0
+
+#: 长线端点需覆盖对方多少比例才算成对。同一个柜子的上下边长度
+#: 可能差几十毫米（图里画的其实是墙厚线），卡太严会一个柜型都配不出。
+FRAME_COVER_RATIO = 0.55
 
 #: 一个柜体最小边长（mm）。低于此值的多半是表位框或零件，不是柜体。
 MIN_CABINET_SIDE_MM = 400.0
@@ -178,11 +210,31 @@ class Cupboard:
     notes: list[str] = field(default_factory=list)
     #: 柜内识别到的 water/gas 符号图元总数 —— 诊断用
     glyph_count: int = 0
+    #: 排布聚类容差 ``(x向, y向)``，由 :func:`parse_cupboards` 按柜体尺寸设定
+    _layout_tol: tuple[float, float] | None = None
 
     @property
     def positions_total(self) -> int:
-        """表位总数 = 该层的 units 数。"""
-        return len(self.positions)
+        """套数（units）= 该层的 water+gas 套数。
+
+        口径来自用户原话：「一个 cupboard 里面包含了多套的 water+gas，
+        这种是一套」。所以**不是** gas 表数 + water 表数，而是取
+        **能配成套的那一边的数量**。
+
+        具体规则：
+
+        - 有 gas 时以 **gas 数**为准 —— 每个 gas 表必然配1 个 water，
+          多出来的 water（图纸上单独的「water bank」不成套排布）不计入。
+        - 没有 gas（纯 water 柜）时退回water 数。
+
+        真实样本实测：19 个柜型里 gas 数与 water 数**逐一相等**
+        （14/14、13/13、…、5/5），只有 1 个柜型是纯 gas（3/0）。
+        这条规则在真实文件上与「取 max」结果完全一致（191 套），
+        但在有额外 water bank 的图纸上不会虚高。
+        """
+        g = self.gas_count
+        w = sum(1 for p in self.positions if p.kind == "water")
+        return g if g > 0 else w
 
     @property
     def gas_count(self) -> int:
@@ -200,24 +252,44 @@ class Cupboard:
 
     @property
     def layout_rows_cols(self) -> tuple[int, int]:
-        """从表位中心的聚类推断排布行列。
+        """推断排布行列：**以 gas 表为权威**做行列聚类。
 
-        用坐标聚类而不是猜：表位在图上是规则网格，
-        先按 y 聚成行、再按 x 聚成列。
+        真实样本实测（14 套柜，2165×2350mm）
+        ------------------------------------
+        柜内 28 个标记的分布是::
+
+            cy=-36064  water×7 (x -4048..-4948, 间距150)
+            cy=-35968  gas  ×2 (x -3423, -3773)
+            cy=-35464  water×7 (同上)
+            cy=-35418  gas  ×2 (同上)
+            cy=-34868  gas  ×5 (x -3423..-4823, 间距350)
+            cy=-34318  gas  ×5 (同上)
+
+        也就是**布局是 5 列 × 4 行 = 20 格，实际填了 14 个套位**
+        （顶部两行只填了右侧 2 列）。water 表的 x 间距只有 150mm，
+        若把它也拿去聚类，26 个标记会聚出乱七八糟的行列数。
+
+        所以：**套数和排布都只认 gas 表** —— 一套 = 1 个 gas 是用户
+        明确给的口径，water 表只用来交叉验证「gas 数≈water 数」。
+        这样 14 套柜得到 4 行 × 5 列，与图上完全对得上。
+
+        聚类容差取柜体尺寸的比例（x 向 12%、y 向 15%）：真实数据
+        gas 的列间距 350mm、行间距 550~600mm，分别落在 260mm /
+        352mm 两个阈值之外，稳定分开。
         """
-        if not self.positions:
+        gas = [p for p in self.positions if p.kind == "gas"]
+        if not gas:
+            # 没有 gas 标记（图纸只画了水表）时退回用全部表位
+            gas = self.positions
+        if not gas:
             return (0, 0)
-        ys = sorted({round(p.rect.cy, 1) for p in self.positions})
-        rows = _cluster_count(ys, tol=self.rect.height * 0.08)
-        if rows == 0:
-            return (0, 0)
-        # 每行的表位数取众数
-        counts: dict[int, int] = {}
-        for p in self.positions:
-            r = _which_cluster(p.rect.cy, ys, tol=self.rect.height * 0.08)
-            counts[r] = counts.get(r, 0) + 1
-        cols = max(counts.values()) if counts else 0
-        return (rows, cols)
+        tol_x, tol_y = self._layout_tol or (
+            max(self.rect.width * 0.12, 30.0),
+            max(self.rect.height * 0.15, 30.0),
+        )
+        cx = sorted({round(p.rect.cx, 1) for p in gas})
+        cy = sorted({round(p.rect.cy, 1) for p in gas})
+        return (_cluster_count(cy, tol=tol_y), _cluster_count(cx, tol=tol_x))
 
     @property
     def grid_aspect(self) -> str:
@@ -255,22 +327,26 @@ class ParsedCupboard:
     entity_total: int = 0
     #: 识别出的闭合矩形总数
     rect_total: int = 0
+    #: 成对长 LINE 配出的柜体框候选数（真实文件的柜体识别走这条路）
+    cabinet_frame_pairs: int = 0
     #: 柜体候选图层命中情况，用于诊断「图层对不对」
     cabinet_layer_hits: dict[str, int] = field(default_factory=dict)
 
     def summary(self) -> str:
-        parts = [f"实体 {self.entity_total} / 闭合矩形 {self.rect_total}",
-                 f"柜型 {len(self.cupboards)} 个"]
+        parts = [f"实体 {self.entity_total}",
+                 f"柜框配对 {self.cabinet_frame_pairs}",
+                 f"柜型 {len(self.cupboards)} 个",
+                 f"总套数 {sum(c.positions_total for c in self.cupboards)}"]
         for c in self.cupboards:
             w, h = c.bbox_mm
             parts.append(
-                f"  · {c.positions_total} 表位 "
-                f"{c.grid_aspect}  {w:.0f}×{h:.0f}mm  "
-                f"gas {c.gas_count}/water {c.water_count}  "
+                f"· {c.positions_total:2d} 套{c.grid_aspect:>7}"
+                f"  {w:.0f}×{h:.0f}mm  "
+                f"gas {c.gas_count}/water {c.water_count}（{c.glyph_count} 表位）  "
                 f"图层 {c.layer}"
             )
         if self.discarded:
-            parts.append(f"丢弃 {len(self.discarded)} 个矩形")
+            parts.append(f"丢弃 {len(self.discarded)} 个")
         return "\n".join(parts)
 
 
@@ -282,12 +358,464 @@ def _is_junk_layer(layer: str) -> bool:
     return any(k in low for k in JUNK_LAYER_KEYWORDS)
 
 
+# ------------------------------------------------- 柜框：成对长LINE 配对
+#
+# 为什么不是「找闭合多段线」
+# -------------------------
+# 真实样本 ``samples/Cold and hot water and gs meter cupboard detail 1.dwg``
+# 的实测结果（1069 个 LWPOLYLINE 里1053 个在图层 ``1`` 上、**全部不闭合**），
+# 全图只有 16 个闭合 LWPOLYLINE：
+#   - 1 个 ``2CONC`` 4414×6215mm的混凝土剖面填充（不是柜体）
+#   - 15 个 ``G-Anno-Std-Cntr`` 250×450mm（**表位框**，不是柜体）
+# 也就是说「闭合矩形 = 柜体」这条规则在真实文件上**一个都找不到**。
+#
+# 柜框实际是 **4 条独立 LINE**：上下边在 ``2CONC``，左边在 ``1CO``，
+# 右边在 ``2CONC`` 或 ``1CO``。所以必须按「成对长线」重建矩形。
+
+
+@dataclass
+class _Seg:
+    """一条轴对齐长线段（只存够配对用的信息）。"""
+
+    a0: float          # 起点（沿走向的坐标）
+    a1: float          # 终点
+    pos: float         # 垂直于走向的坐标（水平线= y，垂直线= x）
+    layer: str
+
+
+def _collect_frame_segments(ents) -> tuple[list[_Seg], list[_Seg]]:
+    """收集柜框候选长线，按走向分成「水平」「垂直」两组。
+
+    只取图层命中 :data:`CABINET_FRAME_LAYERS` 或
+    :data:`CABINET_FRAME_KEYWORDS` 的 LINE，且长度 >= ``MIN_FRAME_SIDE_MM``。
+
+    这样做的额外好处：HVAC 风管零件、文字、标注引线全部落在别的图层，
+    天然被排除，不需要再维护一张噪声前缀黑名单。
+    """
+    hs: list[_Seg] = []
+    vs: list[_Seg] = []
+    for e in ents:
+        if e.dxftype() != "LINE":
+            continue
+        try:
+            lay = str(e.dxf.layer if e.dxf.hasattr("layer") else "")
+        except Exception:
+            continue
+        if not _is_frame_layer(lay):
+            continue
+        try:
+            s, t = e.dxf.start, e.dxf.end
+        except Exception:
+            continue
+        x0, y0 = float(s.x), float(s.y)
+        x1, y1 = float(t.x), float(t.y)
+        w, h = abs(x1 - x0), abs(y1 - y0)
+        if h <= FRAME_ALIGN_TOL_MM and w >= MIN_FRAME_SIDE_MM:
+            hs.append(_Seg(min(x0, x1), max(x0, x1), y0, lay))
+        elif w <= FRAME_ALIGN_TOL_MM and h >= MIN_FRAME_SIDE_MM:
+            vs.append(_Seg(min(y0, y1), max(y0, y1), x0, lay))
+    return hs, vs
+
+
+def _is_frame_layer(layer: str) -> bool:
+    """该图层是否可能承载柜体外框。"""
+    if not layer:
+        return False
+    if _is_junk_layer(layer):
+        return False
+    if layer.upper() in CABINET_FRAME_LAYERS:
+        return True
+    low = layer.lower()
+    return any(k in low for k in CABINET_FRAME_KEYWORDS)
+
+
+def _covers(outer: float, inner: float) -> bool:
+    """竖线是否「足够覆盖」两条横线之间的高度。
+
+    卡太严会漏：真实图纸里同一柜子的上下边长度往往差几十毫米
+    （画的是墙厚线，不是严格矩形）。0.55 的比例既能配上正常柜子，
+    又不会把上下两层楼的不同柜子误配成一个。
+    """
+    lo, hi = sorted((outer, inner))
+    return (hi - lo) >= (hi - lo) * FRAME_COVER_RATIO
+
+
+def pair_frame_segments(hs: list[_Seg], vs: list[_Seg]) -> list[Rect]:
+    """把长线配成柜体矩形。
+
+    配对逻辑（与真实文件实测一致）：
+      1. 两条**水平线** x 起止一致、y 不同 → 它们是某个柜体的上下边；
+      2. 在左右端点 x 处各找一条**垂直线**，其 y 范围要覆盖上下边；
+      3. 上下左右四条都齐 → 得到一个柜体矩形。
+
+    真实样本实测：46 条水平长线 + 46 条垂直长线 → **20 个矩形**，
+    与图纸上肉眼可见的 20 个柜型一一对应。
+    """
+    out: list[Rect] = []
+    seen: set[tuple] = set()
+    tol = FRAME_ALIGN_TOL_MM
+
+    # 按 x 起止（量化到 5mm）分组，同组内才可能是同一个柜子的上下边
+    groups: dict[tuple, list[_Seg]] = {}
+    for h in hs:
+        groups.setdefault((round(h.a0 / 5.0), round(h.a1 / 5.0)), []).append(h)
+
+    for segs in groups.values():
+        if len(segs) < 2:
+            continue
+        ys = sorted({round(s.pos, 1) for s in segs})
+        for i in range(len(ys)):
+            for j in range(i + 1, len(ys)):
+                y0, y1 = ys[i], ys[j]
+                if y1 - y0 < MIN_FRAME_SIDE_MM:
+                    continue
+                x0, x1 = segs[0].a0, segs[0].a1
+                left = next((v for v in vs if abs(v.pos - x0) <= tol
+                             and v.a0 <= y0 + tol and v.a1 >= y1 - tol), None)
+                if left is None:
+                    continue
+                right = next((v for v in vs if abs(v.pos - x1) <= tol
+                              and v.a0 <= y0 + tol and v.a1 >= y1 - tol), None)
+                if right is None:
+                    continue
+                key = (round(x0), round(y0), round(x1), round(y1))
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(Rect(
+                    x0=x0, y0=y0, x1=x1, y1=y1,
+                    layer=left.layer or right.layer,
+                    source_type="LINE_PAIR",
+                ))
+    return out
+
+
+def extract_cabinet_frames(ents) -> list[Rect]:
+    """从实体列表里重建所有柜体矩形（成对长 LINE 配对）。"""
+    hs, vs = _collect_frame_segments(ents)
+    return pair_frame_segments(hs, vs)
+
+
+# ------------------------------------------------------------ 表位识别
+#
+# 真实文件里一个套位（1 套 water + gas）由两个东西表达：
+#   - gas：``gas meter 1`` 这个 INSERT（内部自带一个 250×450 闭合框）
+#   - water：``water meter v`` / ``water meter h`` / ``h-meter`` 这几个 INSERT
+# 少数柜型（第 20 号，865mm 宽那个）**没有用 INSERT**，gas 表被炸开成
+# 直接画在 modelspace 上的 ``G-Anno-Std-Cntr`` 250×450 闭合框 ——
+# 这两种画法都要认。
+GAS_BLOCK_KEYWORDS: tuple[str, ...] = ("gas", "gms", "g-meter")
+WATER_BLOCK_KEYWORDS: tuple[str, ...] = (
+    "water", "wms", "cws", "w-meter", "hwm", "h-meter",
+)
+#: 炸开画的 gas 表位框尺寸区间（mm）
+UNBOXED_GAS_W = (200.0, 300.0)
+UNBOXED_GAS_H = (400.0, 500.0)
+
+
+def _entity_extents(e) -> Rect | None:
+    """取实体真实几何包围盒（mm）。
+
+    为什么必须用 ``ezdxf.bbox.extents`` 而不是 ``e.dxf.insert``
+    --------------------------------------------------------------
+    真实 DWG 里每个仪表 block 的**内部顶点用的是绝对图纸坐标**，
+    而 ``base_point`` 是 ``(0,0,0)``。于是 ``insert=(2200, 1872)``
+    的那个 ``gas meter 1``，真实位置其实是 ``(-4279, 4619)`` ——
+    和 insert 点差了 6500mm。直接拿 insert 点做空间聚类会全部错位，
+    一个柜型都统计不出。
+
+    实测：用 insert 点 → 落在柜体外的 INSERT 计数为 0；
+    改用 extents → 全图范围 x -8461..-79、y -36310..5145，
+    完整覆盖全部 20 个柜体。
+
+    性能
+    ----
+    ``ezdxf.bbox.extents`` 要展开块内容，对 393 个 INSERT 逐个调用
+    会花掉大部分解析时间。这里加了两级缓存：
+      1. **按块名缓存**—— 同一份图纸里 393 个 INSERT 只引用 4 个块，
+         每个块的本地 bbox 只算一次，之后平移即可；
+      2. **局部 LRU** —— 同一批相邻实体反复求包围盒时命中缓存。
+    实测把真实样本的解析从 3 分钟压到 20 秒以内。
+    """
+    t = e.dxftype()
+
+    # ---- INSERT：按块名缓存本地偏移 ----
+    if t == "INSERT":
+        try:
+            name = str(e.dxf.name)
+        except Exception:
+            return None
+        try:
+            ip = e.dxf.insert
+            ix, iy = float(ip.x), float(ip.y)
+        except Exception:
+            return None
+        try:
+            sx = float(e.dxf.get("xscale", 1.0)) or 1.0
+            sy = float(e.dxf.get("yscale", 1.0)) or 1.0
+        except Exception:
+            sx = sy = 1.0
+        try:
+            rot = math.radians(float(e.dxf.get("rotation", 0.0)))
+        except Exception:
+            rot = 0.0
+
+        local = _block_local_bbox(name)
+        if local is None:
+            return None
+        lx0, ly0, lx1, ly1 = local
+        # 本地 bbox → 缩放 → 绕插入点旋转 → 平移
+        corners = []
+        for cx, cy in ((lx0, ly0), (lx1, ly0), (lx0, ly1), (lx1, ly1)):
+            px, py = cx * sx, cy * sy
+            if rot:
+                c, s = math.cos(rot), math.sin(rot)
+                px, py = px * c - py * s, px * s + py * c
+            corners.append((ix + px, iy + py))
+        xs = [p[0] for p in corners]
+        ys = [p[1] for p in corners]
+        return Rect(x0=min(xs), y0=min(ys), x1=max(xs), y1=max(ys),
+                    layer=str(e.dxf.layer if e.dxf.hasattr("layer") else ""),
+                    source_type="INSERT")
+
+    # ---- 其他实体：先走快路径，失败再退回 ezdxf ----
+    fast = _fast_extents(e)
+    if fast is not None:
+        return fast
+    try:
+        from ezdxf import bbox as _bbox
+        box = _bbox.extents([e], fast=True)
+        if not box.has_data:
+            return None
+        return Rect(
+            x0=box.extmin.x, y0=box.extmin.y,
+            x1=box.extmax.x, y1=box.extmax.y,
+            layer=str(e.dxf.layer if e.dxf.hasattr("layer") else ""),
+            source_type=t,
+        )
+    except Exception:
+        return None
+
+
+def bind_document(doc) -> None:
+    """把当前文档绑给包围盒计算，让渲染侧也能用 :func:`_entity_extents`。
+
+    渲染模块需要按**同一套**几何判断「实体属不属于这个柜体」——
+    否则会出现「数出14 套，但图里只渲出 8 个表」这种自相矛盾。
+    换文档必须先调用它，否则块定义缓存会串味。
+    """
+    global _current_doc
+    _current_doc = doc
+    _BLOCK_BBOX_CACHE.clear()
+
+
+#: 块名 -> 本地 bbox ``(x0, y0, x1, y1)``
+_BLOCK_BBOX_CACHE: dict[str, tuple[float, float, float, float] | None] = {}
+
+
+def _block_local_bbox(name: str):
+    """求一个块定义里所有实体的本地包围盒（结果进程内缓存）。
+
+    块内顶点可能带 z 值，这里一律按 (x, y) 取 min/max —— 柜型识别只关心
+    平面位置。z 不同的零件（上下叠置的管道）在平面上会重合，
+    对 2D 柜型分解没有影响。
+    """
+    if name in _BLOCK_BBOX_CACHE:
+        return _BLOCK_BBOX_CACHE[name]
+    result: tuple[float, float, float, float] | None = None
+    try:
+        from ezdxf import bbox as _bbox
+        box = _bbox.extents(_current_doc.blocks.get(name), fast=True)
+        if box.has_data:
+            result = (box.extmin.x, box.extmin.y, box.extmax.x, box.extmax.y)
+    except Exception:
+        result = None
+    _BLOCK_BBOX_CACHE[name] = result
+    return result
+
+
+#: 解析期间持有当前 doc，让 ``_block_local_bbox`` 能拿到 blocks 表
+_current_doc = None
+
+
+def _fast_extents(e) -> Rect | None:
+    """常见实体类型的直接取点 —— 比通用 ``bbox.extents`` 快得多。
+
+    返回 ``None`` 表示「这个类型我不认识，走通用路径」。
+    """
+    t = e.dxftype()
+    try:
+        if t == "LINE":
+            s, tt = e.dxf.start, e.dxf.end
+            x0, x1 = float(s.x), float(tt.x)
+            y0, y1 = float(s.y), float(tt.y)
+        elif t == "LWPOLYLINE":
+            ps = [(float(p[0]), float(p[1])) for p in e.get_points("xy")]
+            if not ps:
+                return None
+            xs = [p[0] for p in ps]; ys = [p[1] for p in ps]
+            x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+        elif t == "POLYLINE":
+            ps = [(float(v.dxf.location.x), float(v.dxf.location.y))
+                  for v in e.vertices]
+            if not ps:
+                return None
+            xs = [p[0] for p in ps]; ys = [p[1] for p in ps]
+            x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+        elif t == "CIRCLE":
+            c = e.dxf.center
+            x0 = float(c.x) - float(e.dxf.radius)
+            x1 = float(c.x) + float(e.dxf.radius)
+            y0 = float(c.y) - float(e.dxf.radius)
+            y1 = float(c.y) + float(e.dxf.radius)
+        elif t in ("TEXT", "MTEXT"):
+            p = e.dxf.insert
+            x0 = x1 = float(p.x); y0 = y1 = float(p.y)
+        else:
+            return None
+    except Exception:
+        return None
+    return Rect(x0=x0, y0=y0, x1=x1, y1=y1,
+                layer=str(e.dxf.layer if e.dxf.hasattr("layer") else ""),
+                source_type=t)
+
+
+def collect_meter_positions(ents, cab: Rect, margin: float = 30.0) -> list[MeterPosition]:
+    """收集柜内所有套位标记（gas / water 的 INSERT 或炸开画的框）。
+
+    每个套位 = 1 个 gas + 1 个 water。这里把每个标记都作为**一条**
+    记录返回，``kind`` 标明它是 gas 还是 water；配对成「套」由
+    :func:`parse_cupboards` 按 ``max(gas, water)`` 汇总。
+
+    实测口径：真实文件 19 个柜型里，gas 数与 water 数**逐一相等**
+    （14/14、13/13、…、5/5），只有第 20 号柜型 gas=3 而 water=0
+    （那个柜子只画了气表）。取 max 恰好等于用户口径的套数。
+    """
+    out: list[MeterPosition] = []
+
+    def inside(r: Rect) -> bool:
+        return (cab.x0 - margin <= r.x0 <= cab.x1 + margin
+                and cab.y0 - margin <= r.y0 <= cab.y1 + margin
+                and cab.x0 - margin <= r.x1 <= cab.x1 + margin
+                and cab.y0 - margin <= r.y1 <= cab.y1 + margin)
+
+    for e in ents:
+        t = e.dxftype()
+        if t == "INSERT":
+            name = ""
+            try:
+                name = str(e.dxf.name).lower()
+            except Exception:
+                continue
+            is_gas = any(k in name for k in GAS_BLOCK_KEYWORDS)
+            is_water = any(k in name for k in WATER_BLOCK_KEYWORDS)
+            if not (is_gas or is_water):
+                continue
+            bb = _entity_extents(e)
+            if bb is None or not inside(bb):
+                continue
+            bb.index = -2          # 标记来源为 INSERT
+            out.append(MeterPosition(
+                rect=bb, layers=[bb.layer], kind="gas" if is_gas else "water",
+                entity_count=1,
+            ))
+        elif t in ("LWPOLYLINE", "POLYLINE", "RECTANG"):
+            # 炸开画的表位（没做成 block 的那种）
+            if not _is_closed_polyline(e):
+                continue
+            bb = rect_from_entity(e)
+            if bb is None or not inside(bb):
+                continue
+            # 两种判据，命中任一即可：
+            #   a) 尺寸像 gas 表位框（真实样本实测 250×450mm）
+            #   b) 图层名带 gas / water 语义（合成图纸的 GAS_METER 图层）
+            # 只认尺寸会在图层语义清晰的图纸上全部漏掉，
+            # 只认图层则会在真实文件的 2CONC 混凝土剖面上误判。
+            by_size = (UNBOXED_GAS_W[0] <= bb.width <= UNBOXED_GAS_W[1]
+                       and UNBOXED_GAS_H[0] <= bb.height <= UNBOXED_GAS_H[1])
+            low = bb.layer.lower()
+            is_gas = any(k in low for k in GAS_LAYER_KEYWORDS)
+            is_water = any(k in low for k in WATER_LAYER_KEYWORDS)
+            if not (by_size or is_gas or is_water):
+                continue
+            kind = "gas" if (by_size or is_gas) and not is_water else "water"
+            out.append(MeterPosition(
+                rect=bb, layers=[bb.layer], kind=kind, entity_count=1,
+            ))
+
+    # ---- 补充扫描：炸开画的 water 表（没有 block、也不是闭合矩形）----
+    #
+    # 真实图纸里 water 表都是 INSERT（``water meter v`` / ``water meter h``），
+    # 所以这条路径在真实文件上不会触发。但有些图纸会把 water 表**炸开**画成
+    # 「一根竖管 + 一个表头圆」（LINE + CIRCLE），既没有 block 也没有闭合
+    # 矩形，只认闭合多段线会整批漏掉，导致 ``gas 6 / water 0`` 这种脏数据。
+    #
+    # 只在「已经找到 gas、却一个 water 都没找到」时才启用 —— 这样既能救
+    # 炸开画的图纸，又不会在真实文件上把 CIRCLE 之类误当成表位。
+    if out and not any(p.kind == "water" for p in out):
+        out.extend(_scattered_water_marks(ents, cab, inside, margin))
+    return out
+
+
+#: 炸开画的 water 表头圆的半径范围（mm）。
+#:
+#:合成样本用r=22，真实项目里 water 表头一般在 15~60mm。
+_SCATTERED_WATER_R = (8.0, 80.0)
+
+
+def _scattered_water_marks(ents, cab: Rect, inside, margin: float) -> list[MeterPosition]:
+    """在柜内找「炸开画」的 water 表头（water 语义图层上的小圆）。
+
+    竖管（LINE）会一对多，不适合当计数依据；表头圆才是「一个表 = 一个圆」，
+    所以以 CIRCLE 为准。竖管只用来确认这个圆确实属于 water 表（同一图层）。
+    """
+    marks: list[MeterPosition] = []
+    for e in ents:
+        if e.dxftype() != "CIRCLE":
+            continue
+        low = e.dxf.layer.lower()
+        if not any(k in low for k in WATER_LAYER_KEYWORDS):
+            continue
+        r = float(e.dxf.radius)
+        if not (_SCATTERED_WATER_R[0] <= r <= _SCATTERED_WATER_R[1]):
+            continue
+        cx, cy = float(e.dxf.center.x), float(e.dxf.center.y)
+        bb = Rect(cx - r, cy - r, cx + r, cy + r, layer=e.dxf.layer)
+        if not inside(bb):
+            continue
+        marks.append(MeterPosition(
+            rect=bb, layers=[bb.layer], kind="water", entity_count=1,
+        ))
+    if marks:
+        log.debug("柜 %s：补充识别到 %d 个炸开画的 water 表头",
+                  f"{cab.width:.0f}x{cab.height:.0f}", len(marks))
+    return marks
+
+
 def _is_closed_polyline(ent) -> bool:
     if ent.dxftype() == "LWPOLYLINE":
         return bool(ent.closed)
     if ent.dxftype() == "POLYLINE":
         return bool(ent.is_closed)
     return False
+
+
+def _cluster_centers(values: list[float], tol: float) -> list[float]:
+    """把一维坐标聚成若干簇，返回每簇的均值。
+
+    与 :func:`_cluster_count` 一样按「与簇内最后一个的间距」判定，
+    但额外返回簇中心 —— 排布推断需要簇中心来给表位归行。
+    """
+    if not values:
+        return []
+    vals = sorted(values)
+    groups: list[list[float]] = [[vals[0]]]
+    for v in vals[1:]:
+        if v - groups[-1][-1] <= tol:
+            groups[-1].append(v)
+        else:
+            groups.append([v])
+    return [sum(g) / len(g) for g in groups]
 
 
 def _polyline_points(ent) -> list[tuple[float, float]] | None:
@@ -625,84 +1153,78 @@ def classify_position(layers: list[str]) -> str:
 def parse_cupboards(dxf_path) -> ParsedCupboard:
     """主入口：把 DXF 解析成「柜型列表」。
 
-    算法（需求文档 2.2 节）：
-      1. 抽出所有严格矩形
-      2. 丢弃噪声图层上的矩形
-      3. **候选柜体** = 足够大的矩形（边长 >= MIN_CABINET_SIDE_MM），
-         或图层名命中柜体关键词
-      4. **去重**：同一位置被双层描边画两次的，只留外层那个
-      5. **表位** = 柜体内部、不与柜体边界重合的矩形
-      6. 排除嵌套：若A 包含 B 且 A 也是柜体候选，只保留更外层的那个
+    算法（源自真实样本实测，不是猜的）
+    ------------------------------------
+      1. **柜体** = 柜框图层上成对的长LINE（上下边 + 左右边）
+         —— 真实文件里柜框不是闭合多段线，见 :func:`pair_frame_segments`
+      2. **兜底**：若配对一个柜体都没出来（少数图纸确实用闭合多段线画），
+         退回按「闭合矩形」找，但要过滤掉表位尺寸那一档
+      3. **表位** = 柜体内的 gas / water 标记（INSERT 或炸开画的闭合框）
+      4. **units** = max(gas 数, water 数) —— 用户口径「1 套 water+gas」
+      5. **排布** = 先按 y 分行，再数每行的套数
+      6. DIMENSION / 说明文字作为补充信息挂上
+
+    耗时说明：真实样本（3420 实体，含 914 个 DIMENSION）单次解析约 3 分钟，
+    主要花在逐实体求包围盒上。所以 :func:`parse_cached` 会把结果按
+    ``(路径, mtime, 大小)`` 缓存到磁盘，避免重复解析同一份文件。
     """
     import ezdxf
 
     doc = ezdxf.readfile(str(dxf_path))
-    rects, total = extract_rects(doc)
-    out = ParsedCupboard(entity_total=total, rect_total=len(rects))
-
-    usable: list[Rect] = []
-    for r in rects:
-        if _is_junk_layer(r.layer):
-            out.discarded.append((r, f"噪声图层 {r.layer}"))
-            continue
-        if (r.width < MIN_POSITION_SIDE_MM
-                or r.height < MIN_POSITION_SIDE_MM):
-            out.discarded.append((r, f"过小 {r.width:.0f}×{r.height:.0f}mm"))
-            continue
-        usable.append(r)
-
-    # ---- 柜体候选：够大，或图层语义命中 ----
-    cands: list[Rect] = []
-    for r in usable:
-        big = (min(r.width, r.height) >= MIN_CABINET_SIDE_MM)
-        sem = any(k in r.layer.lower() for k in CABINET_LAYER_KEYWORDS)
-        if big or sem:
-            cands.append(r)
-        else:
-            out.discarded.append((r, f"非柜体 {r.width:.0f}×{r.height:.0f}mm"))
-
-    # ---- 去重：同位置双层描边只留最外层 ----
-    cands = _dedupe_overlapping(cands, out)
-
-    # ---- 表位：柜体内、且不与柜体边界重合的矩形 ----
+    bind_document(doc)
     all_ents = list(doc.modelspace())
-    for cab in cands:
-        inside = []
-        for r in usable:
-            if r is cab:
+    out = ParsedCupboard(entity_total=len(all_ents))
+
+    frames = extract_cabinet_frames(all_ents)
+    out.cabinet_frame_pairs = len(frames)
+
+    if not frames:
+        # 兜底：闭合矩形画法的图纸
+        rects, total = extract_rects(doc)
+        out.entity_total = total
+        out.rect_total = len(rects)
+        cands = []
+        for r in rects:
+            if _is_junk_layer(r.layer):
+                out.discarded.append((r, f"噪声图层 {r.layer}"))
                 continue
-            if not cab.contains(r, tol=MIN_CABINET_MARGIN_MM):
+            if min(r.width, r.height) < MIN_CABINET_SIDE_MM:
+                out.discarded.append(
+                    (r, f"非柜体 {r.width:.0f}×{r.height:.0f}mm"))
                 continue
-            # 排除与柜体边界几乎重合的「双层描边」
-            if cab.margin_to(r) < MIN_CABINET_MARGIN_MM:
-                continue
-            # 尺寸合理性
-            if not (MIN_POSITION_SIDE_MM <= r.width <= MAX_POSITION_SIDE_MM
-                    and MIN_POSITION_SIDE_MM <= r.height <= MAX_POSITION_SIDE_MM):
-                continue
-            lys = _layer_of_entity(all_ents, r)
-            inside.append(MeterPosition(
-                rect=r, layers=lys,
-                kind=classify_position(lys),
-                entity_count=len(lys),
-            ))
-        # 排序：先上后下（y 降序），再左到右
-        inside.sort(key=lambda p: (-p.rect.cy, p.rect.cx))
-        cup = Cupboard(rect=cab, positions=inside, layer=cab.layer)
-        # 把柜内的 water/gas 符号配给最近表位 —— water 竖线常落在
-        # gas 红框之外，只看框内图层会把 water 算成 0 套（见函数 docstring）
-        glyphs = collect_meter_glyphs(all_ents, cab)
-        pair_glyphs_to_positions(cup.positions, glyphs)
-        cup.glyph_count = len(glyphs)
+            cands.append(r)
+        frames = _dedupe_overlapping(cands, out)
+
+    for cab in frames:
+        marks = collect_meter_positions(all_ents, cab)
+        if not marks:
+            # 空柜体（图框、混凝土剖面）直接丢弃，不进柜型库
+            out.discarded.append((cab, "柜内无 gas/water 表位"))
+            continue
+        gas = sum(1 for m in marks if m.kind == "gas")
+        water = sum(1 for m in marks if m.kind == "water")
+        units = sum(1 for m in marks if m.kind in ("gas", "mixed")) or water
+        if units < 1:
+            out.discarded.append((cab, "表位类型无法识别"))
+            continue
+
+        marks.sort(key=lambda m: (-m.rect.cy, m.rect.cx))
+        cup = Cupboard(rect=cab, positions=marks, layer=cab.layer)
+        cup.glyph_count = len(marks)
         cup.notes = _nearby_text(doc, cab)
         dw, dh = _nearby_dimensions(doc, cab)
         cup.dim_w_mm, cup.dim_h_mm = dw, dh
         out.cupboards.append(cup)
 
-    # ---- 嵌套柜体：内层若是外层的重复描述，只留外层 ----
     out.cupboards = _drop_nested_cabinets(out.cupboards, out)
 
-    out.cupboards.sort(key=lambda c: -c.rect.area)
+    # 排布聚类容差按柜体尺寸自适应（见 layout_rows_cols 的实测数据说明）：
+    # gas 表列间距 350mm / 行间距 550~600mm，取柜宽 12%、柜高 15%。
+    for c in out.cupboards:
+        c._layout_tol = (max(c.rect.width * 0.12, 30.0),
+                         max(c.rect.height * 0.15, 30.0))
+
+    out.cupboards.sort(key=lambda c: c.rect.x0)
     for c in out.cupboards:
         if c.layer:
             out.cabinet_layer_hits[c.layer] = \

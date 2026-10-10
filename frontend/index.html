@@ -446,6 +446,7 @@ const I18N = {
     'lib.rendering': '正在渲染柜型图纸…', 'lib.rendered': '已渲染',
     'lib.of': '/ 识别到', 'lib.picked': '已勾选',
     'lib.selall': '全选', 'lib.selnone': '全不选', 'lib.nosel': '没有勾选任何柜型',
+    'lib.units': '套', 'lib.rename': '修改名称',
     'lib.del': '删除该柜型', 'lib.deldone': '已删除', 'lib.delfail': '删除失败',
     'lib.mginv': '反向选择', 'lib.clear': '清空解析结果',
     'lib.empty': '柜型库是空的', 'lib.nodwg': '没有从 DWG 解析进来的柜型',
@@ -511,6 +512,7 @@ const I18N = {
     'lib.rendering': 'Rendering cupboard drawings…', 'lib.rendered': 'Rendered',
     'lib.of': '/ detected', 'lib.picked': 'picked',
     'lib.selall': 'Select all', 'lib.selnone': 'Clear', 'lib.nosel': 'No cupboard selected',
+    'lib.units': 'units', 'lib.rename': 'Rename',
     'lib.del': 'Delete this cupboard', 'lib.deldone': 'Deleted', 'lib.delfail': 'Delete failed',
     'lib.mginv': 'Select the rest', 'lib.clear': 'Clear parsed',
     'lib.empty': 'Library is empty', 'lib.nodwg': 'No DWG-derived cupboards',
@@ -586,8 +588,11 @@ const S = {          // 全局状态
   renders: [],       // 柜型block → JPG 的渲染结果
   storedName: null,   // DWG 上传后的文件名（渲染/入库都用它）
   selBlocks: [],      // 预览里勾选的柜型block —— 只有这些会入库
-  detected: null,     // 柜型语义判定摘要（识别到几个/排除几个）
-  rejected: [],       // 被排除的非柜型 block（含排除理由）
+  detected: null,     // 柜型识别摘要（识别到几个/排除几个）
+  rejected: [],       // 被排除的非柜体区域（含排除理由）
+  cupboards: [],      // 柜型几何明细（套数/排布/尺寸）—— 按柜体识别时才有
+  diag: null,         // 解析诊断（实体数/柜框配对数/柜体图层命中）
+  renames: {},// DWG 节点显示名改写 {原名: 新名}
 };
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -785,28 +790,117 @@ function renderTree() {
 }
 
 /** 柜型库 tab 的树：只列柜型分组 */
+/** 柜型库左树：**DWG 文件名（可改名） → N Units**
+ *
+ *  用户口径（明确要求）：
+ *    · 根节点 = DWG 文件名，可以改
+ *    · 子节点 = 「5 Units」「6 Units」…
+ *    · 点子节点 → 右侧平铺该套数下的**全部**摆法（不去重）
+ *
+ *  为什么不去重
+ *  ------------
+ *  真实样本实测：同一张图里 13 Units 的 2115×2350 那个柜出现了 3 次
+ *  （楼上有三个楼层各画一遍）。用户明确要求「不去重，每次出现都算
+ *  一种」—— 因为「这张图上一共画了几个柜」本身就是有用信息。
+ *  所以分组只看 units 数，不看尺寸；同组内尺寸不同自然就分开了。
+ *
+ *  差异判定也按用户要求：**严格区分尺寸**，1315×2250 与 1315×2300
+ *  是两种摆法（差 50mm）。
+ */
+function libraryGroups() {
+  // 先按来源图纸分组（一个库里可能有多份 DWG 都导过柜型）
+  const byFile = new Map();
+  for (const v of S.variants) {
+    const fname = v.source_name || v.dwg_name || t('tree.library');
+    if (!byFile.has(fname)) byFile.set(fname, []);
+    byFile.get(fname).push(v);
+  }
+  const files = [];
+  for (const [fname, items] of byFile) {
+    const byUnits = new Map();
+    for (const v of items) {
+      const n = Number(v.positions || 0);
+      if (!byUnits.has(n)) byUnits.set(n, []);
+      byUnits.get(n).push(v);
+    }
+    // 套数从少到多排：5 Units 在 6 Units 前面，符合直觉
+    const units = [...byUnits.entries()]
+      .map(([n, list]) => ({ n, list, key: `${fname}#${n}` }))
+      .sort((a, b) => a.n - b.n);
+    files.push({
+      name: fname,
+      fileKey: fname,
+      count: items.length,
+      units,
+      // 该文件总共多少套
+      unitsTotal: items.reduce((a, v) => a + Number(v.positions || 0), 0),
+    });
+  }
+  files.sort((a, b) => a.name.localeCompare(b.name));
+  return files;
+}
+
 function renderTreeLibrary() {
+  const groups = libraryGroups();
   let h = `<div class="sec">${t('tree.library')}</div>`;
-  const groups = variantGroups();
   if (!groups.length) {
     h += `<div class="node lv1" style="color:var(--dim)">${t('dwg.empty')}</div>`;
+    $('#tree').innerHTML = h;
+    return;
   }
-  for (const g of groups) {
-    const sel = S.treeSel === 'vg:' + g.key ? ' on' : '';
-    const open = S.treeSel === 'vg:' + g.key;
-    h += `<div class="node lv1${sel}" data-vg="${esc(g.key)}">
-      <span class="tw">▸</span>
-      <span class="ico">⊞</span><span class="nm">${esc(g.title)}</span>
-      <span class="ct">${g.count} ${t('mtx.kind')}</span></div>`;
-    if (open) {
-      for (const v of S.variants.filter(x => (x.bucket || 'p' + x.positions) === g.key)) {
-        h += `<div class="node lv2"><span class="nm mono">${esc(v.code)}</span>
-          <span class="ct">${v.positions}${t('dwg.pos')}</span></div>`;
+  for (const f of groups) {
+    const fsel = S.treeSel === 'f:' + f.fileKey ? ' on' : '';
+    const fopen = S.treeSel === 'f:' + f.fileKey;
+    h += `<div class="node lv1${fsel}" data-lf="${esc(f.fileKey)}">
+      <span class="tw">▸</span><span class="ico">⊞</span>
+      <span class="nm" title="${esc(f.name)}">${esc(f.name)}</span>
+      <span class="ct">${f.count}</span>
+      <button class="renam" data-rename="${esc(f.fileKey)}"
+        title="${t('lib.rename')}">✎</button></div>`;
+    if (fopen) {
+      for (const u of f.units) {
+        const on = S.treeSel === u.key ? ' on' : '';
+        h += `<div class="node lv2${on}" data-lg="${esc(u.key)}">
+          <span class="nm">${u.n} ${t('lib.units')}</span>
+          <span class="ct">${u.list.length}</span></div>`;
       }
     }
   }
   $('#tree').innerHTML = h;
   bindTree();
+  bindTreeRename();
+}
+
+/** 重命名 DWG 节点 —— 用户要求「根目录的名字就是 dwg 文件的名字（可以修改）」。
+ *  改名只改显示名，**不动原文件**：柜型图已经渲成 JPG 存库了，
+ *  原DWG 改了名反而对不上。名字存在 sessionStorage，刷新后仍在。 */
+function bindTreeRename() {
+  $$('#tree [data-rename]').forEach(b => {
+    b.onclick = ev => {
+      ev.stopPropagation();
+      const key = b.dataset.rename;
+      const cur = (S.renames || {})[key] || key;
+      const name = prompt(
+        LANGNOW === 'zh' ? '修改显示名称：' : 'Rename display name:', cur);
+      if (name === null) return;
+      const clean = String(name).trim();
+      S.renames = S.renames || {};
+      if (!clean || clean === key) delete S.renames[key];
+      else S.renames[key] = clean;
+      try {
+        sessionStorage.setItem('cupRename', JSON.stringify(S.renames));
+      } catch (e) { /* 隐私模式下写不了，忽略 */ }
+      renderTree();
+      // 正在看的那个分组要刷新标题
+      if (S.treeSel === 'f:' + key) showUnitsGroup(key + '#0', true);
+      else if (S.treeSel?.startsWith(key + '#')) showUnitsGroup(S.treeSel, true);
+    };
+  });
+}
+
+/** 取显示名（应用过重命名的优先） */
+function dispName(fname) {
+  return (S.renames || {})[fname] || fname;
 }
 
 function bindTree() {
@@ -820,6 +914,22 @@ function bindTree() {
       return;
     }
     if (n.dataset.b) { S.curBuilding = +n.dataset.b; S.treeSel = null; renderTree(); }
+    else if (n.dataset.lf) {
+      // 点根节点：展开/收起，默认展开后自动选中第一个 Units
+      const key = n.dataset.lf;
+      if (S.treeSel === 'f:' + key) { S.treeSel = null; renderTree(); return; }
+      S.treeSel = 'f:' + key;
+      renderTree();
+      const g = libraryGroups().find(f => f.fileKey === key);
+      if (g?.units.length) showUnitsGroup(g.units[0].key);
+      return;
+    }
+    else if (n.dataset.lg) {
+      const k = n.dataset.lg;
+      S.treeSel = (S.treeSel === k) ? null : k;
+      renderTree();
+      if (S.treeSel) showUnitsGroup(k);
+    }
     else if (n.dataset.sel) {
       const k = n.dataset.sel;
       if (k.startsWith('d')) {
@@ -1004,6 +1114,79 @@ function filterFloor(code) { S.floorFilter = S.floorFilter === code ? null : cod
 
 /** 柜型库详情：柜型卡片带缩略图，点卡片看中栏大图。
  *  需求：「将里面的不同的柜型都导出成jpg 格式，放在 library 里，可以点击查看」 */
+/** 右侧：显示某个「N Units」下的**全部**摆法
+ *
+ *  key 形如 ``<dwgFileName>#<units>``。不去重（用户明确要求），
+ *  所以同套数下有几个柜就平铺几张图，每张标注尺寸与排布，
+ *  尺寸不同就是不同的摆法（1315×2250 与 1315×2300 算两种）。
+ */
+function showUnitsGroup(key, keepScroll) {
+  const hash = String(key).lastIndexOf('#');
+  const fname = hash >= 0 ? key.slice(0, hash) : key;
+  const n = hash >= 0 ? Number(key.slice(hash + 1)) : 0;
+  const items = S.variants.filter(v => {
+    const vf = v.source_name || v.dwg_name || t('tree.library');
+    return vf === fname && Number(v.positions || 0) === n;
+  });
+  const withImg = items.filter(v => v.image_url);
+  const scroll0 = keepScroll ? ($('#rpane')?.scrollTop || 0) : 0;
+
+  $('#mfn').textContent = dispName(fname) + ' · ' + n + ' ' + t('lib.units');
+  $('#pagelist').innerHTML = '';
+  resetViewer();
+  $('#bpage').style.display = withImg.length ? '' : 'none';
+  if (withImg.length) $('#bpage').textContent = `${withImg.length} ${t('lib.img')}`;
+  $('#bparse').style.display = 'none';
+
+  if (withImg.length) showCupImage(withImg[0].image_url);
+  else $('#viewer').innerHTML = `<div class="ph"><div class="big">⊞</div>
+    <div>${t('lib.noimg')}</div></div>`;
+
+  let h = `<div class="sec" style="padding-left:0">
+      ${dispName(fname)} · <b>${n} ${t('lib.units')}</b> ·
+      ${LANGNOW === 'zh' ? '共' : ''} ${items.length}
+      ${LANGNOW === 'zh' ? '种摆法' : (items.length === 1 ? 'layout' : 'layouts')}
+    </div>`;
+  if (items.length > 1) {
+    h += `<div class="alert ok" style="margin-bottom:10px">
+      ${LANGNOW === 'zh'
+        ? `同样是 ${n} 套，柜子的尺寸和 meter 摆放方式可以不同 —— 下面 ${items.length} 种都是这个套数的合法柜型。`
+        : `All ${items.length} below hold ${n} units; only the size and meter layout differ.`}
+    </div>`;
+  }
+  h += '<div class="cupgrid">';
+  for (const v of items) {
+    const src = v.size_source || 'estimated';
+    const srcTag = src === 'measured' ? `<span class="tag ok">${t('lib.measured')}</span>`
+      : src === 'manual' ? `<span class="tag">${t('lib.manual')}</span>`
+      : `<span class="tag warn">${t('lib.estimated')}</span>`;
+    h += `<div class="cupwrap">
+    <div class="cupcard${v.image_url ? ' has-img' : ''}" data-img="${esc(v.image_url || '')}">
+      <div class="thumb">${v.image_url
+        ? `<img loading="lazy" src="${esc(v.image_url)}" alt="${esc(v.code)}">`
+        : `<div class="noph">${t('lib.noimg')}</div>`}</div>
+      <div class="meta">
+        <div class="code mono">${esc(v.code)}</div>
+        <div class="dim">${n} ${t('lib.units')} · ${esc(v.grid || '-')}</div>
+        <div class="dim">${v.w ?? '—'} × ${v.h ?? '—'} × ${v.d ?? '—'} mm ${srcTag}</div>
+        ${v.description ? `<div class="desc">${esc(v.description)}</div>` : ''}
+      </div></div>
+      <button class="cupdel" data-del="${v.id}" data-code="${esc(v.code)}"
+        title="${t('lib.del')}">×</button></div>`;
+  }
+  h += '</div>';
+  $('#rpane').innerHTML = h;
+  if (scroll0) $('#rpane').scrollTop = scroll0;
+
+  $$('#rpane .cupcard').forEach(x => x.onclick = () => {
+    const u = x.dataset.img;
+    if (!u) { toast(t('lib.noclue'), 'err'); return; }
+    showCupImage(u);
+    $$('#rpane .cupcard').forEach(y => y.classList.toggle('on', y === x));
+  });
+  bindCupDelete();
+}
+
 function showVariantGroup(key) {
   const items = S.variants.filter(v => (v.bucket || 'p' + v.positions) === key);
   const withImg = items.filter(v => v.image_url);
@@ -1520,11 +1703,11 @@ function paintRenders() {
   const sel = new Set(S.selBlocks);
   const det = S.detected || {};
   let h = `<div class="sec" style="padding-left:0">${t('lib.title')} · ${rs.length}/${t('lib.picked')}</div>`;
-  // 分类判定摘要 —— 解释「141 个里为什么只有 6 个是柜型」
-  if (det.rejected) {
+  // 识别摘要 —— 解释「一整张图纸里为什么只切出这几个柜型」
+  if (det.rejected !== undefined) {
     h += `<div class="alert ok">
       ${LANGNOW==='zh'?'已识别柜型':'Cupboards detected'}: <b>${det.detected ?? rs.length}</b> ·
-      ${LANGNOW==='zh'?'已排除非柜型 block':'non-cupboard blocks filtered'}: <b>${det.rejected}</b>
+      ${LANGNOW==='zh'?'已排除非柜体区域':'non-cupboard regions filtered'}: <b>${det.rejected}</b>
       ${det.sample ? `<br/><span style="font-size:12px;opacity:.85">${esc(det.sample)}</span>` : ''}
     </div>`;
   }
@@ -1533,24 +1716,32 @@ function paintRenders() {
       <span class="muted" id="selcnt">${sel.size} / ${rs.length}</span>
       <button class="btn" id="selnone">${t('lib.selnone')}</button>
     </div><div class="cupgrid" style="padding-left:0">`;
+  // 柜型尺寸/套数明细 —— 后端返回 cupboards 时按柜型展示，
+  // 没有就退回旧的「实体数 × 尺寸」写法。
+  const cupByCode = new Map((S.cupboards || []).map(c => [c.code, c]));
   for (const r of rs) {
     const on = sel.has(r.block_name);
+    const c = cupByCode.get(r.block_name);
+    const meta = c
+      ? `<div class="dim">${LANGNOW==='zh'
+          ? `${c.positions_total} ${t('lib.units')}${c.grid_aspect ? ' · ' + c.grid_aspect : ''}`
+          : `${c.positions_total} units${c.grid_aspect ? ' · ' + c.grid_aspect : ''}`}
+          ${c.gas_count}/${c.water_count} · ${c.w} × ${c.h} mm</div>`
+      : `<div class="dim">${r.entity_count} ${t('dwg.entity')} · ${r.width_mm ?? '—'} × ${r.height_mm ?? '—'} mm</div>`;
     h += `<div class="cupcard has-img${on ? ' on' : ''}" data-sel="${esc(r.block_name)}">
         <div class="thumb"><img loading="lazy" src="/api/thumbs/${esc(r.image_name)}"
              alt="${esc(r.block_name)}"><span class="tick">${on ? '✓' : ''}</span></div>
-        <div class="meta"><div class="code mono">${esc(r.block_name)}</div>
-          <div class="dim">${r.entity_count} ${t('dwg.entity')} · ${r.width_mm ?? '—'} × ${r.height_mm ?? '—'} mm</div>
-        </div></div>`;
+        <div class="meta"><div class="code mono">${esc(r.block_name)}</div>${meta}</div></div>`;
   }
   h += '</div>';
 
-  // 被排除的非柜型 block —— 折叠起来，让用户能核对而不是被噪声淹没
+  // 被排除的非柜体区域 —— 折叠起来，让用户能核对而不是被噪声淹没
   if ((S.rejected || []).length) {
     h += `<details class="rejd"><summary>${LANGNOW==='zh'
-      ? `已排除 ${S.rejected.length} 个非柜型 block（点击查看）`
-      : `${S.rejected.length} non-cupboard blocks filtered (click)`}</summary>`
+      ? `已排除 ${S.rejected.length} 个非柜体区域（点击查看）`
+      : `${S.rejected.length} non-cupboard regions filtered (click)`}</summary>`
       + `<div class="rejlist">${S.rejected.slice(0, 80).map(x =>
-          `<div><code>${esc(x.block_name)}</code><span>${esc(x.reason || '')}</span></div>`
+          `<div><code>${x.w ?? ''}${x.h ? '×' + x.h + 'mm' : ''}</code><span>${esc(x.reason || '')}</span></div>`
         ).join('')}</div></details>`;
   }
   box.innerHTML = h;
@@ -1611,12 +1802,29 @@ async function renderCupboards(storedName) {
     });
     S.renders = r.items || [];
     S.storedName = storedName;
-    // 分类判定明细 —— 用于解释「141 个里只有 6 个是柜型」
-    S.detected = { detected: r.detected, rejected: r.rejected,
-                   sample: (r.rejected_items || []).slice(0, 3).map(
-                     x => `${x.block_name} —— ${x.reason}`).join(' / ') };
-    S.rejected = r.rejected_items || [];
-    $('#pm').textContent = `${t('lib.rendered')} ${r.rendered}/${t('lib.of')} ${r.detected ?? r.rendered}`;
+    // 柜型识别明细 —— 后端已从「block 名打分」改成「几何分解」，
+    // 响应字段也跟着换了：
+    //   detected / rejected / rejected_items （旧，按 block 打分）
+    // → cupboards / discarded / diag（按柜体几何）
+    // 这里做一次兼容，两个字段名都收，老后端也不会把界面搞空。
+    const cupboards = r.cupboards || null;
+    const discarded = r.discarded || r.rejected_items || [];
+    S.detected = cupboards
+      ? { detected: (cupboards).length, rejected: (discarded).length,
+          sample: discarded.slice(0, 3).map(
+            x => `${x.w}×${x.h}mm —— ${x.reason}`).join(' / ') }
+      : { detected: r.detected, rejected: r.rejected,
+          sample: (r.rejected_items || []).slice(0, 3).map(
+            x => `${x.block_name} —— ${x.reason}`).join(' / ') };
+    S.rejected = discarded;
+    S.cupboards = cupboards || [];
+    S.diag = r.diag || null;
+    const totalUnits = S.cupboards.reduce(
+      (a, c) => a + (c.positions_total || 0), 0);
+    $('#pm').textContent = cupboards
+      ? `${t('lib.rendered')} ${r.rendered}/${t('lib.of')} ${S.cupboards.length}`
+        + (totalUnits ? ` · ${LANGNOW==='zh'?'总套数':'units'} ${totalUnits}` : '')
+      : `${t('lib.rendered')} ${r.rendered}/${t('lib.of')} ${r.detected ?? r.rendered}`;
     paintRenders();
     return S.renders;
   } catch (e) {
@@ -1628,18 +1836,39 @@ async function renderCupboards(storedName) {
 
 /** 把渲染结果整成入库要提交的 variants。
  *  以block 为单位生成变体：尺寸全部用 DWG 实测值，不再填占位数字。 */
+/** 把渲染结果整成入库要提交的 variants。
+ *
+ *  套数与排布必须取后端解析出的**真实几何**（`S.cupboards`），
+ *  不能在这里估。
+ *
+ *  旧实现按 `entity_count / 8` 反推行数、`rows` 恒写 1，
+ *  于是入库的柜型全是「1 行 N 列」，套数也是空的 ——
+ *  左树没法按「5 Units / 6 Units」分组，整条链路就断了。
+ */
 function dwgVariantsFromRenders(renders) {
-  return (renders || []).filter(r => r.ok).map(r => ({
-    code: r.block_name,
-    block_name: r.block_name,
-    rows: 1,
-    cols: Math.max(1, Math.round(
-      (r.entity_count || 1) / 8)) || 1,
-    w: r.width_mm ?? null,
-    h: r.height_mm ?? null,
-    meter_combo: r.block_name,
-    description: (r.texts || []).slice(0, 4).join(' / ') || null,
-  }));
+  // code ->柜体几何明细
+  const geo = new Map((S.cupboards || []).map(c => [c.code, c]));
+  return (renders || []).filter(r => r.ok).map(r => {
+    const c = geo.get(r.block_name);
+    return {
+      code: r.block_name,
+      block_name: r.block_name,
+      // 套数：优先后端解析值；退化时从 code（CP-6p-09）里解析。
+      // 注意 `??` 与 `||` 不能直接混用，Number(...) 外面必须加括号。
+      positions: c?.positions_total
+        ?? (Number((String(r.block_name).match(/CP-(\d+)p/) || [])[1]) || null),
+      rows: c?.layout_rows ?? 1,
+      cols: c?.layout_cols ?? 1,
+      grid: c?.grid_aspect || null,
+      gas_count: c?.gas_count ?? null,
+      water_count: c?.water_count ?? null,
+      w: c?.w ?? r.width_mm ?? null,
+      h: c?.h ?? r.height_mm ?? null,
+      meter_combo: r.block_name,
+      description: (c?.notes?.length ? c.notes.slice(0, 4).join(' / ')
+        : (r.texts || []).slice(0, 4).join(' / ')) || null,
+    };
+  });
 }
 
 async function commitDwg() {
@@ -1659,6 +1888,9 @@ async function commitDwg() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         source_file: S.storedName || (S.dwgRes && S.dwgRes.source_file) || '',
+        // 根节点显示名 = DWG 文件名（去掉路径和扩展名）
+        source_name: (S.storedName || S.dwgRes?.source_file || 'DWG')
+          .split('/').pop().replace(/\.dwg$/i, '').replace(/\.dxf$/i, ''),
         cupboard_name: '柜型库（' + (S.storedName || 'DWG') + '）',
         variants,
         renders,
