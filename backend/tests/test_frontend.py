@@ -117,8 +117,13 @@ class TestPreviewPerformance:
         assert re.search(r"/api/page/\$\{S\.jobId\}/", script), (
             "未使用 /api/page/{job}/{n} 单页渲染接口"
         )
-        fn = re.search(r"function gotoPage\(.*?\n\}", script, re.S).group(0)
-        assert 'id="pgimg"' in fn, "应渲染 <img id=\"pgimg\"> 而不是 iframe"
+        # 连续滚动模式下每页是独立 <img>，由 renderPages 铺满
+        fn = re.search(r"function renderPages\(.*?\n(?=/\*\*|function )", script, re.S)
+        assert fn, "renderPages 未定义"
+        assert 'class="vpage"' in fn.group(0), "应按 .vpage 逐页占位渲染"
+        assert "<iframe" not in script, (
+            "任何位置都不该再用 iframe 加载整份 PDF —— 大图纸会卡死浏览器"
+        )
 
     def test_no_stale_pdf_url(self, script: str):
         """旧的 S.pdfUrl 若残留，翻页会退回 iframe 路径。"""
@@ -127,15 +132,33 @@ class TestPreviewPerformance:
         )
 
     def test_prefetches_neighbours(self, script: str):
-        """邻页预取 —— 连续翻页才不会有白屏。"""
-        fn = re.search(r"function gotoPage\(.*?\n\}", script, re.S).group(0)
-        assert "new Image()" in fn, "缺少邻页预取"
+        """提前取邻近页 —— 连续滚动下来不能有白屏。
 
-    def test_scrolls_to_top_on_page_change(self, script: str):
-        """翻页后必须滚回顶部，否则停在上一页偏移像是没换页。"""
+        实现从「new Image() 手动预取相邻页」换成了
+        IntersectionObserver + rootMargin 提前 600px 触发，
+        效果相同（甚至更好：滚多快都能提前加载），但不会一次性
+        把35 页全打出去。
+        """
+        fn = re.search(r"function observePages\(.*?\n(?=/\*\*|function )", script, re.S)
+        assert fn, "observePages 未定义"
+        body = fn.group(0)
+        assert "IntersectionObserver" in body, "缺少 IntersectionObserver 懒加载"
+        assert "rootMargin" in body, "rootMargin 未设置，取图太晚会露白"
+        assert re.search(r"rootMargin:\s*'\s*\d+px", body), (
+            "rootMargin 必须给出像素提前量，否则快速滚动会看到骨架屏"
+        )
+
+    def test_scrolls_to_target_page(self, script: str):
+        """跳页后必须滚到目标页位置，否则停在原偏移像是没换页。
+
+        连续滚动下不再重置 scrollTop=0，而是 scrollTo 到该页的
+        offsetTop。
+        """
         fn = re.search(r"function gotoPage\(.*?\n\}", script, re.S).group(0)
-        assert re.search(r"\$\('#viewer'\)\.scrollTop\s*=\s*0", fn), \
-            "翻页后未重置滚动位置"
+        assert "scrollTo" in fn, "跳页未滚动到目标页"
+        assert re.search(r"\.vpage\[data-p=", fn), (
+            "跳页应定位到 .vpage[data-p=目标页] 节点"
+        )
 
     def test_zoom_control_exists(self, script: str, html: str):
         assert re.search(r"function setZoom\(", script), "缺少 setZoom"
@@ -654,6 +677,10 @@ class TestLightTheme:
                 r"background:\s*#2563eb", body
             ):
                 continue
+            # .pno 是连续滚动时每页右下角的页码角标，深色半透明底
+            # (#0f172aa8 ≈ 65% 不透明度) 压在任何图纸上都可读。
+            if name == "pno" and re.search(r"background:\s*#0f172a[0-9a-f]{2}", body):
+                continue
             assert name in {"spin"}, (
                 f"类 .{name} 用 #fff 作文字色但背景是浅色，可能看不清"
             )
@@ -739,3 +766,181 @@ class TestCupboardSelectionUI:
         body = fn.group(0)
         assert "rejected_items" in body, "未收集被排除的 block，前端无法解释"
         assert "detected" in body, "未记录识别统计"
+
+
+# ----------------------------------------------------------------连续滚动 PDF
+
+
+class TestContinuousPdfScroll:
+    """用户诉求：「按顺序显示全部内容，不要翻页。还是可以鼠标上下快速翻页」。
+
+    实现方式：全部页面按 A4 比例一次性排开成占位块，图片由
+    IntersectionObserver 懒加载；裸滚轮 = 连续滚动，
+    Ctrl/⌘+滚轮 与翻页键 = 整页跳。
+    """
+
+    def test_a4_ratio_defined(self, script: str):
+        """页面占位高度必须按 A4 比例预留，否则图片到位时会跳版。"""
+        m = re.search(r"const A4_RATIO\s*=\s*([\d.]+)", script)
+        assert m, "缺少 A4_RATIO 常量"
+        assert abs(float(m.group(1)) - 1.414) < 0.01, \
+            f"A4 比例应为 1.414（高/宽），实际 {m.group(1)}"
+
+    def test_render_pages_lays_out_all(self, script: str):
+        fn = re.search(r"function renderPages\(.*?\n(?=/\*\*|function )", script, re.S)
+        assert fn, "renderPages 未定义"
+        body = fn.group(0)
+        # 一次性铺满所有页：必须是 map 出全部页，而不是只渲染当前页
+        assert "S.pages.map" in body, "未把全部页面排开（应一次铺满，不要翻页）"
+        assert "vpage" in body, "缺 .vpage 占位块"
+        # 占位块高度按比例算
+        assert "A4_RATIO" in body, "占位高度未按 A4 比例计算"
+
+    def test_lazy_loading_not_eager(self, script: str):
+        """必须懒加载 —— 35 页一次性取图会把浏览器拖死。"""
+        fn = re.search(r"function renderPages\(.*?\n(?=/\*\*|function )", script, re.S)
+        body = fn.group(0)
+        assert 'data-src=' in body, "图片应先用 data-src 占位"
+        assert not re.search(r"<img[^>]*\ssrc=", body), (
+            "renderPages 里出现直接 src= —— 会一次性加载全部页面"
+        )
+        obs = re.search(r"function observePages\(.*?\n(?=/\*\*|function )", script, re.S)
+        assert obs and "IntersectionObserver" in obs.group(0), \
+            "缺少 IntersectionObserver 懒加载"
+
+    def test_scroll_tracks_current_page(self, script: str):
+        fn = re.search(r"function syncCurFromScroll\(.*?\n(?=/\*\*|function )", script, re.S)
+        assert fn, "syncCurFromScroll 未定义"
+        body = fn.group(0)
+        assert "scrollTop" in body, "未按滚动位置推算当前页"
+        assert "curPage" in body, "未同步 S.curPage"
+
+    def test_sync_guards_empty_dom(self, script: str):
+        """预览 DOM 被换掉时不能把当前页写坏。
+
+        实测踩坑：renderHub() 开头 resetViewer() 归零 scrollTop，
+        scroll 事件在下一帧才跑，那时 .vpage 已被占位符替换掉，
+        遍历不到节点 → cur 恒为 0 并写坏 S.curPage，
+        从柜型库切回工作台就再也回不到离开前那一页。
+        """
+        body = re.search(r"function syncCurFromScroll\(.*?\n(?=/\*\*|function )",
+                         script, re.S).group(0)
+        nodes = re.search(r"(?:const|let)\s+(\w+)\s*=\s*\$\$\('#viewer \.vpage'\)", body)
+        assert nodes, "未先取出 .vpage 节点列表"
+        name = nodes.group(1)
+        guard = re.search(rf"if\s*\(!{name}\.length\)\s*\{{", body)
+        assert guard, "未对「节点为空」做保护，会把 S.curPage 写坏"
+        # 保护分支里必须在return 之前就return，且不能碰 S.curPage 赋值
+        early = body[guard.start():guard.start() + 400]
+        ret = early.find("return")
+        assert ret != -1, "保护分支未return，应跳过当前页计算"
+        assign = early.find("S.curPage =")
+        assert assign == -1 or assign > ret, "保护分支里仍写了 S.curPage"
+
+    def test_bare_wheel_not_hijacked(self, script: str):
+        """裸滚轮必须保持原生连续滚动 —— 细看图纸时不能一滚就是一页。"""
+        fn = re.search(r"function bindScrollNav\(.*?\n(?=/\*\*|function |function )",
+                       script, re.S)
+        assert fn, "bindScrollNav 未定义"
+        body = fn.group(0)
+        wheel = re.search(r"addEventListener\('wheel'.*?\}\);", body, re.S)
+        assert wheel, "未绑定 wheel"
+        w = wheel.group(0)
+        assert "ctrlKey" in w and "metaKey" in w, \
+            "整页跳应限定在 Ctrl/⌘ + 滚轮"
+        assert "return" in w.split("preventDefault")[0], \
+            "无修饰键时必须提前 return，不能拦裸滚轮"
+        assert "passive: false" in w, \
+            "wheel 拦截需要 passive:false，否则 preventDefault 无效"
+
+    def test_scroll_listener_is_bound_once(self, script: str):
+        """监听器只绑一次 —— 每次打开 PDF 都重复绑会成倍触发。"""
+        fn = re.search(r"function bindScrollNav\(.*?\n(?=/\*\*|function )", script, re.S)
+        assert fn, "bindScrollNav 未定义"
+        assert "_scrollBound" in fn.group(0), "缺防重复绑定标记"
+        assert re.search(r"addEventListener\('scroll'.*?passive:\s*true",
+                         fn.group(0), re.S), \
+            "scroll 监听应为 passive，避免拖动时卡顿"
+
+    def test_zoom_reflows_all_pages(self, script: str):
+        fn = re.search(r"function setZoom\(.*?\n\}", script, re.S).group(0)
+        assert "reflowPages" in fn, "缩放未触发全部页面重排"
+        reflow = re.search(r"function reflowPages\(.*?\n(?=/\*\*|function )",
+                           script, re.S).group(0)
+        assert "scrollTop" in reflow, "重排后未保持滚动位置，会跳回开头"
+
+    def test_reset_viewer_clears_scroll_mode(self, script: str):
+        """切到柜型库/图纸 tab 时必须清掉 scrollmode。
+
+        resetViewer() 必须放在 renderHub() 开头统一调用——
+        放进if(isCup) 分支会漏掉 building tab，那里同样会残留
+        工作台的连续滚动样式。
+        """
+        fn = re.search(r"function resetViewer\(.*?\n\}", script, re.S)
+        assert fn, "resetViewer 未定义"
+        assert "scrollmode" in fn.group(0), "未清除 .scrollmode"
+        for fnm in ["showVariantGroup", "renderHub"]:
+            body = re.search(rf"function {fnm}\(.*?\n(?=\w|\Z)", script, re.S)
+            assert body and "resetViewer()" in body.group(0), \
+                f"{fnm} 未调用 resetViewer()，切tab 后滚动样式会残留"
+        hub = re.search(r"function renderHub\(.*?\n(?=\s*let h)", script, re.S)
+        assert hub, "renderHub 未找到"
+        head = hub.group(0)
+        # 注意要比的是 if(isCup) 判断，不是 const isCup 声明（声明必然在前）
+        ifpos = head.find("if (isCup)")
+        assert ifpos != -1, "renderHub 未按 isCup 分流"
+        assert head.index("resetViewer()") < ifpos, \
+            "resetViewer() 必须在 if(isCup) 之前无条件调用，否则 building tab 漏复位"
+
+    def test_returning_to_work_rebuilds_preview(self, script: str):
+        """从柜型库切回工作台必须重建预览。
+
+        renderHub() 会把 #viewer 的 DOM 换成占位提示，.vpage 全没了。
+        此时若只调 syncCurFromScroll()，遍历不到节点 → 当前页恒为 0
+        且页面一片空白。必须先检测 DOM 缺失，再按 S.pages 重建。
+        """
+        fn = re.search(r"function gotoView\(.*?\n(?=\$\$)", script, re.S)
+        assert fn, "gotoView 未找到"
+        body = fn.group(0)
+        assert "querySelector('#viewer .vpage')" in body, \
+            "切回工作台未检测预览 DOM 是否还在"
+        assert "renderPages(" in body, "DOM 缺失时未按 S.pages 重建预览"
+        # gotoPage 要支持 behavior='auto'，重建后瞬时还原而非二次平滑滚动
+        gp = re.search(r"function gotoPage\(.*?\n\}", script, re.S).group(0)
+        assert "behavior" in gp, "gotoPage 不支持指定滚动方式"
+
+    def test_page_buttons_use_page_step(self, script: str):
+        """翻页按钮应走 pageStep（滚动定位），不是换 img。"""
+        assert re.search(r"\$\('#bprev'\)\.onclick\s*=\s*\(\)\s*=>\s*pageStep\(-1\)",
+                         script), "#bprev 未接 pageStep(-1)"
+        assert re.search(r"\$\('#bnext'\)\.onclick\s*=\s*\(\)\s*=>\s*pageStep\(1\)",
+                         script), "#bnext 未接 pageStep(1)"
+
+    def test_keyboard_page_jumps(self, script: str):
+        kd = re.search(r"document\.addEventListener\('keydown'.*", script, re.S)
+        assert kd, "keydown 未绑定"
+        body = kd.group(0)
+        for key in ["PageUp", "PageDown", "Home", "End"]:
+            assert key in body, f"{key} 未接整页跳"
+        assert "ArrowLeft" in body and "ArrowRight" in body, "左右方向键未接"
+        # 输入框里打字不能抢快捷键
+        assert re.search(r"INPUT\|TEXTAREA\|SELECT", body), \
+            "输入框内未排除快捷键，打字会触发翻页"
+        assert "scrollmode" in body, "未限定只在连续滚动模式生效"
+
+    def test_scroll_hint_visible(self, html: str, script: str):
+        assert 'id="bhelp"' in html, "缺滚动操作提示元素"
+        assert "ui.scrollhint" in html, "提示未接i18n"
+        # 一行里可能有多条 i18n 条目，用中文/英文各出现一次来确认两种语言都填了
+        assert len(re.findall(r"'ui\.scrollhint':", script)) == 2, \
+            "i18n 的 scrollhint 必须中英各一条"
+        assert re.search(r"'ui\.scrollhint':\s*'[^']*[\u4e00-\u9fff]", script), \
+            "缺中文滚动提示"
+
+    def test_no_redefined_scroll_functions(self, script: str):
+        """连续滚动是重写过的函数，最容易残留旧定义静默覆盖新实现。"""
+        for fnm in ["renderPages", "showPdf", "gotoPage", "setZoom",
+                    "observePages", "syncCurFromScroll", "reflowPages",
+                    "pageStep", "bindScrollNav", "resetViewer"]:
+            n = len(re.findall(rf"function {fnm}\(", script))
+            assert n == 1, f"{fnm} 有 {n} 个定义，后者会静默覆盖前者"

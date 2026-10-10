@@ -190,6 +190,12 @@ main{display:flex;height:calc(100% - 52px)}
   flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   font-size:12px;color:var(--txt);
 }
+/* 滚动模式提示 —— 说明「整份连续显示」+ 怎么快速翻页 */
+.mid-bar .hint{
+  font-size:10.5px;color:var(--dim);white-space:nowrap;
+  padding:2px 7px;background:var(--panel2);border-radius:4px;
+}
+@media (max-width:1200px){.mid-bar .hint{display:none}}
 .btn{
   padding:5px 11px;border-radius:5px;background:var(--panel2);color:var(--txt);
   font-size:12px;font-weight:500;transition:.15s;white-space:nowrap;
@@ -200,6 +206,25 @@ main{display:flex;height:calc(100% - 52px)}
 .btn.ok{background:var(--ok);color:#fff}
 .btn:disabled{opacity:.4;cursor:not-allowed}
 .viewer{flex:1;overflow:auto;position:relative;background:#e8edf3}
+/* ---- 连续滚动模式：全部页面依次排开，像看长文档 ---- */
+.viewer.scrollmode{padding:10px 0 40vh;scroll-behavior:smooth}
+/* 每个页面占位块：高度按 A4 比例预留，图片到位前不跳动 */
+.vpage{position:relative;margin:0 auto 10px;background:#fff;box-shadow:0 1px 4px #0002}
+.vpage > img{width:100%;display:block;opacity:0;transition:opacity .18s}
+/* 懒加载占位：先出一个骨架，图片加载完才显示真实内容 */
+.vpage .skel{
+  width:100%;display:flex;align-items:center;justify-content:center;
+  color:var(--dim);font-size:12px;background:#f6f8fa;
+}
+.vpage > img.on{opacity:1}
+.vpage .skel.on{display:none}
+/* 页码角标：滚到哪页一眼看到 */
+.vpage .pno{
+  position:absolute;right:6px;bottom:6px;z-index:2;
+  background:#0f172aa8;color:#fff;font-size:10.5px;padding:1px 7px;border-radius:9px;
+  pointer-events:none;font-variant-numeric:tabular-nums;
+}
+/* 连续滚动时页码条高亮当前可见页（.pg.on 定义在下方基础样式里） */
 .viewer img{
   display:block;margin:0 auto;transition:width .15s;
   image-rendering:-webkit-optimize-contrast;
@@ -363,9 +388,10 @@ tr.floor-row td{background:#eef2f7;font-weight:700;border-top:2px solid var(--li
   <div id="mid">
     <div class="mid-bar">
       <span class="fn" id="mfn"></span>
-      <button class="btn" id="bprev" title="◀">◀</button>
+      <button class="btn" id="bprev" data-i18n-title="ui.prevpage">◀</button>
       <span class="badge" id="bpage">– / –</span>
-      <button class="btn" id="bnext" title="▶">▶</button>
+      <button class="btn" id="bnext" data-i18n-title="ui.nextpage">▶</button>
+      <span class="hint" id="bhelp" data-i18n="ui.scrollhint"></span>
       <span style="width:6px"></span>
       <button class="btn" id="bzout" title="zoom out">−</button>
       <span class="badge" id="bzoom">100%</span>
@@ -404,6 +430,8 @@ const I18N = {
   zh: {
     'nav.work': '工作台', 'nav.cupboard': '柜型库', 'nav.building': '建筑图纸',
     'btn.upload': '⬆ 上传图纸', 'btn.reparse': '重新解析',
+    'ui.prevpage': '上一页（PageUp）', 'ui.nextpage': '下一页（PageDown）',
+    'ui.scrollhint': '连续滚动 ·⌘/Ctrl+滚轮 整页跳',
     'tab.matrix': '楼层 × 柜型', 'tab.detail': '单元明细', 'tab.prov': '溯源诊断',
     'hstat.connecting': '连接中…', 'hstat.offline': '后端未连接',
     'dwg.ready': 'DWG 就绪', 'dwg.none': 'DWG 未装后端',
@@ -466,6 +494,8 @@ const I18N = {
   en: {
     'nav.work': 'Workbench', 'nav.cupboard': 'Cupboard Library', 'nav.building': 'Buildings',
     'btn.upload': '⬆ Upload', 'btn.reparse': 'Re-parse',
+    'ui.prevpage': 'Previous page (PageUp)', 'ui.nextpage': 'Next page (PageDown)',
+    'ui.scrollhint': 'Scroll continuously · ⌘/Ctrl+wheel = page jump',
     'tab.matrix': 'Floor × Cupboard', 'tab.detail': 'Unit Detail', 'tab.prov': 'Provenance',
     'hstat.connecting': 'Connecting…', 'hstat.offline': 'Backend offline',
     'dwg.ready': 'DWG ready', 'dwg.none': 'DWG backend missing',
@@ -534,6 +564,9 @@ const t = k => (I18N[LANGNOW][k] !== undefined ? I18N[LANGNOW][k] : k);
 function applyI18n() {
   document.documentElement.lang = LANGNOW === 'zh' ? 'zh-CN' : 'en';
   $$('[data-i18n]').forEach(e => { e.textContent = t(e.dataset.i18n); });
+  // title 型翻译单独处理：翻页按钮要写清快捷键，
+  // 只改textContent 会把title 留在旧语言上
+  $$('[data-i18n-title]').forEach(e => { e.title = t(e.dataset.i18nTitle); });
   $('#lzh').classList.toggle('on', LANGNOW === 'zh');
   $('#len').classList.toggle('on', LANGNOW === 'en');
   gotoView(S.view);
@@ -976,8 +1009,7 @@ function showVariantGroup(key) {
   const withImg = items.filter(v => v.image_url);
   $('#mfn').textContent = t('tree.library') + ' · ' + (items[0]?.bucket_label || key);
   $('#pagelist').innerHTML = '';
-  $('#bprev').style.display = 'none';
-  $('#bnext').style.display = 'none';
+  resetViewer();
   $('#bpage').style.display = '';
   $('#bpage').textContent = `${withImg.length} ${t('lib.img')}`;
   $('#bparse').style.display = 'none';
@@ -1103,52 +1135,191 @@ function showPlaceholder() {
   $('#viewer').innerHTML = `<div class="ph"><div class="big">▤</div><div>${t('mid.ph')}</div></div>`;
   $('#pagelist').innerHTML = '';
 }
+
+/* ============================================================ 连续滚动预览
+ *用户诉求：「按顺序显示全部内容，不要翻页。还是可以鼠标上下快速翻页」
+ *
+ * 之前是「一页一屏 + 点页码换图」，35 页要点 35 次。
+ * 现在改为**整份文档连续排开**，像读长文档一样一路滚下去；
+ * 同时保留「快速翻页」：滚轮/ PageUp/PageDown/方向键都能整页跳。
+ *
+ * 实现要点：
+ *  1. 每页先按 A4 比例（1:1.414）占好位，图片到位后不跳动 ——
+ *     否则懒加载时页面高度突变，滚动位置会跳，体验比翻页还糟。
+ *  2. IntersectionObserver 只加载**邻近 2 页**，远处的先占位。
+ *     35 页全load 会把 37MB PDF 相关的渲染请求全打出去。
+ *  3. 滚轮翻页用 scrollBy 而不是换img —— 这样用户能停在
+ *     「两页中间」的位置，而整页跳转时也能快速定位。
+ *  4. 快捷键/按钮走 gotoPage(n) 的「滚动到该页」，与滚轮共用一条路径。
+ */
+const A4_RATIO = 1.414;
+
+/** 把中栏复位成「非滚动预览」状态。
+ *  柜型库/建筑图纸 tab 会覆盖 #viewer 内容，但不会自动清掉
+ *  .scrollmode —— 于是切回工作台时容器还带着 padding 与
+ *  smooth滚动，单页预览会莫名偏移。统一在这里收口。 */
+function resetViewer() {
+  const v = $('#viewer');
+  v.classList.remove('scrollmode');
+  v.scrollTop = 0;
+  $('#bprev').style.display = 'none';
+  $('#bnext').style.display = 'none';
+  $('#bpage').style.display = 'none';
+  $('#bhelp').style.display = 'none';
+}
+
+/** 打开一份 PDF —— 整份连续排开，不做一页一屏 */
 function showPdf(jobId, pages) {
-  S.curPage = 0; S.jobId = jobId; S.zoom = 1;
+  S.curPage = 0; S.jobId = jobId; S.zoom = S.zoom || 1;
+  if (!pages?.length) {
+    $('#viewer').classList.remove('scrollmode');
+    $('#viewer').innerHTML =
+      `<div class="ph"><div class="big">▤</div><div>${t('mid.ph')}</div></div>`;
+    $('#pagelist').innerHTML = '';
+    $('#bpage').textContent = `0 / 0`;
+    return;
+  }
+  $('#bprev').style.display = '';
+  $('#bnext').style.display = '';
+  $('#bpage').style.display = '';
   renderPages(pages);
-  gotoPage(0);
+  bindScrollNav();
 }
-function renderPages(pages) {
-  S.pages = pages || [];
-  $('#pagelist').innerHTML = S.pages.map((p, i) =>
-    `<div class="pg" data-p="${i}">${i + 1}. ${esc((p.title || '').slice(0, 14) || 'p' + (i + 1))}</div>`).join('');
-  $$('#pagelist .pg').forEach(e => e.onclick = () => gotoPage(+e.dataset.p));
-}
+
 /** 单页图片 URL —— 走服务端渲染，不加载整份 PDF */
 function pageUrl(n, dpi) { return `/api/page/${S.jobId}/${n}?dpi=${dpi || 110}`; }
 
-/** 翻页。
- *  曾经的实现：<iframe src="整份.pdf#page=N">，改src 等于重下整个 37MB PDF，
- *  实测直接卡死、点页码无响应。现在改为服务端按需渲染单页 PNG。 */
-function gotoPage(i) {
-  if (!S.jobId || !S.pages?.length) return;
-  S.curPage = Math.max(0, Math.min(i, S.pages.length - 1));
-  const n = S.curPage + 1;
-  const p = S.pages[S.curPage];
+/** 建好全部页面的占位骨架，一次性铺完（图片随后懒加载） */
+function renderPages(pages) {
+  S.pages = pages || [];
   const z = S.zoom || 1;
-  // 用 img 而非 iframe：img 只加载这一页，且浏览器能边下边显示
-  $('#viewer').innerHTML =
-    `<img id="pgimg" src="${pageUrl(n)}" alt="p${n}"
-          style="width:${Math.round(100 * z)}%;max-width:none" />`;
-  $('#bpage').textContent = `${n} / ${S.pages.length}`;
-  $$('#pagelist .pg').forEach((e, k) => e.classList.toggle('on', k === S.curPage));
+  // 内容宽度 = 中栏宽度 × 缩放。用 CSS 变量统一控制，
+  // 改缩放时只需更新 --pw，所有页一起变
+  const vw = $('#viewer').clientWidth || 800;
+  const pw = Math.round((vw - 36) * z);
+  const ph = Math.round(pw * A4_RATIO);
+
+  const v = $('#viewer');
+  v.classList.add('scrollmode');
+  v.innerHTML = S.pages.map((p, i) =>
+    `<div class="vpage" data-p="${i}" style="width:${pw}px;height:${ph}px">
+       <div class="skel" style="height:${ph}px">${LANGNOW==='zh'?'加载中…':'Loading…'}${i + 1}</div>
+       <img loading="lazy" alt="p${i + 1}" data-src="${pageUrl(i + 1)}">
+       <div class="pno">${i + 1} / ${S.pages.length}</div>
+     </div>`).join('');
+
+  $('#pagelist').innerHTML = S.pages.map((p, i) =>
+    `<div class="pg" data-p="${i}">${i + 1}. ${esc((p.title || '').slice(0, 14) || 'p' + (i + 1))}</div>`).join('');
+  $$('#pagelist .pg').forEach(e => e.onclick = () => gotoPage(+e.dataset.p));
+
+  observePages();
+  v.scrollTop = 0;
+  syncCurFromScroll();
+}
+
+/** 懒加载：进入视口 ±600px 的页才真正去取图 */
+let _pgObserver = null;
+function observePages() {
+  if (_pgObserver) _pgObserver.disconnect();
+  _pgObserver = new IntersectionObserver((es) => {
+    for (const e of es) {
+      if (!e.isIntersecting) continue;
+      const img = e.target.querySelector('img[data-src]');
+      if (!img || img.dataset.loaded) continue;
+      img.dataset.loaded = '1';
+      img.onload = () => {
+        img.classList.add('on');
+        img.parentElement.querySelector('.skel')?.classList.add('on');
+      };
+      img.onerror = () => {
+        const s = img.parentElement.querySelector('.skel');
+        if (s) s.textContent = `${LANGNOW==='zh'?'第':'Page '}${(+img.alt.slice(1))}${LANGNOW==='zh'?'页加载失败':' failed'}`;
+      };
+      img.src = img.dataset.src;
+    }
+  }, { root: $('#viewer'), rootMargin: '600px 0px' });
+  $$('#viewer .vpage').forEach(n => _pgObserver.observe(n));
+}
+
+/** 滚动位置 → 当前页（页码条高亮 + 顶部计数） */
+function syncCurFromScroll() {
+  const v = $('#viewer');
+  if (!v || !S.pages?.length) return;
+  const nodes = $$('#viewer .vpage');
+  // 切到柜型库/图纸 tab 后 .vpage 已被清空。此时若还照常遍历，
+  // cur 会恒为 0 并把 S.curPage 写坏 —— 从 tab 切回来就再也回不到
+  // 离开前那一页。DOM 不在时只更新计数，不碰状态。
+  if (!nodes.length) {
+    $('#bpage').textContent = `${S.curPage + 1} / ${S.pages.length}`;
+    return;
+  }
+  const mid = v.scrollTop + v.clientHeight * 0.35;
+  let cur = 0;
+  nodes.forEach(n => {
+    if (n.offsetTop <= mid) cur = +n.dataset.p;
+  });
+  S.curPage = cur;
+  $('#bpage').textContent = `${cur + 1} / ${S.pages.length}`;
+  $$('#pagelist .pg').forEach((e, k) => e.classList.toggle('on', k === cur));
+  const p = S.pages[cur];
   const fn = [S.curFile, p?.title || p?.drawing_no].filter(Boolean).join(' — ');
   $('#mfn').textContent = fn || t('mid.none');
-  // 邻页预取：连续翻页几乎无等待
-  [n + 1, n - 1, n + 2].forEach(k => {
-    if (k >= 1 && k <= S.pages.length) {
-      const im = new Image(); im.src = pageUrl(k);
-    }
-  });
-  // 滚动回顶，否则停在上一页的偏移位置像是没换页
-  $('#viewer').scrollTop = 0;
+}
+
+/** 滚动到指定页 —— 翻页按钮/页码条/键盘都走这里。
+ *  behavior='auto' 用于切 tab 回来时的瞬时还原，不做二次平滑滚动。 */
+function gotoPage(i, behavior) {
+  if (!S.jobId || !S.pages?.length) return;
+  const target = Math.max(0, Math.min(i, S.pages.length - 1));
+  const node = $(`#viewer .vpage[data-p="${target}"]`);
+  if (node) {
+    $('#viewer').scrollTo({ top: node.offsetTop - 8,
+                            behavior: behavior || 'smooth' });
+  } else { S.curPage = target; syncCurFromScroll(); }
+}
+
+/** 相对翻页（◀ ▶ 按钮） */
+function pageStep(d) { gotoPage(S.curPage + d); }
+
+/** 重新按当前缩放重排全部页面 */
+function reflowPages() {
+  if (!S.pages?.length || !$('#viewer').classList.contains('scrollmode')) return;
+  const keepTop = $('#viewer').scrollTop;
+  renderPages(S.pages);
+  //重排后按比例还原滚动位置，避免跳回开头
+  requestAnimationFrame(() => { $('#viewer').scrollTop = keepTop; });
+}
+
+/** 滚动联动 + 滚轮快速翻页 —— 只绑一次。
+ *
+ *  用户诉求：「还是可以鼠标上下快速翻页」。
+ *  连续滚动下滚轮本来就会滚，但**要滚一整屏**才能翻页，太慢。
+ *  所以：Ctrl/⌘ + 滚轮 = 整页跳（细调靠裸滚轮）；
+ *  PageUp/PageDown / 空格 / 方向键也整页跳。
+ *  没有修饰键时保持原生连续滚动 —— 细看图纸时不能一滚就是一页。
+ */
+let _scrollBound = false;
+function bindScrollNav() {
+  const v = $('#viewer');
+  if (!_scrollBound) {
+    _scrollBound = true;
+    let raf = 0;
+    v.addEventListener('scroll', () => {
+      if (raf) return;                    // 合并同一帧内的多次 scroll 事件
+      raf = requestAnimationFrame(() => { raf = 0; syncCurFromScroll(); });
+    }, { passive: true });
+    v.addEventListener('wheel', (e) => {
+      if (!(e.ctrlKey || e.metaKey)) return;// 裸滚轮= 连续滚动，不拦截
+      e.preventDefault();
+      pageStep(e.deltaY > 0 ? 1 : -1);
+    }, { passive: false });
+  }
 }
 
 function setZoom(z) {
-  S.zoom = Math.max(0.5, Math.min(4, z));
-  const img = $('#pgimg');
-  if (img) img.style.width = `${Math.round(100 * S.zoom)}%`;
+  S.zoom = Math.max(0.4, Math.min(4, z));
   $('#bzoom').textContent = `${Math.round(S.zoom * 100)}%`;
+  reflowPages();
 }
 
 // ============================================================ 导出
@@ -1513,6 +1684,9 @@ async function commitDwg() {
     左侧树和中栏始终是楼栋的。现在按view 整体切换。 */
 function renderHub() {
   const isCup = S.view === 'cupboard';
+  // 两个 hub tab 都不是楼栋预览视图，先把工作台的连续滚动状态收掉。
+  // 放函数开头统一做，避免只补了 isCup 分支漏掉 building。
+  resetViewer();
 
   if (isCup) {
     // 柜型库：中栏不该再预览楼栋图纸，改为展示分组说明
@@ -1520,15 +1694,7 @@ function renderHub() {
     $('#pagelist').innerHTML = '';
     $('#viewer').innerHTML = `<div class="ph"><div class="big">⊞</div>
       <div>${t('mid.cup.hint')}</div></div>`;
-    $('#bprev').style.display = 'none';
-    $('#bnext').style.display = 'none';
-    $('#bpage').style.display = 'none';
     $('#bparse').style.display = 'none';
-  } else {
-    $('#bprev').style.display = '';
-    $('#bnext').style.display = '';
-    $('#bpage').style.display = '';
-    $('#bparse').style.display = '';
   }
 
   let h = '';
@@ -1668,12 +1834,30 @@ function gotoView(v) {
   // 上传按钮只在「柜型库」「建筑图纸」两个 tab 出现 ——
   // 工作台是看解析结果的，不该摆上传入口
   $('#bup').style.display = v === 'work' ? 'none' : 'inline-block';
+  // 滚动提示只在工作台的连续预览里才有意义
+  $('#bhelp').style.display = v === 'work' ? '' : 'none';
   syncTabsForView();
   if (v === 'work') {
     renderTree();
-    // 恢复楼栋预览
-    if (S.jobId && S.pages?.length) gotoPage(S.curPage);
-    else { $('#mfn').textContent = t('mid.none'); }
+    // 从柜型库切回来时，renderHub() 已把 #viewer 的 DOM 换成占位提示，
+    // .vpage 全没了 —— 此时 syncCurFromScroll() 里遍历不到任何节点，
+    // 当前页会恒为 0，页面一片空白。必须先按S.pages 重建整条预览，
+    // 再把滚动位置还原回离开前的那一页。
+    if (S.jobId && S.pages?.length) {
+      const back = S.curPage || 0;
+      if (!document.querySelector('#viewer .vpage')) {
+        renderPages(S.pages);
+        requestAnimationFrame(() => gotoPage(back, 'auto'));
+      } else {
+        // 页面还在（建筑图纸 tab 不动中栏）—— 只同步当前页即可，
+        // 直接 gotoPage 会二次平滑滚动，看着像页面自己动了一下
+        syncCurFromScroll();
+      }
+    } else {
+      $('#mfn').textContent = t('mid.none');
+    }
+    // renderHub/resetViewer 会把提示清掉，切回工作台要重新挂上
+    $('#bhelp').style.display = S.jobId && S.pages?.length ? '' : 'none';
     renderPane();
   } else {
     renderTree();     // 树也切：柜型库时只显示柜型分组
@@ -1686,8 +1870,8 @@ $('#bup').onclick = () => openUpload(S.view === 'cupboard' ? 'cupboard' : 'build
 $('#lzh').onclick = () => { LANGNOW = 'zh'; applyI18n(); };
 $('#len').onclick = () => { LANGNOW = 'en'; applyI18n(); };
 $$('.rtabs button').forEach(b => b.onclick = () => { S.pane = b.dataset.pane; syncTabs(); renderPane(); });
-$('#bprev').onclick = () => gotoPage(S.curPage - 1);
-$('#bnext').onclick = () => gotoPage(S.curPage + 1);
+$('#bprev').onclick = () => pageStep(-1);
+$('#bnext').onclick = () => pageStep(1);
 $('#bzin').onclick = () => setZoom((S.zoom || 1) * 1.25);
 $('#bzout').onclick = () => setZoom((S.zoom || 1) / 1.25);
 $('#bparse').onclick = () => openUpload('building');
@@ -1695,8 +1879,17 @@ $('#bparse').onclick = () => openUpload('building');
 $('#mask').onclick = e => { if (e.target.id === 'mask') closeModal(); };
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeModal();
-  if (e.key === 'ArrowLeft' && S.curPage) gotoPage(S.curPage - 1);
-  if (e.key === 'ArrowRight') gotoPage(S.curPage + 1);
+  //输入框里打字时不抢快捷键
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+  const cont = S.view === 'work' && $('#viewer').classList.contains('scrollmode');
+  if (!cont) return;
+  // 连续滚动模式下，方向键/翻页键 = 整页跳；
+  // 上下键保持浏览器原生细滚，方便看图纸局部。
+  if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); pageStep(-1); }
+  else if (e.key === 'ArrowRight' || e.key === 'PageDown'
+        || e.key === ' ') { e.preventDefault(); pageStep(1); }
+  else if (e.key === 'Home') { e.preventDefault(); gotoPage(0); }
+  else if (e.key === 'End') { e.preventDefault(); gotoPage(S.pages.length - 1); }
 });
 
 boot();
