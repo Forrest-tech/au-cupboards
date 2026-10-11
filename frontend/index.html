@@ -2431,6 +2431,8 @@ function bindTree() {
 function variantGroups() {
   const g = {};
   for (const v of S.variants) {
+    // 与 libraryGroups() 一致：只收 DWG 实测柜型，过滤掉 seed_poc 演示数据
+    if (v.source !== 'dwg') continue;
     // 按 water+gas 表位组合分组（需求 2：按 meter 组合分组）
     const key = v.bucket || ('p' + v.positions);
     (g[key] = g[key] || []).push(v);
@@ -4062,8 +4064,9 @@ function renderHub() {
   let h = '';
   if (isCup) {
     const groups = variantGroups();
-    const nAll = S.variants.length;
-    const nImg = S.variants.filter(v => v.image_url).length;
+    const dwgVars = S.variants.filter(v => v.source === 'dwg');
+    const nAll = dwgVars.length;
+    const nImg = dwgVars.filter(v => v.image_url).length;
     h += `<div class="sec" style="padding-left:0">${t('tree.library')}</div>`;
     if (!groups.length) {
       h += `<div class="empty"><div class="big">${ic('image-off')}</div><b>${t('dwg.empty')}</b></div>`;
