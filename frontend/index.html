@@ -1513,9 +1513,10 @@ function renderTreeLibrary() {
 
   for (const grp of unitsList) {
     const ukey = 'u' + grp.n;
-    const uopen = !!S.lfOpen[ukey];
     // 父子都要显示的计数：这个套数下一共有几个柜
     const total = grp.files.reduce((a, x) => a + x.u.labels.length, 0);
+    // 只有一套的组默认展开，显示 Model A，保持一致不空白 —— 用户要求
+    const uopen = !!S.lfOpen[ukey] || total === 1;
     const usel = S.treeSel === ukey;
     h += `<div class="node${uopen || usel ? ' on' : ''}" data-lu="${grp.n}">
       <span class="tw">${twIcon(uopen)}</span>
