@@ -1380,14 +1380,16 @@ function renderTree() {
     // 用户要求去掉图纸层（"1. A000"），楼层直接挂在项目下
     if (job) {
       // 用户要求：两层架构，去掉图标，"所有楼层"与 L1-L4 平级（不是折叠父节点）
-      // 高亮依据 S.floorFilter（实际过滤用的变量），与 S.floorSel 保持同步
-      h += `<div class="node lv1${!S.floorFilter ? ' on' : ''}" data-floor="">
+      // 高亮：建筑图纸 tab 看 S.floorSel，工作台看 S.floorFilter
+      const allSel = S.view === 'building' ? !S.floorSel : !S.floorFilter;
+      h += `<div class="node lv1${allSel ? ' on' : ''}" data-floor="">
         <span class="nm">${LANGNOW==='zh'?'所有楼层':'All floors'}</span>
         <span class="ct">${job.floors?.length || 0}</span></div>`;
       for (const f of (job.floors || [])) {
         // 当前楼层高亮 —— 用户靠这个判断「右栏这批柜型是给哪一层看的」
-        // 用 S.floorFilter（实际过滤变量），保证高亮与显示一致
-        const fo = S.floorFilter === f.floor_code ? ' on' : '';
+        // 建筑图纸 tab 用 S.floorSel，工作台用 S.floorFilter —— 两边变量不同，必须分开
+        const selForHl = S.view === 'building' ? S.floorSel : S.floorFilter;
+        const fo = selForHl === f.floor_code ? ' on' : '';
         h += `<div class="node lv1${fo}" data-floor="${esc(f.floor_code)}">
           <span class="nm">${esc(f.floor_code)}</span>
           <span class="ct">${f.unit_count}${LANGNOW==='zh'?'户':' u'}${f.communal_count ? '+' + f.communal_count : ''}</span></div>`;
