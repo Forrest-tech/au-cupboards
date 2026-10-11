@@ -1353,7 +1353,8 @@ function renderTree() {
     h += `<div class="node lv1" style="color:var(--dim)">${t('tree.empty')}</div>`;
   }
   for (const p of S.projects) {
-    const on = S.curBuilding === p.id ? ' on' : '';
+    // 只有一个 item 高亮：选了楼层时项目不高亮 —— 用户要求
+    const on = (S.curBuilding === p.id && !S.floorFilter) ? ' on' : '';
     const job = S.job;
     const dw = p.drawings || [];
     // 楼栋节点上的箭头：折叠/展开。展开后每张图纸各占一个 item
