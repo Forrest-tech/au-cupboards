@@ -1970,7 +1970,13 @@ async function delVariants(vs) {
   }
   toast((LANGNOW === 'zh' ? `已删除 ${ok} 个柜型` : `Deleted ${ok} variants`)
     + (bad ? `（${bad} 个失败）` : ''), bad ? 'err' : 'ok');
-  await loadVariants(); renderTree(); refreshOpenGroups();
+  await loadVariants();
+  // 如果删空了，刷新浏览器回到干净状态（与建筑删除一致）
+  if (!S.variants.some(v => v.source === 'dwg')) {
+    setTimeout(() => location.reload(), 600);
+    return;
+  }
+  renderTree(); refreshOpenGroups();
 }
 
 /** 删除建筑项目（含图纸、版本、解析任务级联）。与柜型删除共用确认框模式。 */
@@ -1982,11 +1988,8 @@ async function delBuilding(id) {
     toast((LANGNOW === 'zh' ? '删除失败：' : 'Delete failed: ') + (e.message || e), 'err');
     return;
   }
-  // 清掉可能指向已删项目的选中状态
-  if (S.curBuilding === id) S.curBuilding = null;
-  S.job = null; S.jobId = null;
-  S.floorFilter = null; S.floorSel = null;
-  await loadTree(); renderTree();
+  // 用户要求：删除后刷新浏览器，确保左右中三栏都回到干净状态
+  setTimeout(() => location.reload(), 600);
 }
 
 /** 重渲染后把右侧内容刷回来。
@@ -2032,6 +2035,11 @@ async function delVariant(id) {
     await api(`/variants/${id}`, { method: 'DELETE' });
     toast(t('lib.deldone'), 'ok');
     await loadVariants();
+    // 如果删空了，刷新浏览器回到干净状态
+    if (!S.variants.some(v => v.source === 'dwg')) {
+      setTimeout(() => location.reload(), 600);
+      return;
+    }
     // 删掉的正好是当前选中项 -> 落到同组下一个，组空了就清选中
     if (String(S.treeSel || '').endsWith('@' + id)) {
       const g = libraryGroups();
