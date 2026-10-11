@@ -998,6 +998,12 @@ function showExportModal() {
           <option value="jpg">🖼️ JPG (.jpg)</option>
         </select>
       </label>
+      <label style="display:flex;flex-direction:column;gap:6px;font-size:13px">
+        <span style="font-weight:600">${zh?'文件名':'File name'}</span>
+        <input id="expName" placeholder="${zh?'输入文件名（不含扩展名）':'Enter file name (without extension)'}"
+          value="${esc((S.job?.project_name || S.job?.name || 'cupboards').replace(/[\\/:*?"<>|]/g, '_'))}"
+          style="padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px">
+      </label>
       <div style="display:flex;flex-direction:column;gap:6px;font-size:13px">
         <span style="font-weight:600">${zh?'保存位置':'Save to'}</span>
         <div style="display:flex;gap:8px">
@@ -1042,10 +1048,12 @@ function showExportModal() {
 /** 读取对话框选择并执行导出 */
 function doExportConfirm() {
   const fmt = document.querySelector('#expFmt')?.value || 'pdf';
+  // 用户输入的文件名（不含扩展名）—— 用户要求可自定义
+  const customName = (document.querySelector('#expName')?.value || '').trim();
   // 路径选择：如果用户点了"浏览"选了位置，用 File System Access API 保存
   const picked = window._expFileHandle || null;
   closeModal();
-  doExport(fmt, picked);
+  doExport(fmt, picked, customName);
 }
 
 function buildExportData() {
@@ -1088,9 +1096,10 @@ async function saveExportBlob(blob, filename, fileHandle) {
   toast(zh ? `已导出 ${filename}` : `Exported ${filename}`, 'ok');
 }
 
-function doExport(fmt, fileHandle) {
+function doExport(fmt, fileHandle, customName) {
   const rows = buildExportData();
-  const jname = (S.job?.name || 'export').replace(/[^\w\-]+/g, '_');
+  // 用户自定义文件名优先，否则用项目名 —— 用户要求
+  const jname = (customName || S.job?.name || 'export').replace(/[^\w\-\u4e00-\u9fa5]+/g, '_');
   const zh = LANGNOW === 'zh';
   const title = zh ? '楼层×柜型方案' : 'Floor × Cupboard';
 
