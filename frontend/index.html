@@ -2077,13 +2077,26 @@ function renderMatrix() {
   h += '</div></div>';
   $('#rpane').innerHTML = h;
   // 缩略图 → 点开看中栏大图（矩阵内的两种：.mthumb 小图 + .cupcard 卡片）
+  // 问题11：点击缩略图弹 modal 大图，不替换中间面板；点外部关闭
   const openBig = (url, el) => {
     const v = S.variants.find(x => x.image_url === url);
-    showCupImage(url, v
+    const info = v
       ? `<b>${fmtMM(v.w)} × ${fmtMM(v.h)} mm</b>${
           v.label ? ' · ' + esc(v.label) : ''}<div class="muted">${
-          v.positions ?? '?'} ${t('lib.units')}</div>`
-      : '');
+          v.positions ?? '?'} ${t('lib.units')}${v.grid ? ' · ' + esc(v.grid) : ''}${
+          v.code ? '<br>' + esc(v.code) : ''}</div>`
+      : '';
+    // 用现有 mask/modal 显示大图
+    $('#modal').innerHTML = `
+      <div class="mhead"><b>${esc(v?.code || t('lib.title'))}</b>
+        <button class="btn" onclick="closeModal()" style="float:right">✕</button></div>
+      <div class="mbody" style="text-align:center;padding:16px">
+        <img src="${esc(url)}" style="max-width:100%;max-height:70vh;object-fit:contain" alt="">
+        <div style="margin-top:12px">${info}</div>
+      </div>`;
+    $('#mask').classList.add('on');
+    // 点击 mask 背景关闭（但解析中禁止）
+    $('#mask').onclick = (e) => { if (e.target.id === 'mask') closeModal(); };
     if (el) {
       $$('#rpane .mthumb, #rpane .cupcard[data-mtimg]')
         .forEach(y => y.classList.toggle('on', y === el));
