@@ -1492,6 +1492,7 @@ function renderTree() {
     <span class="ttools">
       <button class="ib" id="tExpandAll" title="${LANGNOW==='zh'?'全部展开':'Expand all'}">${ic('expand-all')}</button>
       <button class="ib" id="tCollapseAll" title="${LANGNOW==='zh'?'全部收起':'Collapse all'}">${ic('collapse-all')}</button>
+      ${S.view === 'building' ? `<button class="ib" id="tEditMode" title="${LANGNOW==='zh'?'编辑':'Edit'}">${ic('pencil')}</button>` : ''}
     </span></div>`;
   if (!S.projects.length) {
     h += `<div class="node lv1" style="color:var(--dim)">${t('tree.empty')}</div>`;
@@ -1506,7 +1507,8 @@ function renderTree() {
     const open = !S.fold['b' + p.id];
     h += `<div class="node${on}" data-b="${p.id}">
       <span class="nm">${esc(p.name)}</span>
-      <span class="ct">${dw.length}${t('tree.drawings')}</span></div>`;
+      <span class="ct">${dw.length}${t('tree.drawings')}</span>
+      ${S.treeEditMode ? `<span class="treedrop"><button class="ib" data-emenu="bid:${p.id}:${esc(p.name)}" title="${LANGNOW==='zh'?'操作':'Actions'}">${ic('more')}</button></span>` : ''}</div>`;
     if (!open) continue;
     // 用户要求去掉图纸层（"1. A000"），楼层直接挂在项目下
     if (job) {
@@ -1652,6 +1654,7 @@ function renderTreeLibrary() {
     <span class="ttools">
       <button class="ib" id="tExpandAll" title="${LANGNOW==='zh'?'全部展开':'Expand all'}">${ic('expand-all')}</button>
       <button class="ib" id="tCollapseAll" title="${LANGNOW==='zh'?'全部收起':'Collapse all'}">${ic('collapse-all')}</button>
+      <button class="ib" id="tEditMode" title="${LANGNOW==='zh'?'编辑':'Edit'}">${ic('pencil')}</button>
     </span></div>`;
   if (!unitsList.length) {
     h += `<div class="node lv1" style="color:var(--dim)">${t('dwg.empty')}</div>`;
@@ -1670,7 +1673,8 @@ function renderTreeLibrary() {
     h += `<div class="node${usel ? ' on' : ''}" data-lu="${grp.n}">
       <span class="tw">${twIcon(uopen)}</span>
       <span class="nm">${grp.n} ${t('lib.units')}</span>
-      <span class="ct">${total}</span></div>`;
+      <span class="ct">${total}</span>
+      ${S.treeEditMode ? `<span class="treedrop"><button class="ib" data-emenu="lu:${grp.n}" title="${LANGNOW==='zh'?'操作':'Actions'}">${ic('more')}</button></span>` : ''}</div>`;
     // 默认收起，与其他组一致 —— 用户要求
     if (!uopen) continue;
 
@@ -1684,7 +1688,8 @@ function renderTreeLibrary() {
         if (!disp) disp = 'Model A';
         h += `<div class="node lv2${on}" data-lg="${esc(key)}" data-vid="${esc(lb.v.id)}">
           <span class="nm">${esc(disp)}</span>
-          <span class="ct">${fmtMM(lb.v.w)}×${fmtMM(lb.v.h)}</span></div>`;
+          <span class="ct">${fmtMM(lb.v.w)}×${fmtMM(lb.v.h)}</span>
+          ${S.treeEditMode ? `<span class="treedrop"><button class="ib" data-emenu="vid:${esc(lb.v.id)}:${esc(disp)}" title="${LANGNOW==='zh'?'操作':'Actions'}">${ic('more')}</button></span>` : ''}</div>`;
       }
     }
   }
@@ -2297,6 +2302,16 @@ function bindTree() {
     Object.keys(S.fold).forEach(k => { if (k.startsWith('b')) S.fold[k] = true; });
     renderTree();
   };
+  // 编辑模式切换：显示每项的操作下拉菜单（工作台无此按钮，天然跳过）
+  const bedit = $('#tEditMode');
+  if (bedit) {
+    bedit.classList.toggle('on', !!S.treeEditMode);
+    bedit.onclick = (e) => {
+      e.stopPropagation();
+      S.treeEditMode = !S.treeEditMode;
+      renderTree();
+    };
+  }
   $$('#tree .node').forEach(n => n.onclick = ev => {
     // 点箭头只折叠/展开，不触发选中
     const tw = ev.target.closest('.tw');
