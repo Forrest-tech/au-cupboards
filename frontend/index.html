@@ -1323,6 +1323,17 @@ function autoSelectFirstInView() {
     if (S.jobId) showPdf(S.jobId, S.pages || []);
     return;
   }
+  // 工作台默认：选中"所有楼层"，显示完整矩阵 —— 用户要求
+  // 之前是点击第一个 node（项目），导致右栏只显示图纸
+  if (S.view === 'work') {
+    S.floorFilter = null;
+    S.floorSel = null;
+    S.treeSel = 'floors';
+    renderTree();
+    if (S.pane === 'matrix') renderMatrix();
+    else renderDetail();
+    return;
+  }
   const first = $('#tree .node');
   if (first) { first.click(); return; }
   // 树是空的（柜型库没数据 / 没解析过）—— 中右两栏也别留上一 tab 的残影
