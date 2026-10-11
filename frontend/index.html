@@ -624,6 +624,8 @@ tr.floor-row td{background:#eef2f7;font-weight:700;border-top:2px solid var(--li
   <g id="i-search"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></g>
   <g id="i-download"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></g>
   <g id="i-more"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></g>
+  <g id="i-expand-all"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/><path d="M12 20v-8"/><path d="M12 12V4"/></g>
+  <g id="i-collapse-all"><path d="m7 20 5-5 5 5"/><path d="m7 4 5 5 5-5"/><path d="M12 12v8"/><path d="M12 4v8"/></g>
 </defs></svg>
 
 <header>
@@ -1344,8 +1346,8 @@ function renderTree() {
   // 问题8a：建筑项目树顶部同样加展开/收起工具栏
   let h = `<div class="sec treetoolbar"><span>${t('tree.projects')}</span>
     <span class="ttools">
-      <button class="ib" id="tExpandAll" title="${LANGNOW==='zh'?'全部展开':'Expand all'}">⤢</button>
-      <button class="ib" id="tCollapseAll" title="${LANGNOW==='zh'?'全部收起':'Collapse all'}">⤡</button>
+      <button class="ib" id="tExpandAll" title="${LANGNOW==='zh'?.全部展开.:.Expand all.}">${ic("expand-all")}</button>
+      <button class="ib" id="tCollapseAll" title="${LANGNOW==='zh'?.全部收起.:.Collapse all.}">${ic("collapse-all")}</button>
     </span></div>`;
   if (!S.projects.length) {
     h += `<div class="node lv1" style="color:var(--dim)">${t('tree.empty')}</div>`;
@@ -1500,8 +1502,8 @@ function renderTreeLibrary() {
 
   let h = `<div class="sec treetoolbar"><span>${t('tree.library')}</span>
     <span class="ttools">
-      <button class="ib" id="tExpandAll" title="${LANGNOW==='zh'?'全部展开':'Expand all'}">⤢</button>
-      <button class="ib" id="tCollapseAll" title="${LANGNOW==='zh'?'全部收起':'Collapse all'}">⤡</button>
+      <button class="ib" id="tExpandAll" title="${LANGNOW==='zh'?.全部展开.:.Expand all.}">${ic("expand-all")}</button>
+      <button class="ib" id="tCollapseAll" title="${LANGNOW==='zh'?.全部收起.:.Collapse all.}">${ic("collapse-all")}</button>
     </span></div>`;
   if (!unitsList.length) {
     h += `<div class="node lv1" style="color:var(--dim)">${t('dwg.empty')}</div>`;
