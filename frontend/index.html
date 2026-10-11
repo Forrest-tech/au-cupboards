@@ -4100,9 +4100,8 @@ function gotoView(v) {
   const hexport = $('#hexport'); if (hexport) hexport.style.display = v === 'work' ? '' : 'none';
   // 滚动提示只在工作台的连续预览里才有意义
   const bhelp = $('#bhelp'); if (bhelp) bhelp.style.display = v === 'work' ? '' : 'none';
-  // 问题1：建筑图纸 tab 下隐藏编辑按钮和页码 pill
-  const isBuilding = v === 'building';
-  const bedit = $('#bedit'); if (bedit) bedit.style.display = isBuilding ? 'none' : '';
+  // 编辑按钮两个 tab 一致：都隐藏 —— 用户要求
+  const bedit = $('#bedit'); if (bedit) bedit.style.display = 'none';
   const bpage = $('#bpage'); if (bpage) bpage.style.display = isBuilding ? 'none' : '';
   // 建筑图纸 tab 隐藏左树（竖条块），让 PDF 显示更宽 —— 用户要求
   // 2026-10-11 11:45 用户反悔：左树要恢复，只隐藏 pagelist
