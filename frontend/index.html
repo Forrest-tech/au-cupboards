@@ -1645,7 +1645,7 @@ function renderTreeLibrary() {
     const total = grp.files.reduce((a, x) => a + x.u.labels.length, 0);
     // 只有一套的组默认展开，显示 Model A，保持一致不空白 —— 用户要求
     // 注意：展开≠选中，高亮只看 usel
-    const uopen = !!S.lfOpen[ukey] || total === 1;
+    const uopen = !!S.lfOpen[ukey];
     const usel = S.treeSel === ukey;
     h += `<div class="node${usel ? ' on' : ''}" data-lu="${grp.n}">
       <span class="tw">${twIcon(uopen)}</span>
@@ -1656,9 +1656,8 @@ function renderTreeLibrary() {
         <button class="ib" data-lu-rename="${grp.n}" title="${esc(t('lib.rename'))}">${ic('pencil')}</button>
         <button class="ib" data-lu-del="${grp.n}" title="${esc(t('lib.delone'))}">${ic('trash')}</button>
       </span></div>`;
-    // 单模型组强制展开显示 Model A（用户要求：不能空白）
-    // 多模型组按 uopen 状态
-    if (!uopen && total !== 1) continue;
+    // 默认收起，与其他组一致 —— 用户要求
+    if (!uopen) continue;
 
     // 该套数下的每个 model
     for (const { f, u } of grp.files) {
