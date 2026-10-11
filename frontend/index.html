@@ -1369,10 +1369,9 @@ function renderTree() {
         <span class="nm">${LANGNOW==='zh'?'所有楼层':'All floors'}</span>
         <span class="ct">${job.floors?.length || 0}</span></div>`;
       for (const f of (job.floors || [])) {
-        // 建筑图纸 tab 下当前楼层要高亮 —— 用户靠这个判断
-        //「右栏这批柜型是给哪一层看的」
-        const fo = S.view === 'building' && S.floorSel === f.floor_code
-          ? ' on' : '';
+        // 当前楼层高亮 —— 用户靠这个判断「右栏这批柜型是给哪一层看的」
+        // 工作台和建筑图纸 tab 都要高亮（之前只在 building view 高亮，工作台点 L4 没反应）
+        const fo = S.floorSel === f.floor_code ? ' on' : '';
         h += `<div class="node lv1${fo}" data-floor="${esc(f.floor_code)}">
           <span class="nm">${esc(f.floor_code)}</span>
           <span class="ct">${f.unit_count}${LANGNOW==='zh'?'户':' u'}${f.communal_count ? '+' + f.communal_count : ''}</span></div>`;
@@ -2148,12 +2147,15 @@ function bindTree() {
       S.treeSel = S.treeSel === k ? null : k;
       renderTree();
     }
-    else if (n.dataset.floor) {
+    else if (n.dataset.floor !== undefined) {
       // 建筑图纸 tab：点楼层 -> 右栏显示该层 units 数对应的柜型种类；
       // 工作台 tab：沿用原来的户表筛选。
+      // 注意：data-floor=""（所有楼层）是空字符串，不能用 truthy 判断
       if (S.view === 'building') {
         S.treeSel = 'floors';
         S.floorSel = S.floorSel === n.dataset.floor ? null : n.dataset.floor;
+        // 空字符串转为 null，保持语义一致
+        if (S.floorSel === '') S.floorSel = null;
         renderTree();
         if (S.floorSel) showFloorPanel(S.floorSel);
         else { S.floorFilter = null; renderHub(); }
@@ -2447,7 +2449,10 @@ function filterFloor(code) {
     S.floorSel = null;
   } else {
     S.floorFilter = S.floorFilter === code ? null : code;
+    // 工作台也要同步 S.floorSel，否则左树高亮不更新（用户报的 bug）
+    S.floorSel = S.floorFilter;
   }
+  renderTree();
   // 问题16b：楼层×柜型 tab 按选中楼层过滤（renderMatrix 会读 S.floorFilter）
   if (S.pane === 'matrix') renderMatrix();
   else renderDetail();
