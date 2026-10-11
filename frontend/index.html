@@ -2353,24 +2353,21 @@ function showUnitsGroup(key, keepScroll) {
     + (items.length === 1 ? suffixOf(items[0]) : '');
   $('#pagelist').innerHTML = '';
   resetViewer();
-  $('#bpage').style.display = withImg.length ? '' : 'none';
-  if (withImg.length) $('#bpage').textContent = `${withImg.length} ${t('lib.img')}`;
+  // 问题4：去掉"X 张图纸"pill，不显示
+  $('#bpage').style.display = 'none';
   $('#bparse').style.display = 'none';
 
   // 尺寸标注块：图下方直接写实际尺寸（用户要求「图片 + 下面显示尺寸」）
+  // 问题5：去掉所有"实测"字样，不显示 tag
   const capOf = (v) => {
     if (!v) return '';
-    const src = v.size_source || 'estimated';
-    const tag = src === 'measured' ? (LANGNOW === 'zh' ? 'DWG 实测' : 'measured')
-      : src === 'manual' ? (LANGNOW === 'zh' ? '人工录入' : 'manual')
-      : (LANGNOW === 'zh' ? '待实测' : 'estimated');
     // 这一行只放尺寸本身。柜型名（有 label 就用 label）另起，
     // 套数在下面那行已经写了 —— 之前这里回退成「5 Units」，
     // 渲染出来是「1065 × 2350 mm · 5 套5 套 · 2x4」这种叠字。
     return `<b>${fmtMM(v.w)} × ${fmtMM(v.h)} mm</b>`
       + ((v.d && v.d !== 'null') ? ` · D ${fmtMM(v.d)}` : '')
       + (v.label ? ` · ${esc(v.label)}` : '')
-      + `<div class="muted">${n} ${t('lib.units')} · ${esc(v.grid || '-')} · ${tag}</div>`;
+      + `<div class="muted">${n} ${t('lib.units')} · ${esc(v.grid || '-')}</div>`;
   };
 
   if (withImg.length) showCupImage(withImg[0].image_url, capOf(withImg[0]));
@@ -2393,10 +2390,7 @@ function showUnitsGroup(key, keepScroll) {
   }
   h += '<div class="cupgrid">';
   for (const v of items) {
-    const src = v.size_source || 'estimated';
-    const srcTag = src === 'measured' ? `<span class="tag ok">${t('lib.measured')}</span>`
-      : src === 'manual' ? `<span class="tag">${t('lib.manual')}</span>`
-      : `<span class="tag warn">${t('lib.estimated')}</span>`;
+    // 问题5：去掉所有"实测"字样，不显示 srcTag badge
     h += `<div class="cupwrap">
     <div class="cupcard${v.image_url ? ' has-img' : ''}" data-img="${esc(v.image_url || '')}">
       <div class="thumb">${v.image_url
@@ -2405,7 +2399,7 @@ function showUnitsGroup(key, keepScroll) {
       <div class="meta">
         <div class="code mono">${esc(v.code)}</div>
         <div class="dim">${n} ${t('lib.units')}${esc(suffixOf(v))} · ${esc(v.grid || '-')}</div>
-        <div class="dim">${sizeMM(v)}${srcTag}</div>
+        <div class="dim">${sizeMM(v)}</div>
         ${v.description ? `<div class="desc">${esc(v.description)}</div>` : ''}
       </div></div>
       <button class="cupdel" data-del="${v.id}" data-code="${esc(v.code)}"
@@ -2430,8 +2424,8 @@ function showVariantGroup(key) {
   $('#mfn').textContent = t('tree.library') + ' · ' + (items[0]?.bucket_label || key);
   $('#pagelist').innerHTML = '';
   resetViewer();
-  $('#bpage').style.display = '';
-  $('#bpage').textContent = `${withImg.length} ${t('lib.img')}`;
+  // 问题4：去掉"X 张图纸"pill，不显示
+  $('#bpage').style.display = 'none';
   $('#bparse').style.display = 'none';
 
   // 默认展示第一张有图的柜型
@@ -2442,10 +2436,7 @@ function showVariantGroup(key) {
   let h = `<div class="sec" style="padding-left:0">${t('lib.title')}</div>`;
   h += '<div class="cupgrid">';
   for (const v of items) {
-    const src = v.size_source || 'estimated';
-    const srcTag = src === 'measured' ? `<span class="tag ok">${t('lib.measured')}</span>`
-      : src === 'manual' ? `<span class="tag">${t('lib.manual')}</span>`
-      : `<span class="tag warn">${t('lib.estimated')}</span>`;
+    // 问题5：去掉所有"实测"字样，不显示 srcTag badge
     // 删除按钮挂在卡片外层右上角，避免和「点击看大图」抢事件
     h += `<div class="cupwrap">
     <div class="cupcard${v.image_url ? ' has-img' : ''}" data-img="${esc(v.image_url || '')}">
@@ -2455,7 +2446,7 @@ function showVariantGroup(key) {
       <div class="meta">
         <div class="code mono">${esc(v.code)}</div>
         <div class="dim">${v.positions} ${t('dwg.pos')} · ${esc(v.grid || '-')}</div>
-        <div class="dim">${sizeMM(v)}${srcTag}</div>
+        <div class="dim">${sizeMM(v)}</div>
         ${v.description ? `<div class="desc">${esc(v.description)}</div>` : ''}
       </div></div>
       <button class="cupdel" data-del="${v.id}" data-code="${esc(v.code)}"
