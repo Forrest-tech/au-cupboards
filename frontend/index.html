@@ -961,6 +961,74 @@ function closeModal() {
   $('#mask').classList.remove('on');
 }
 
+// ============================================================ 问题15：导出
+/** 导出楼层×柜型结果：MD / CSV / HTML（打印成PDF） */
+function showExportModal() {
+  const j = S.job;
+  if (!j) { toast(t('empty.notparsed'), 'err'); return; }
+  $('#modal').innerHTML = `
+    <div class="mhead"><b>${LANGNOW==='zh'?'导出方案':'Export'}</b>
+      <button class="btn" onclick="closeModal()" style="float:right">✕</button></div>
+    <div class="mbody" style="padding:16px;display:flex;flex-direction:column;gap:10px">
+      <div class="muted" style="font-size:12px">${LANGNOW==='zh'
+        ? '导出当前项目的楼层 × 柜型匹配结果'
+        : 'Export floor × cupboard matching results'}</div>
+      <button class="btn pri" onclick="doExport('md')">📄 Markdown (.md)</button>
+      <button class="btn pri" onclick="doExport('csv')">📊 CSV (.csv)</button>
+      <button class="btn pri" onclick="doExport('html')">🖨️ HTML（${LANGNOW==='zh'?'打印成 PDF':'print to PDF'}）</button>
+    </div>`;
+  $('#mask').classList.add('on');
+}
+
+function buildExportData() {
+  const j = S.job;
+  const rows = [];
+  for (const f of (j.floors || [])) {
+    const units = (j.units || []).filter(u => u.floor === f.floor_code);
+    const n = units.length;
+    // 找匹配的柜型
+    const matched = S.variants.filter(v => v.source === 'dwg' && Number(v.positions || 0) === n);
+    rows.push({
+      floor: f.floor_code,
+      units: n,
+      cupboards: matched.map(v => `${v.code || ''} (${fmtMM(v.w)}×${fmtMM(v.h)}mm)`).join('; ') || '-',
+    });
+  }
+  return rows;
+}
+
+function doExport(fmt) {
+  const rows = buildExportData();
+  const jname = (S.job?.name || 'export').replace(/[^\w\-]+/g, '_');
+  let content, mime, ext;
+  if (fmt === 'md') {
+    content = `# ${LANGNOW==='zh'?'楼层×柜型方案':'Floor × Cupboard'}\n\n`;
+    content += `| ${LANGNOW==='zh'?'楼层':'Floor'} | ${LANGNOW==='zh'?'户数':'Units'} | ${LANGNOW==='zh'?'匹配柜型':'Cupboards'} |\n|---|---|---|\n`;
+    for (const r of rows) content += `| ${r.floor} | ${r.units} | ${r.cupboards} |\n`;
+    mime = 'text/markdown'; ext = 'md';
+  } else if (fmt === 'csv') {
+    content = (LANGNOW==='zh'?'楼层,户数,匹配柜型\n':'Floor,Units,Cupboards\n');
+    for (const r of rows) content += `"${r.floor}",${r.units},"${r.cupboards}"\n`;
+    mime = 'text/csv'; ext = 'csv';
+  } else {
+    content = `<html><head><meta charset="utf-8"><title>${jname}</title>
+      <style>table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:8px}th{background:#f5f5f5}</style>
+      </head><body><h1>${LANGNOW==='zh'?'楼层×柜型方案':'Floor × Cupboard'}</h1>
+      <table><tr><th>${LANGNOW==='zh'?'楼层':'Floor'}</th><th>${LANGNOW==='zh'?'户数':'Units'}</th><th>${LANGNOW==='zh'?'匹配柜型':'Cupboards'}</th></tr>`;
+    for (const r of rows) content += `<tr><td>${r.floor}</td><td>${r.units}</td><td>${r.cupboards}</td></tr>`;
+    content += `</table></body></html>`;
+    mime = 'text/html'; ext = 'html';
+  }
+  const blob = new Blob([content], { type: mime + ';charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${jname}.${ext}`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  closeModal();
+  toast(LANGNOW==='zh' ? `已导出 ${jname}.${ext}` : `Exported ${jname}.${ext}`, 'ok');
+}
+
 // ============================================================ 启动
 /** DWG 后端缺失时的安装指引弹窗。
  *  文案走 i18n（后端返回的 dwg_hint 只有中文，英文界面下不可用），
@@ -1006,10 +1074,8 @@ async function boot() {
     $('#hstat').innerHTML =
       `<span class="huser" id="huser" title="${LANGNOW==='zh'?'用户':'User'}"><svg class="ic" aria-hidden="true"><use href="#i-user"></use></svg> <span>${LANGNOW==='zh'?'用户':'User'}</span></span>
        <button class="hexport" id="hexport" title="${LANGNOW==='zh'?'导出方案':'Export'}">⬇ ${LANGNOW==='zh'?'导出':'Export'}</button>`;
-    // 导出按钮点击事件（问题15的具体导出逻辑后续实现）
-    $('#hexport').onclick = () => {
-      toast(LANGNOW==='zh' ? '导出功能开发中，支持 PDF / Word / JPG / MD' : 'Export coming soon: PDF / Word / JPG / MD', 'info');
-    };
+    // 导出按钮点击事件（问题15：导出楼层×柜型结果）
+    $('#hexport').onclick = () => showExportModal();
   } catch (e) {
     $('#hstat').innerHTML = `<span class="err-t">${t('hstat.offline')}</span>`;
   }
