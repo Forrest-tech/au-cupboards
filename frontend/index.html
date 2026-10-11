@@ -1162,9 +1162,13 @@ async function doExportPdfFrontend(jname, fileHandle) {
       table { border-collapse: collapse; width: 100%; margin: 10px 0; }
       th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; font-size: 11px; }
       th { background: #f1f5f9; }
-      img { max-width: 100%; height: auto; page-break-inside: avoid; }
+      img { max-width: 45%; max-height: 380px; height: auto; page-break-inside: avoid; margin: 4px; }
       .card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; margin: 10px 0; page-break-inside: avoid; }
-      @media print { body { padding: 0; } }
+      .card img { display: inline-block; vertical-align: top; }
+      @media print {
+        body { padding: 0; }
+        img { max-height: 360px; }
+      }
     </style></head><body>${html}
     <script>window.onload = () => { setTimeout(() => window.print(), 500); }<\/script>
     </body></html>`);
