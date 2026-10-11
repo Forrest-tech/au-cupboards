@@ -637,11 +637,11 @@ tr.floor-row td{background:#eef2f7;font-weight:700;border-top:2px solid var(--li
   </nav>
   <!-- 工作台不放上传入口，默认隐藏，由 gotoView 按 tab 控制 -->
   <button class="hupload" id="bup" style="display:none"><svg class="ic" aria-hidden="true"><use href="#i-upload"></use></svg><span data-i18n="btn.upload">上传图纸</span></button>
+  <div class="hstat" id="hstat">连接中…</div>
   <div class="langsw">
     <button id="lzh" class="on">中文</button>
     <button id="len">EN</button>
   </div>
-  <div class="hstat" id="hstat">连接中…</div>
 </header>
 
 <main>
@@ -1198,8 +1198,12 @@ async function boot() {
            <button data-uact="logout" class="danger">${LANGNOW==='zh'?'🚪 退出登录':'🚪 Sign out'}</button>
          </div>
        </span>`;
-    // 导出按钮
-    $('#hexport').onclick = () => showExportModal();
+    // 导出按钮 —— 只在工作台显示（用户要求）
+    const hexportBtn = $('#hexport');
+    if (hexportBtn) {
+      hexportBtn.onclick = () => showExportModal();
+      if (S.view !== 'work') hexportBtn.style.display = 'none';
+    }
     // 用户菜单开关
     const ub = $('#huserBtn'), um = $('#huserMenu');
     ub.onclick = (e) => { e.stopPropagation(); um.classList.toggle('on'); };
@@ -3926,6 +3930,8 @@ function gotoView(v) {
   // 上传按钮只在「柜型库」「建筑图纸」两个 tab 出现 ——
   // 工作台是看解析结果的，不该摆上传入口
   const bup = $('#bup'); if (bup) bup.style.display = v === 'work' ? 'none' : 'inline-block';
+  // 导出按钮只在工作台出现 —— 用户要求
+  const hexport = $('#hexport'); if (hexport) hexport.style.display = v === 'work' ? '' : 'none';
   // 滚动提示只在工作台的连续预览里才有意义
   const bhelp = $('#bhelp'); if (bhelp) bhelp.style.display = v === 'work' ? '' : 'none';
   // 问题1：建筑图纸 tab 下隐藏编辑按钮和页码 pill
