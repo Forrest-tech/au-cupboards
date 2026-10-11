@@ -655,6 +655,14 @@ tr.floor-row td{background:#eef2f7;font-weight:700;border-top:2px solid var(--li
 
   <!-- ============ 中：文档原样预览 ============ -->
   <div id="mid">
+    <div style="display:flex;flex:1;min-height:0">
+      <div class="page-list" id="pagelist"></div>
+      <div class="viewer" id="viewer">
+        <!-- 静态 HTML 里的 ${...} 不会被求值，必须给真实文本，
+             boot() 会用 t('mid.ph') 覆盖 -->
+        <div class="ph"><div class="big"><svg class="ic" aria-hidden="true"><use href="#i-file-text"></use></svg></div><div>上传建筑图纸后在此原样预览</div></div>
+      </div>
+    </div>
     <div class="mid-bar">
       <span class="fn" id="mfn"></span>
       <button class="btn" id="bedit" title="编辑" style="display:none"><svg class="ic" aria-hidden="true"><use href="#i-pencil"></use></svg></button>
@@ -665,14 +673,6 @@ tr.floor-row td{background:#eef2f7;font-weight:700;border-top:2px solid var(--li
       <button class="btn" id="bzout" title="zoom out"><svg class="ic" aria-hidden="true"><use href="#i-zoom-out"></use></svg></button>
       <span class="badge" id="bzoom">100%</span>
       <button class="btn" id="bzin" title="zoom in"><svg class="ic" aria-hidden="true"><use href="#i-zoom-in"></use></svg></button>
-    </div>
-    <div style="display:flex;flex:1;min-height:0">
-      <div class="page-list" id="pagelist"></div>
-      <div class="viewer" id="viewer">
-        <!-- 静态 HTML 里的 ${...} 不会被求值，必须给真实文本，
-             boot() 会用 t('mid.ph') 覆盖 -->
-        <div class="ph"><div class="big"><svg class="ic" aria-hidden="true"><use href="#i-file-text"></use></svg></div><div>上传建筑图纸后在此原样预览</div></div>
-      </div>
     </div>
   </div>
 
