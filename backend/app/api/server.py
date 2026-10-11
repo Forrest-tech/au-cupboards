@@ -442,9 +442,10 @@ def export_report(job_id: int, fmt: str, body: dict[str, Any]):
 
     if fmt == "pdf":
         from reportlab.lib.pagesizes import A4
-        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Image, Spacer, PageBreak
         from reportlab.lib.styles import getSampleStyleSheet
         from reportlab.lib import colors
+        from reportlab.lib.units import mm
         buf = io.BytesIO()
         doc = SimpleDocTemplate(buf, pagesize=A4)
         styles = getSampleStyleSheet()
@@ -457,6 +458,25 @@ def export_report(job_id: int, fmt: str, body: dict[str, Any]):
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ]))
         elems.append(t)
+        # 每个楼层的柜型图 —— 用户要求：导出内容与页面显示一致
+        for r in rows:
+            imgs = r.get("images") or []
+            if not imgs:
+                continue
+            elems.append(Spacer(1, 8 * mm))
+            elems.append(Paragraph(f"{r.get('floor','')} · {r.get('units','')} Units", styles["Heading2"]))
+            for im in imgs:
+                # url 形如 /api/thumbs/xxx.jpg，转成本地路径
+                try:
+                    iname = Path(im.get("url","")).name
+                    ipath = (THUMB_DIR_PATH / iname).resolve()
+                    if not str(ipath).startswith(str(THUMB_DIR_PATH.resolve())) or not ipath.is_file():
+                        continue
+                    # 宽度 160mm，保持纵横比
+                    elems.append(Paragraph(im.get("code",""), styles["Normal"]))
+                    elems.append(Image(str(ipath), width=160*mm, height=120*mm, kind='proportional'))
+                except Exception:
+                    continue
         doc.build(elems)
         return Response(buf.getvalue(), media_type="application/pdf",
                         headers={"Content-Disposition": f'attachment; filename="{name}.pdf"'})
