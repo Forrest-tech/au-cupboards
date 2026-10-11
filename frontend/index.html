@@ -3342,7 +3342,7 @@ function showDwgResult(r) {
   const btn = $('#bgo');
   if (btn) {
     btn.disabled = true;
-    btn.innerHTML = `<span class="spinref">${ic('refresh')}</span> ${t('up.rendering')}`;
+    btn.innerHTML = `<span class="spin"></span> ${t('up.rendering')}`;
     btn.onclick = null;
   }
 
@@ -3683,7 +3683,7 @@ function setCommitState(state) {
   if (!b) return;
   const map = {
     parsing:   [`<span class="spin"></span> ${t('up.parsing')}`, true],
-    rendering: [`<span class="spinref">${ic('refresh')}</span> ${t('up.rendering')}`, true],
+    rendering: [`<span class="spin"></span> ${t('up.rendering')}`, true],
     ready:     [t('up.commit'), false],
     abort:     [`${ic('x')} ${LANGNOW === 'zh' ? '已放弃入库' : 'Import aborted'}`, true],
     fail:      [t('up.nogo'), true],
