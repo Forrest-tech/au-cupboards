@@ -1533,7 +1533,9 @@ function renderTreeLibrary() {
         <button class="ib" data-lu-rename="${grp.n}" title="${esc(t('lib.rename'))}">${ic('pencil')}</button>
         <button class="ib" data-lu-del="${grp.n}" title="${esc(t('lib.delone'))}">${ic('trash')}</button>
       </span></div>`;
-    if (!uopen) continue;
+    // 单模型组强制展开显示 Model A（用户要求：不能空白）
+    // 多模型组按 uopen 状态
+    if (!uopen && total !== 1) continue;
 
     // 该套数下的每个 model
     for (const { f, u } of grp.files) {
