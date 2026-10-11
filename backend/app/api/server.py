@@ -28,7 +28,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.config import load_config
@@ -40,6 +40,7 @@ from app.models.entities import (
     Drawing,
     DrawingVersion,
     JobStatus,
+    PageParse,
     ParseJob,
     Selection,
     Unit,
@@ -196,6 +197,44 @@ def list_projects() -> list[dict[str, Any]]:
                 }
             )
         return out
+
+
+@app.delete("/api/buildings/{building_id}")
+def delete_building(building_id: int) -> dict[str, Any]:
+    """删除建筑项目及其下全部图纸、版本、解析任务（演示用：从干净系统开始）。
+
+    级联：Building → Drawings → DrawingVersions → ParseJobs → Units/Selections/PageParses，
+    并清理上传的源文件。"""
+    from pathlib import Path as _P
+    with Session(_pipeline().engine) as s:
+        b = s.get(Building, building_id)
+        if b is None:
+            raise HTTPException(404, f"项目 {building_id} 不存在")
+        name = b.name
+        drawings = s.scalars(select(Drawing).where(Drawing.building_id == b.id)).all()
+        for d in drawings:
+            versions = s.scalars(select(DrawingVersion).where(DrawingVersion.drawing_id == d.id)).all()
+            for v in versions:
+                jobs = s.scalars(select(ParseJob).where(ParseJob.drawing_version_id == v.id)).all()
+                for j in jobs:
+                    unit_ids = s.scalars(select(Unit.id).where(Unit.parse_job_id == j.id)).all()
+                    if unit_ids:
+                        s.execute(delete(Selection).where(Selection.unit_id.in_(unit_ids)))
+                        s.execute(delete(Unit).where(Unit.id.in_(unit_ids)))
+                    s.execute(delete(PageParse).where(PageParse.parse_job_id == j.id))
+                    s.delete(j)
+                # 清理上传的源文件
+                try:
+                    fp = _P(v.file_path)
+                    if fp.is_file():
+                        fp.unlink()
+                except OSError:
+                    pass
+                s.delete(v)
+            s.delete(d)
+        s.delete(b)
+        s.commit()
+    return {"deleted": 1, "name": name}
 
 
 @app.post("/api/buildings")

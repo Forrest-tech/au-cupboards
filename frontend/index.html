@@ -1486,7 +1486,10 @@ function renderTree() {
     const open = !S.fold['b' + p.id];
     h += `<div class="node${on}" data-b="${p.id}">
       <span class="nm">${esc(p.name)}</span>
-      <span class="ct">${dw.length}${t('tree.drawings')}</span></div>`;
+      <span class="ct">${dw.length}${t('tree.drawings')}</span>
+      <span class="rowact">
+        <button class="ib" data-del-bid="${p.id}" data-bname="${esc(p.name)}" title="${esc(t('lib.delone'))}">${ic('trash')}</button>
+      </span></div>`;
     if (!open) continue;
     // 用户要求去掉图纸层（"1. A000"），楼层直接挂在项目下
     if (job) {
@@ -1840,6 +1843,20 @@ function bindTreeRename() {
       delVariants(ids);
     };
   });
+
+  // ---- 建筑项目删除（演示用：从干净系统开始）
+  // 与柜型库共用同一套确认框+刷新逻辑
+  $$('#tree [data-del-bid]').forEach(b => {
+    b.onclick = ev => {
+      ev.stopPropagation();
+      const id = +b.dataset.delBid;
+      const nm = b.dataset.bname || '';
+      if (!confirm((LANGNOW === 'zh'
+          ? `删除建筑项目「${nm}」及其下全部图纸和解析结果？`
+          : `Delete building "${nm}" and all its drawings and parse results?`))) return;
+      delBuilding(id);
+    };
+  });
 }
 
 /** 某个 units 数下所有变体记录（units 层批量操作要用）。
@@ -1883,6 +1900,22 @@ async function delVariants(vs) {
   toast((LANGNOW === 'zh' ? `已删除 ${ok} 个柜型` : `Deleted ${ok} variants`)
     + (bad ? `（${bad} 个失败）` : ''), bad ? 'err' : 'ok');
   await loadVariants(); renderTree(); refreshOpenGroups();
+}
+
+/** 删除建筑项目（含图纸、版本、解析任务级联）。与柜型删除共用确认框模式。 */
+async function delBuilding(id) {
+  try {
+    const r = await api(`/buildings/${id}`, { method: 'DELETE' });
+    toast((LANGNOW === 'zh' ? `已删除项目「${r.name}」` : `Deleted building "${r.name}"`), 'ok');
+  } catch (e) {
+    toast((LANGNOW === 'zh' ? '删除失败：' : 'Delete failed: ') + (e.message || e), 'err');
+    return;
+  }
+  // 清掉可能指向已删项目的选中状态
+  if (S.curBuilding === id) S.curBuilding = null;
+  S.job = null; S.jobId = null;
+  S.floorFilter = null; S.floorSel = null;
+  await loadTree(); renderTree();
 }
 
 /** 重渲染后把右侧内容刷回来。
