@@ -1033,8 +1033,11 @@ function showExportModal() {
         return;
       }
       const fmtSel = document.querySelector('#expFmt')?.value || 'pdf';
+      // 用用户输入的文件名，保持一致 —— 用户要求
+      const customName = (document.querySelector('#expName')?.value || '').trim().replace(/[^\w\-\u4e00-\u9fa5]+/g, '_') || 'export';
       const handle = await window.showSaveFilePicker({
-        suggestedName: `export.${fmtSel}`,
+        suggestedName: `${customName}.${fmtSel}`,
+        startIn: 'downloads',
         types: [{ description: 'Export', accept: {'*/*': [`.${fmtSel}`]} }],
       });
       window._expFileHandle = handle;
