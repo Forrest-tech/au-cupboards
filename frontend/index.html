@@ -228,6 +228,11 @@ body.resizing{cursor:col-resize;user-select:none}
 .node{
   display:flex;align-items:center;gap:7px;padding:5px 12px;cursor:pointer;
   border-left:3px solid transparent;transition:.1s;
+  /* 行内管理按钮（.rowact）是绝对定位，锚点必须是自己 ——
+     否则它会飞到最近的定位祖先（比如整个树容器）上去，
+     跑到别的行甚至面板外。加 relative 后按钮稳稳落在本行右侧。
+     padding-right 预留出按钮的位置，按钮显形时不会压住计数数字。 */
+  position:relative;padding-right:58px;
 }
 .node:hover{background:var(--panel2)}
 .node.on{background:var(--panel2);border-left-color:var(--accent)}
@@ -249,6 +254,49 @@ body.resizing{cursor:col-resize;user-select:none}
 /* 树节点的编辑按钮 —— 已改为顶部「编辑」按钮下拉菜单，
    这里只保留 hover 时高亮当前行，不再有逐项按钮。 */
 .node:hover{background:var(--panel2)}
+
+/* ---- 树节点行内管理按钮（重命名 / 删除）----
+ * 用户诉求：「给我管理的功能按钮，可以删除，rename 这些 items」。
+ *
+ * 为什么放行内而不只用顶部「编辑」下拉：
+ *   顶部菜单要先选中节点、再点菜单、再在下拉里挑动作，三步；
+ *   行内按钮鼠标悬停即现，**点哪一行就管哪一行**，少两步也不易点错行。
+ *
+ * 默认 opacity:0，:hover / :focus-within 时显形 —— 不喧宾夺主，
+ * 键盘 Tab 过去也能看见（focus-within 兜底）。
+ * .rowact 绝对定位、不占布局宽度，所以按钮出现不会让整棵树横向抖动。
+ */
+.rowact{
+  position:absolute;right:4px;top:50%;transform:translateY(-50%);
+  display:flex;gap:2px;
+  /* 【真实 bug 修复】不能靠 opacity+pointer-events 来隐藏。
+   *
+   * `pointer-events:none` 会让按钮**完全不可点**，而且不只触屏 ——
+   * Playwright 报「父节点 div intercepts pointer events」，
+   * 自动化测试直接点不到；触屏设备上因为没有 hover，按钮永远显形不了，
+   * 等于彻底不能用。opacity 为 0 的元素仍然可点，于是出现
+   * 「看不见但点得到」的诡异状态：用户看不见按钮，鼠标移进去
+   * 偶然点中，却什么反馈都收不到。
+   *
+   * 正确做法：opacity 控制视觉显隐（保留过渡动画），
+   * visibility 控制可交互性（不可见时真正不接收事件）。
+   */
+  opacity:0;visibility:hidden;
+  transition:opacity .12s ease,visibility .12s;
+}
+.node:hover .rowact,.node:focus-within .rowact,.rowact:focus-within{
+  opacity:1;visibility:visible;
+}
+.ib{
+  width:22px;height:22px;display:grid;place-items:center;
+  border:0;border-radius:5px;background:transparent;color:var(--dim);
+  cursor:pointer;font-size:13px;
+}
+.ib:hover{background:#fff;color:var(--accent);box-shadow:0 1px 4px rgba(15,23,42,.16)}
+.ib.danger:hover{background:#fee2e2;color:var(--err)}
+.ib .ic{width:13px;height:13px}
+/* 触屏没有 hover，永远点不到 —— 直接常显 */
+@media (hover:none){.rowact{opacity:1;visibility:visible}}
 
 /* ---- 顶部「编辑」下拉菜单 ---- */
 .editmenu{
@@ -637,6 +685,7 @@ const I18N = {
     'lib.units': '套', 'lib.rename': '修改名称',
     'lib.del': '删除该柜型', 'lib.deldone': '已删除', 'lib.delfail': '删除失败',
     'lib.delone': '删除该柜型', 'lib.delfile': '删除该图纸下的全部柜型',
+    'lib.novariant': '该分类下没有柜型',
     'lib.mginv': '反向选择', 'lib.clear': '清空解析结果',
     'lib.empty': '柜型库是空的', 'lib.nodwg': '没有从 DWG 解析进来的柜型',
     'mid.none': '未选择文件', 'mid.ph': '上传建筑图纸后在此原样预览',
@@ -705,6 +754,7 @@ const I18N = {
     'lib.units': 'units', 'lib.rename': 'Rename',
     'lib.del': 'Delete this cupboard', 'lib.deldone': 'Deleted', 'lib.delfail': 'Delete failed',
     'lib.delone': 'Delete this cupboard', 'lib.delfile': 'Delete all cupboards in this drawing',
+    'lib.novariant': 'No cupboards under this group',
     'lib.mginv': 'Select the rest', 'lib.clear': 'Clear parsed',
     'lib.empty': 'Library is empty', 'lib.nodwg': 'No DWG-derived cupboards',
     'mid.none': 'No file selected', 'mid.ph': 'Building drawing will be previewed here',
@@ -807,7 +857,31 @@ function toast(msg, kind = '') {
   setTimeout(() => t.remove(), kind === 'err' ? 6500 : 3500);
 }
 async function api(path, opt = {}) {
-  const r = await fetch('/api' + path, opt);
+  // 【真实 bug 修复】body 传裸对象时自动 JSON.stringify。
+  //
+  // 实测事故（本轮挖出）：全站7 处 PATCH/POST 都写成
+  //     api(url, { method:'PATCH', body: { name } })
+  // 而 fetch 的 body 只接受字符串 / Blob / FormData / URLSearchParams，
+  // 传普通对象会被隐式 toString() 变成 **"[object Object]"** ——
+  // 后端 FastAPI 收到后直接 422
+  //     "Input should be a valid dictionary or object to extract fields from"
+  // 于是「柜型重命名」「删除柜型」「清空柜型库」这7 个按钮
+  // 看起来都点了、请求也发出去了，实际全都不生效。
+  //用户看到的现象是「按钮点了没有任何反应」，极难定位 ——
+  // 因为网络面板里确实有一条 200/422，请求根本没缺。
+  //
+  // 这里在 api() 统一兜底：对象/数组自动序列化并补 Content-Type。
+  // 这样既修了已存在的 7 处，也保证以后新写的调用不会再踩。
+  const o = { ...opt };
+  if (o.body !== undefined && o.body !== null && typeof o.body === 'object'
+      && !(o.body instanceof FormData) && !(o.body instanceof Blob)
+      && !(o.body instanceof URLSearchParams) && !(o.body instanceof ArrayBuffer)) {
+    o.body = JSON.stringify(o.body);
+    if (!Object.keys(o.headers || {}).some(h => h.toLowerCase() === 'content-type')) {
+      o.headers = { ...(o.headers || {}), 'Content-Type': 'application/json' };
+    }
+  }
+  const r = await fetch('/api' + path, o);
   if (!r.ok) {
     let d = ''; try { d = (await r.json()).detail || ''; } catch (e) {}
     // 500 且后端已带可读原因 → 直接把原因摊开给用户，
@@ -1227,7 +1301,11 @@ function renderTreeLibrary() {
       <span class="tw">${twIcon(uopen)}</span>
       <span class="ico">${ic('grid')}</span>
       <span class="nm">${grp.n} ${t('lib.units')}</span>
-      <span class="ct">${total}</span></div>`;
+      <span class="ct">${total}</span>
+      <span class="rowact">
+        <button class="ib" data-lu-rename="${grp.n}" title="${esc(t('lib.rename'))}">${ic('pencil')}</button>
+        <button class="ib" data-lu-del="${grp.n}" title="${esc(t('lib.delone'))}">${ic('trash')}</button>
+      </span></div>`;
     if (!uopen) continue;
 
     // 该套数下的每个 model
@@ -1238,7 +1316,11 @@ function renderTreeLibrary() {
         const disp = vLabel(lb.v, lb.suffix.replace(/^-\s*/, 'Model '));
         h += `<div class="node lv2${on}" data-lg="${esc(key)}" data-vid="${esc(lb.v.id)}">
           <span class="nm">${esc(disp)}</span>
-          <span class="ct">${fmtMM(lb.v.w)}×${fmtMM(lb.v.h)}</span></div>`;
+          <span class="ct">${fmtMM(lb.v.w)}×${fmtMM(lb.v.h)}</span>
+          <span class="rowact">
+            <button class="ib" data-rename-vid="${esc(lb.v.id)}" data-vname="${esc(disp)}" title="${esc(t('lib.rename'))}">${ic('pencil')}</button>
+            <button class="ib" data-del-vid="${esc(lb.v.id)}" data-vname="${esc(disp)}" title="${esc(t('lib.delone'))}">${ic('trash')}</button>
+          </span></div>`;
       }
     }
   }
@@ -1366,6 +1448,108 @@ function bindTreeRename() {
       delVariant(id);
     };
   });
+
+  // ---- units 层级重命名 / 删除（用户诉求：
+  //      「给我管理的功能按钮，可以删除，rename 这些 items」）
+  //
+  // units 层是**一组柜**（如「7套」下面有 3 个 model），不是单个柜，
+  // 所以语义是**批量**：改名一次改这一组里所有柜，删除一次删这一组。
+  // 这样用户在 units 层点一下就能管整组，不必逐个 model 点。
+  $$('#tree [data-lu-rename]').forEach(b => {
+    b.onclick = ev => {
+      ev.stopPropagation();
+      const n = +b.dataset.luRename;
+      const ids = variantIdsOfUnits(n);
+      if (!ids.length) { toast(t('lib.novariant'), 'err'); return; }
+      const cur = `${n} ${t('lib.units')}`;
+      const name = prompt(
+        LANGNOW === 'zh'
+          ? `修改「${cur}」下 ${ids.length} 个柜型的名称：`
+          : `Rename all ${ids.length} variants under "${cur}":`,
+        cur);
+      if (name === null) return;
+      const clean = String(name).trim();
+      if (!clean || clean === cur) return;
+      renameVariants(ids, clean);
+    };
+  });
+
+  $$('#tree [data-lu-del]').forEach(b => {
+    b.onclick = ev => {
+      ev.stopPropagation();
+      const n = +b.dataset.luDel;
+      const ids = variantIdsOfUnits(n);
+      if (!ids.length) { toast(t('lib.novariant'), 'err'); return; }
+      if (!confirm((LANGNOW === 'zh'
+          ? `删除「${n} ${t('lib.units')}」下的全部 ${ids.length} 个柜型？`
+          : `Delete all ${ids.length} variants under "${n} units"?`)
+          + `\n${ids.map(x => vLabel(x, x.variant_code)).join('\n')}`)) return;
+      delVariants(ids);
+    };
+  });
+}
+
+/** 某个 units 数下所有变体记录（units 层批量操作要用）。
+ *
+ *  必须从 ``S.variants`` 现算，不能缓存 —— 重命名/删除后列表会变，
+ *  缓存会导致第二次操作作用在已不存在的记录上。
+ */
+function variantIdsOfUnits(nUnits) {
+  const out = [];
+  for (const g of libraryGroups()) {
+    for (const u of g.units) {
+      if (u.n !== nUnits) continue;
+      for (const lb of u.labels) out.push(lb.v);
+    }
+  }
+  return out;
+}
+
+/** 批量重命名。串行执行并逐个回报成功数 ——
+ *  一次性 Promise.all 在部分失败时会静默吞掉一半，用户不知道结果。 */
+async function renameVariants(vs, name) {
+  let ok = 0, bad = 0;
+  for (const v of vs) {
+    try { await api(`/variants/${v.id}/name`, { method: 'PATCH', body: { name } }); ok++; }
+    catch (e) { bad++; }
+  }
+  toast((LANGNOW === 'zh'
+      ? `已重命名 ${ok} 个柜型`
+      : `Renamed ${ok} variants`)
+    + (bad ? `（${bad} 个失败）` : ''), bad ? 'err' : 'ok');
+  await loadVariants(); renderTree(); refreshOpenGroups();
+}
+
+/** 批量删除。同样串行，失败项如实报数。 */
+async function delVariants(vs) {
+  let ok = 0, bad = 0;
+  for (const v of vs) {
+    try { await api(`/variants/${v.id}`, { method: 'DELETE' }); ok++; }
+    catch (e) { bad++; }
+  }
+  toast((LANGNOW === 'zh' ? `已删除 ${ok} 个柜型` : `Deleted ${ok} variants`)
+    + (bad ? `（${bad} 个失败）` : ''), bad ? 'err' : 'ok');
+  await loadVariants(); renderTree(); refreshOpenGroups();
+}
+
+/** 重渲染后把右侧内容刷回来。
+ *
+ *  批量操作会改变当前选中项指向的记录，所以要重新加载一次 ——
+ *  否则右边可能还显示着刚被删掉的那个柜型。
+ *  原来 renameVariant 里是内联写的 `showUnitsGroup(S.treeSel, true)`，
+ *  批量场景下选中项可能已不存在，必须做存在性检查。 */
+function refreshOpenGroups() {
+  const key = S.treeSel;
+  if (!key) return;
+  // 选中项可能已被删除 —— 校验它还在不在
+  if (key.startsWith('u')) {
+    const n = +key.slice(1);
+    if (!variantIdsOfUnits(n).length) { S.treeSel = null; renderTree(); return; }
+  } else if (key.includes('@')) {
+    const id = +key.split('@')[1];
+    if (!(S.variants || []).some(v => v.id === id)) { S.treeSel = null; renderTree(); return; }
+  }
+  showUnitsGroup(key, true);
 }
 
 /** 变体改名 —— 持久化到后端。
@@ -1708,6 +1892,17 @@ function bindTree() {
       if (S.treeSel) showVariantGroup(n.dataset.vg);
     }
   });
+  // 行内管理按钮（重命名 / 删除）的监听。
+  //
+  // 【真实 bug 修复】这个调用**之前根本不存在** —— bindTreeRename()
+  // 定义了 40 行却一次都没被调用，所以行内按钮一直是死按钮：
+  // 点下去什么都不会发生，用户只能干瞪眼。
+  //
+  // 必须放在 bindTree() 的**末尾**：上面的 forEach 用 `n.onclick =`
+  // 给整行绑了「选中/展开」监听，行内按钮靠 `ev.stopPropagation()`
+  // 阻止冒泡来避免误触发，所以两者共存没问题；但顺序上先绑行、
+  // 再绑按钮更符合直觉，读代码时不容易误解。
+  bindTreeRename();
 }
 
 function variantGroups() {
