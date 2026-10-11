@@ -3936,6 +3936,9 @@ function gotoView(v) {
   // 建筑图纸 tab 隐藏整个中栏顶部工具栏（A000标题+按钮），只显示文档内容 —— 用户要求
   const midBar = document.querySelector('.mid-bar');
   if (midBar) midBar.style.display = isBuilding ? 'none' : '';
+  // 建筑图纸 tab 同时隐藏页列表（#pagelist 里的 "1. A000"），只留 PDF —— 用户要求
+  const pagelist = document.querySelector('#pagelist');
+  if (pagelist) pagelist.style.display = isBuilding ? 'none' : '';
   // 工作台也隐藏 A000 文件名标题（#mfn），保留翻页/缩放按钮 —— 用户要求
   const mfn = document.querySelector('#mfn');
   if (mfn) mfn.style.display = (v === 'work' || isBuilding) ? 'none' : '';
