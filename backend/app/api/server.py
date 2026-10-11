@@ -446,6 +446,19 @@ def export_report(job_id: int, fmt: str, body: dict[str, Any]):
         html_content = body.get("html")
         if html_content:
             from weasyprint import HTML
+            import base64, re
+            # 把 /api/thumbs/xxx.jpg 换成本地文件的 base64，否则 WeasyPrint 抓不到图
+            def _embed(m):
+                iname = Path(m.group(1)).name
+                ipath = (THUMB_DIR_PATH / iname).resolve()
+                try:
+                    if str(ipath).startswith(str(THUMB_DIR_PATH.resolve())) and ipath.is_file():
+                        b64 = base64.b64encode(ipath.read_bytes()).decode()
+                        return f'src="data:image/jpeg;base64,{b64}"'
+                except Exception:
+                    pass
+                return m.group(0)
+            html_content = re.sub(r'src="(/api/thumbs/[^"]+)"', _embed, html_content)
             # 基础样式，保证表格和图片正常显示
             full_html = f"""<html><head><meta charset="utf-8">
             <style>
