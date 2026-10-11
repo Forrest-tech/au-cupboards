@@ -971,22 +971,59 @@ function closeModal() {
 }
 
 // ============================================================ 问题15：导出
-/** 导出楼层×柜型结果：MD / CSV / HTML（打印成PDF） */
+/** 导出楼层×柜型结果：标准对话框（格式下拉 + 位置选择） */
 function showExportModal() {
   const j = S.job;
   if (!j) { toast(t('empty.notparsed'), 'err'); return; }
+  const zh = LANGNOW === 'zh';
   $('#modal').innerHTML = `
-    <div class="mhead"><b>${LANGNOW==='zh'?'导出方案':'Export'}</b>
+    <div class="mhead"><b>${zh?'导出方案':'Export plan'}</b>
       <button class="btn" onclick="closeModal()" style="float:right">✕</button></div>
-    <div class="mbody" style="padding:16px;display:flex;flex-direction:column;gap:10px">
-      <div class="muted" style="font-size:12px">${LANGNOW==='zh'
+    <div class="mbody" style="padding:18px;display:flex;flex-direction:column;gap:14px;min-width:340px">
+      <div class="muted" style="font-size:12px">${zh
         ? '导出当前项目的楼层 × 柜型匹配结果'
         : 'Export floor × cupboard matching results'}</div>
-      <button class="btn pri" onclick="doExport('md')">📄 Markdown (.md)</button>
-      <button class="btn pri" onclick="doExport('csv')">📊 CSV (.csv)</button>
-      <button class="btn pri" onclick="doExport('html')">🖨️ HTML（${LANGNOW==='zh'?'打印成 PDF':'print to PDF'}）</button>
+      <label style="display:flex;flex-direction:column;gap:6px;font-size:13px">
+        <span style="font-weight:600">${zh?'导出格式':'Format'}</span>
+        <select id="expFmt" style="padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px">
+          <option value="pdf">📕 PDF (.pdf) — ${zh?'推荐打印':'print-ready'}</option>
+          <option value="docx">📘 Word (.docx)</option>
+          <option value="xlsx">📗 Excel (.xlsx)</option>
+          <option value="csv">📊 CSV (.csv)</option>
+          <option value="md">📄 Markdown (.md)</option>
+          <option value="html">🖨️ HTML (.html)</option>
+          <option value="jpg">🖼️ JPG (.jpg)</option>
+        </select>
+      </label>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:13px">
+        <span style="font-weight:600">${zh?'保存位置':'Save to'}</span>
+        <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;cursor:pointer">
+          <input type="radio" name="expLoc" value="download" checked>
+          <span>💾 ${zh?'本地下载':'Download to device'}</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;cursor:pointer;opacity:.5">
+          <input type="radio" name="expLoc" value="cloud" disabled>
+          <span>☁️ ${zh?'云端（暂未开通）':'Cloud (coming soon)'}</span>
+        </label>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:4px">
+        <button class="btn" onclick="closeModal()">${zh?'取消':'Cancel'}</button>
+        <button class="btn pri" onclick="doExportConfirm()">${zh?'导出':'Export'}</button>
+      </div>
     </div>`;
   $('#mask').classList.add('on');
+}
+
+/** 读取对话框选择并执行导出 */
+function doExportConfirm() {
+  const fmt = document.querySelector('#expFmt')?.value || 'pdf';
+  const loc = document.querySelector('input[name="expLoc"]:checked')?.value || 'download';
+  if (loc !== 'download') {
+    toast(LANGNOW==='zh' ? '云端存储暂未开通' : 'Cloud storage coming soon', 'info');
+    return;
+  }
+  closeModal();
+  doExport(fmt);
 }
 
 function buildExportData() {
@@ -1009,21 +1046,45 @@ function buildExportData() {
 function doExport(fmt) {
   const rows = buildExportData();
   const jname = (S.job?.name || 'export').replace(/[^\w\-]+/g, '_');
+  const zh = LANGNOW === 'zh';
+  const title = zh ? '楼层×柜型方案' : 'Floor × Cupboard';
+
+  // PDF：用浏览器打印（标准做法）
+  if (fmt === 'pdf') {
+    const w = window.open('', '_blank');
+    w.document.write(`<html><head><meta charset="utf-8"><title>${jname}</title>
+      <style>body{font-family:sans-serif}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:8px}th{background:#f5f5f5}</style>
+      </head><body><h1>${title}</h1>
+      <table><tr><th>${zh?'楼层':'Floor'}</th><th>${zh?'户数':'Units'}</th><th>${zh?'匹配柜型':'Cupboards'}</th></tr>${
+      rows.map(r => `<tr><td>${r.floor}</td><td>${r.units}</td><td>${r.cupboards}</td></tr>`).join('')
+      }</table></body></html>`);
+    w.document.close();
+    w.focus();
+    setTimeout(() => w.print(), 300);
+    toast(zh ? '已打开打印对话框，请选择"另存为 PDF"' : 'Print dialog opened — choose "Save as PDF"', 'ok');
+    return;
+  }
+  // DOCX / XLSX / JPG：走后端生成（后端有 python-docx / openpyxl / Pillow）
+  if (['docx', 'xlsx', 'jpg'].includes(fmt)) {
+    doExportViaBackend(fmt, jname);
+    return;
+  }
+
   let content, mime, ext;
   if (fmt === 'md') {
-    content = `# ${LANGNOW==='zh'?'楼层×柜型方案':'Floor × Cupboard'}\n\n`;
-    content += `| ${LANGNOW==='zh'?'楼层':'Floor'} | ${LANGNOW==='zh'?'户数':'Units'} | ${LANGNOW==='zh'?'匹配柜型':'Cupboards'} |\n|---|---|---|\n`;
+    content = `# ${title}\n\n`;
+    content += `| ${zh?'楼层':'Floor'} | ${zh?'户数':'Units'} | ${zh?'匹配柜型':'Cupboards'} |\n|---|---|---|\n`;
     for (const r of rows) content += `| ${r.floor} | ${r.units} | ${r.cupboards} |\n`;
     mime = 'text/markdown'; ext = 'md';
   } else if (fmt === 'csv') {
-    content = (LANGNOW==='zh'?'楼层,户数,匹配柜型\n':'Floor,Units,Cupboards\n');
+    content = (zh?'楼层,户数,匹配柜型\n':'Floor,Units,Cupboards\n');
     for (const r of rows) content += `"${r.floor}",${r.units},"${r.cupboards}"\n`;
     mime = 'text/csv'; ext = 'csv';
   } else {
     content = `<html><head><meta charset="utf-8"><title>${jname}</title>
       <style>table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:8px}th{background:#f5f5f5}</style>
-      </head><body><h1>${LANGNOW==='zh'?'楼层×柜型方案':'Floor × Cupboard'}</h1>
-      <table><tr><th>${LANGNOW==='zh'?'楼层':'Floor'}</th><th>${LANGNOW==='zh'?'户数':'Units'}</th><th>${LANGNOW==='zh'?'匹配柜型':'Cupboards'}</th></tr>`;
+      </head><body><h1>${title}</h1>
+      <table><tr><th>${zh?'楼层':'Floor'}</th><th>${zh?'户数':'Units'}</th><th>${zh?'匹配柜型':'Cupboards'}</th></tr>`;
     for (const r of rows) content += `<tr><td>${r.floor}</td><td>${r.units}</td><td>${r.cupboards}</td></tr>`;
     content += `</table></body></html>`;
     mime = 'text/html'; ext = 'html';
@@ -1034,8 +1095,30 @@ function doExport(fmt) {
   a.download = `${jname}.${ext}`;
   a.click();
   URL.revokeObjectURL(a.href);
-  closeModal();
-  toast(LANGNOW==='zh' ? `已导出 ${jname}.${ext}` : `Exported ${jname}.${ext}`, 'ok');
+  toast(zh ? `已导出 ${jname}.${ext}` : `Exported ${jname}.${ext}`, 'ok');
+}
+
+/** DOCX/XLSX/JPG 走后端生成并下载 */
+async function doExportViaBackend(fmt, jname) {
+  const zh = LANGNOW === 'zh';
+  try {
+    const res = await fetch(`/api/jobs/${S.jobId}/export/${fmt}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ rows: buildExportData(), name: jname }),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${jname}.${fmt}`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast(zh ? `已导出 ${jname}.${fmt}` : `Exported ${jname}.${fmt}`, 'ok');
+  } catch (e) {
+    toast((zh ? '后端导出失败，已降级为 HTML：' : 'Backend export failed, fell back to HTML: ') + e.message, 'err');
+    doExport('html');
+  }
 }
 
 // ============================================================ 启动
