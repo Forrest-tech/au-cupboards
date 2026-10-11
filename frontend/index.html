@@ -2942,6 +2942,11 @@ function renderPages(pages) {
   $('#pagelist').innerHTML = S.pages.map((p, i) =>
     `<div class="pg" data-p="${i}"${isUselessSite(p) ? ' style="display:none"' : ''}>${i + 1}. ${esc((p.title || '').slice(0, 14) || 'p' + (i + 1))}</div>`).join('');
   $$('#pagelist .pg').forEach(e => e.onclick = () => gotoPage(+e.dataset.p));
+  // 兜底：隐藏 pagelist 里任何残留的纯 "Site:" 文本（用户截图里的竖行 Site:）
+  $$('#pagelist .pg').forEach(e => {
+    const txt = e.textContent.replace(/^\d+\.\s*/, '').trim();
+    if (/^site\s*:?\s*$/i.test(txt)) e.style.display = 'none';
+  });
 
   observePages();
   v.scrollTop = 0;
