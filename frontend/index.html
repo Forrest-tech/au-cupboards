@@ -2220,14 +2220,21 @@ function renderMatrix() {
     : (j.floors || []);
   const kpiUnits = kpiFloors.reduce((a, f) => a + Number(f.unit_count || 0), 0);
   const kpiCommunal = kpiFloors.reduce((a, f) => a + Number(f.communal_count || 0), 0);
-  const kpiFloorCount = kpiFloors.length;
+  // 楼层数：选特定楼层时显示当前楼层编号（如 L4 显示 4），选全部时显示总数 —— 用户要求
+  let kpiFloorDisplay = kpiFloors.length;
+  let kpiFloorLabel = t('kpi.floor');
+  if (S.floorFilter) {
+    const m = S.floorFilter.match(/^L(\d+)$/i);
+    kpiFloorDisplay = m ? m[1] : S.floorFilter;
+    kpiFloorLabel = LANGNOW === 'zh' ? '楼层' : 'Floor';
+  }
   // 合规错误数：选特定楼层时无法按层拆分，显示全部（或 0/0）
   const kpiErrors = S.floorFilter ? 0 : (s.errors ?? 0);
   const kpiWarnings = S.floorFilter ? 0 : (s.warnings ?? 0);
   h += `<div class="kpis">
     <div class="kpi g"><div class="v">${kpiUnits}</div><div class="l">${t('kpi.units')}</div></div>
     <div class="kpi p"><div class="v">${kpiCommunal}</div><div class="l">CO-LIVING</div></div>
-    <div class="kpi"><div class="v">${kpiFloorCount}</div><div class="l">${t('kpi.floor')}</div></div>
+    <div class="kpi"><div class="v">${kpiFloorDisplay}</div><div class="l">${kpiFloorLabel}</div></div>
     <div class="kpi ${kpiErrors ? 'r' : 'o'}"><div class="v">${kpiErrors}/${kpiWarnings}</div><div class="l">${t('kpi.compliance')}</div></div>
   </div>`;
 
