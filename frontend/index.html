@@ -3920,6 +3920,9 @@ function gotoView(v) {
   const isBuilding = v === 'building';
   $('#bedit').style.display = isBuilding ? 'none' : '';
   $('#bpage').style.display = isBuilding ? 'none' : '';
+  // 建筑图纸 tab 隐藏左树（竖条块），让 PDF 显示更宽 —— 用户要求
+  $('#tree').style.display = isBuilding ? 'none' : '';
+  $('#dragL').style.display = isBuilding ? 'none' : '';
   // 切 tab 时把左栏选中清掉：不同 tab 的树结构完全不同（柜型库是
   // units→model，工作台/建筑图纸是楼栋→图纸→楼层），留着上一次的
   // 高亮会让用户以为「这个 item 还选中着」。
