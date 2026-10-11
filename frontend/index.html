@@ -4300,6 +4300,10 @@ function gotoView(v) {
     $('#mfn').textContent = '';
     renderTree();     // 树也切：柜型库时只显示柜型分组
     renderHub();
+    // 建筑图纸 tab 无数据时，中栏设建筑占位（renderHub 只处理柜型库）
+    if (S.view === 'building' && !S.jobId) {
+      $('#viewer').innerHTML = `<div class="ph"><div class="big">${ic('file-text')}</div><div>${t('mid.ph')}</div></div>`;
+    }
     // 用户诉求：进入 tab 自动选中第一个 item
     autoSelectFirstInView();
   }
