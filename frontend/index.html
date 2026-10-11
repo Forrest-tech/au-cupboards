@@ -250,6 +250,17 @@ body.resizing{cursor:col-resize;user-select:none}
 .sectreetoolbar,.treetoolbar{display:flex;align-items:center;justify-content:space-between}
 .ttools{display:flex;gap:2px}
 .ttools .ib{padding:2px 5px;font-size:12px}
+.ttools .ib.on{background:var(--accent);color:#fff}
+/* 编辑模式下拉菜单 */
+.treedrop{position:absolute;right:8px;top:50%;transform:translateY(-50%);z-index:5}
+.treemenu{position:absolute;right:0;top:100%;margin-top:4px;background:#fff;
+  border:1px solid var(--line);border-radius:8px;box-shadow:0 4px 16px rgba(15,23,42,.15);
+  min-width:120px;z-index:50;overflow:hidden}
+.treemenu button{display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;
+  border:0;background:none;font-size:13px;color:var(--fg);cursor:pointer;text-align:left}
+.treemenu button:hover{background:var(--panel2)}
+.treemenu button.danger{color:var(--err)}
+.treemenu button.danger:hover{background:#fee2e2}
 .node{
   display:flex;align-items:center;gap:7px;padding:5px 12px;cursor:pointer;
   border-left:3px solid transparent;transition:.1s;
@@ -1469,6 +1480,7 @@ function renderTree() {
     <span class="ttools">
       <button class="ib" id="tExpandAll" title="${LANGNOW==='zh'?'全部展开':'Expand all'}">${ic('expand-all')}</button>
       <button class="ib" id="tCollapseAll" title="${LANGNOW==='zh'?'全部收起':'Collapse all'}">${ic('collapse-all')}</button>
+      <button class="ib" id="tEditMode" title="${LANGNOW==='zh'?'编辑':'Edit'}">${ic('pencil')}</button>
     </span></div>`;
   if (!S.projects.length) {
     h += `<div class="node lv1" style="color:var(--dim)">${t('tree.empty')}</div>`;
@@ -1484,9 +1496,7 @@ function renderTree() {
     h += `<div class="node${on}" data-b="${p.id}">
       <span class="nm">${esc(p.name)}</span>
       <span class="ct">${dw.length}${t('tree.drawings')}</span>
-      <span class="rowact">
-        <button class="ib" data-del-bid="${p.id}" data-bname="${esc(p.name)}" title="${esc(t('lib.delone'))}">${ic('trash')}</button>
-      </span></div>`;
+      ${S.treeEditMode ? `<span class="treedrop"><button class="ib" data-emenu="bid:${p.id}:${esc(p.name)}" title="${LANGNOW==='zh'?'操作':'Actions'}">${ic('more')}</button></span>` : ''}</div>`;
     if (!open) continue;
     // 用户要求去掉图纸层（"1. A000"），楼层直接挂在项目下
     if (job) {
@@ -1632,6 +1642,7 @@ function renderTreeLibrary() {
     <span class="ttools">
       <button class="ib" id="tExpandAll" title="${LANGNOW==='zh'?'全部展开':'Expand all'}">${ic('expand-all')}</button>
       <button class="ib" id="tCollapseAll" title="${LANGNOW==='zh'?'全部收起':'Collapse all'}">${ic('collapse-all')}</button>
+      <button class="ib" id="tEditMode" title="${LANGNOW==='zh'?'编辑':'Edit'}">${ic('pencil')}</button>
     </span></div>`;
   if (!unitsList.length) {
     h += `<div class="node lv1" style="color:var(--dim)">${t('dwg.empty')}</div>`;
@@ -1649,13 +1660,9 @@ function renderTreeLibrary() {
     const usel = S.treeSel === ukey;
     h += `<div class="node${usel ? ' on' : ''}" data-lu="${grp.n}">
       <span class="tw">${twIcon(uopen)}</span>
-      <span class="ico">${ic('grid')}</span>
       <span class="nm">${grp.n} ${t('lib.units')}</span>
       <span class="ct">${total}</span>
-      <span class="rowact">
-        <button class="ib" data-lu-rename="${grp.n}" title="${esc(t('lib.rename'))}">${ic('pencil')}</button>
-        <button class="ib" data-lu-del="${grp.n}" title="${esc(t('lib.delone'))}">${ic('trash')}</button>
-      </span></div>`;
+      ${S.treeEditMode ? `<span class="treedrop"><button class="ib" data-emenu="lu:${grp.n}" title="${LANGNOW==='zh'?'操作':'Actions'}">${ic('more')}</button></span>` : ''}</div>`;
     // 默认收起，与其他组一致 —— 用户要求
     if (!uopen) continue;
 
@@ -1670,10 +1677,7 @@ function renderTreeLibrary() {
         h += `<div class="node lv2${on}" data-lg="${esc(key)}" data-vid="${esc(lb.v.id)}">
           <span class="nm">${esc(disp)}</span>
           <span class="ct">${fmtMM(lb.v.w)}×${fmtMM(lb.v.h)}</span>
-          <span class="rowact">
-            <button class="ib" data-rename-vid="${esc(lb.v.id)}" data-vname="${esc(disp)}" title="${esc(t('lib.rename'))}">${ic('pencil')}</button>
-            <button class="ib" data-del-vid="${esc(lb.v.id)}" data-vname="${esc(disp)}" title="${esc(t('lib.delone'))}">${ic('trash')}</button>
-          </span></div>`;
+          ${S.treeEditMode ? `<span class="treedrop"><button class="ib" data-emenu="vid:${esc(lb.v.id)}:${esc(disp)}" title="${LANGNOW==='zh'?'操作':'Actions'}">${ic('more')}</button></span>` : ''}</div>`;
       }
     }
   }
@@ -1852,6 +1856,76 @@ function bindTreeRename() {
           ? `删除建筑项目「${nm}」及其下全部图纸和解析结果？`
           : `Delete building "${nm}" and all its drawings and parse results?`))) return;
       delBuilding(id);
+    };
+  });
+
+  // ---- 编辑模式下拉菜单（演示用）
+  // 点击 ⋮ 按钮弹出操作菜单：删除 / 重命名 / 移动
+  $$('#tree [data-emenu]').forEach(b => {
+    b.onclick = ev => {
+      ev.stopPropagation();
+      // 关闭已有的菜单
+      document.querySelectorAll('.treemenu').forEach(m => m.remove());
+      const spec = b.dataset.emenu; // 格式: type:payload
+      const [type, ...rest] = spec.split(':');
+      const menu = document.createElement('div');
+      menu.className = 'treemenu';
+      const zh = LANGNOW === 'zh';
+      const btn = (label, icon, danger, fn) => {
+        const el = document.createElement('button');
+        if (danger) el.className = 'danger';
+        el.innerHTML = `${ic(icon)}<span>${label}</span>`;
+        el.onclick = (e) => { e.stopPropagation(); menu.remove(); fn(); };
+        menu.appendChild(el);
+      };
+      if (type === 'lu') {
+        const n = +rest[0];
+        btn(zh ? '重命名' : 'Rename', 'pencil', false, () => {
+          const ids = variantIdsOfUnits(n);
+          if (!ids.length) return;
+          const cur = `${n} ${t('lib.units')}`;
+          const name = prompt(zh ? `修改「${cur}」下 ${ids.length} 个柜型的名称：` : `Rename ${ids.length} variants:`, cur);
+          if (name === null || !name.trim() || name.trim() === cur) return;
+          renameVariants(ids, name.trim());
+        });
+        btn(zh ? '移动' : 'Move', 'more', false, () => {
+          toast(zh ? '演示版暂不支持移动' : 'Move not supported in demo', 'err');
+        });
+        btn(zh ? '删除' : 'Delete', 'trash', true, () => {
+          const ids = variantIdsOfUnits(n);
+          if (!ids.length) return;
+          if (!confirm(zh ? `删除「${n} ${t('lib.units')}」下的全部 ${ids.length} 个柜型？` : `Delete all ${ids.length} variants?`)) return;
+          delVariants(ids);
+        });
+      } else if (type === 'vid') {
+        const id = +rest[0], nm = rest.slice(1).join(':');
+        btn(zh ? '重命名' : 'Rename', 'pencil', false, () => {
+          const name = prompt(zh ? `重命名柜型「${nm}」：` : `Rename variant "${nm}":`, nm);
+          if (name === null || !name.trim() || name.trim() === nm) return;
+          renameVariants([{ id, variant_code: nm }], name.trim());
+        });
+        btn(zh ? '移动' : 'Move', 'more', false, () => {
+          toast(zh ? '演示版暂不支持移动' : 'Move not supported in demo', 'err');
+        });
+        btn(zh ? '删除' : 'Delete', 'trash', true, () => {
+          if (!confirm((zh ? '删除这个柜型？' : 'Delete this variant?') + `\n${nm}`)) return;
+          delVariant(id);
+        });
+      } else if (type === 'bid') {
+        const id = +rest[0], nm = rest.slice(1).join(':');
+        btn(zh ? '删除项目' : 'Delete building', 'trash', true, () => {
+          if (!confirm(zh ? `删除建筑项目「${nm}」及其下全部图纸和解析结果？` : `Delete building "${nm}"?`)) return;
+          delBuilding(id);
+        });
+      }
+      // 移动功能：演示版暂留空
+      b.parentElement.style.position = 'relative';
+      b.parentElement.appendChild(menu);
+      // 点别处关闭
+      const close = (e) => {
+        if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('click', close); }
+      };
+      setTimeout(() => document.addEventListener('click', close), 0);
     };
   });
 }
@@ -2208,6 +2282,16 @@ function bindTree() {
     Object.keys(S.fold).forEach(k => { if (k.startsWith('b')) S.fold[k] = true; });
     renderTree();
   };
+  // 编辑模式切换：显示每项的操作下拉菜单
+  const bedit = $('#tEditMode');
+  if (bedit) {
+    bedit.classList.toggle('on', !!S.treeEditMode);
+    bedit.onclick = (e) => {
+      e.stopPropagation();
+      S.treeEditMode = !S.treeEditMode;
+      renderTree();
+    };
+  }
   $$('#tree .node').forEach(n => n.onclick = ev => {
     // 点箭头只折叠/展开，不触发选中
     const tw = ev.target.closest('.tw');
