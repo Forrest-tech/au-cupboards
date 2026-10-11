@@ -1201,10 +1201,16 @@ async function boot() {
          </div>
        </span>`;
     // 导出按钮 —— 只在工作台显示（用户要求）
+    // 位置：移到语言切换前面 —— 用户要求：导出, 中文/EN, Admin
     const hexportBtn = $('#hexport');
     if (hexportBtn) {
       hexportBtn.onclick = () => showExportModal();
       if (S.view !== 'work') hexportBtn.style.display = 'none';
+      // 移到 .langsw 前面
+      const langsw = document.querySelector('.langsw');
+      if (langsw && hexportBtn.parentElement === $('#hstat')) {
+        langsw.parentElement.insertBefore(hexportBtn, langsw);
+      }
     }
     // 用户菜单开关
     const ub = $('#huserBtn'), um = $('#huserMenu');
