@@ -3274,7 +3274,7 @@ function bindScrollNav() {
 }
 
 function setZoom(z) {
-  S.zoom = Math.max(0.4, Math.min(4, z));
+  S.zoom = Math.max(0.4, Math.min(6, z));
   $('#bzoom').textContent = `${Math.round(S.zoom * 100)}%`;
   reflowPages();
   // 柜型图 / 图纸缩略图不是走 renderPages 的 PDF 页，只改 S.zoom
