@@ -3005,10 +3005,12 @@ function pageStep(d) { gotoPage(S.curPage + d); }
 /** 重新按当前缩放重排全部页面 */
 function reflowPages() {
   if (!S.pages?.length || !$('#viewer').classList.contains('scrollmode')) return;
-  const keepTop = $('#viewer').scrollTop;
+  // 缩放时按页码恢复，而不是按像素恢复滚动位置——
+  // 缩放后页面高度变了，旧的 scrollTop 会指向错误的页（用户报的"从page 9跳到page 3"）
+  const keepPage = S.curPage || 0;
   renderPages(S.pages);
-  //重排后按比例还原滚动位置，避免跳回开头
-  requestAnimationFrame(() => { $('#viewer').scrollTop = keepTop; });
+  //重排后回到同一页，避免乱跳
+  requestAnimationFrame(() => { gotoPage(keepPage, 'instant'); });
 }
 
 /** 滚动联动 + 滚轮快速翻页 —— 只绑一次。
