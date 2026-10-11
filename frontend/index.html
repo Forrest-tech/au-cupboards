@@ -2488,7 +2488,9 @@ function cupboardsForUnits(n) {
     // 只认 DWG 实测柜型。库里还躺着 11 条早期 seed_poc 演示数据
     //（尺寸 estimated、无渲染图），把它们算进来会让「L4 有 3 户」
     // 冒出 5 种柜型 —— 演示数据不是真实选型依据。
-    .filter(v => v.source === 'dwg' && v.image_url)
+    // 注意：不要过滤 v.image_url，为空时模板会显示占位符；
+    // 否则库里有柜但图还没渲染出来时，楼层下方的大图区直接消失（用户报的 bug）
+    .filter(v => v.source === 'dwg')
     .filter(v => Number(v.positions || 0) === want)
     .sort((a, b) => (Number(a.w) - Number(b.w)) || (Number(a.h) - Number(b.h))
       || String(a.code).localeCompare(String(b.code)));
