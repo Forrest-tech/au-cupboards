@@ -50,6 +50,11 @@ nav button:hover{background:var(--panel2);color:var(--txt)}
 nav button.on{background:var(--accent);color:#fff}
 .hstat{font-size:11px;color:var(--dim);white-space:nowrap;display:flex;align-items:center;gap:10px}
 .hstat b{color:var(--ok)}
+/* 问题13：用户区 + 导出区样式 */
+.huser{display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);cursor:pointer;font-size:12px}
+.huser:hover{background:var(--panel2)}
+.hexport{padding:5px 12px;border-radius:6px;background:var(--ok);color:#fff;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:5px}
+.hexport:hover{filter:brightness(0.95)}
 
 /* 语言切换 + 顶栏上传按钮 */
 .langsw{display:flex;border:1px solid var(--line);border-radius:5px;overflow:hidden;background:#fff}
@@ -991,13 +996,14 @@ async function boot() {
     }
     // 记住后端给的 dwg_hint，供徽章点击时展示
     S.dwgHint = h.dwg_hint || null;
+    // 问题13：去掉"规则 v1.2"和"DWG 就绪"，换成用户区 + 导出区
     $('#hstat').innerHTML =
-      `${LANGNOW==='zh'?'规则':'Rules'} v${esc(h.config_version)} · ${h.dwg_ready
-        ? `<span class="badge on">${t('dwg.ready')}</span>`
-        : `<span class="badge link" id="bdwg" title="${esc(t('dwg.hint.title'))}">${t('dwg.none')}</span>`}`;
-    // 后端已给出可执行指引，前端必须消费它 —— 否则用户只看到「未装后端」却不知道怎么办
-    const bw = $('#bdwg');
-    if (bw) bw.onclick = () => showDwgHint(S.dwgHint);
+      `<span class="huser" id="huser" title="${LANGNOW==='zh'?'用户':'User'}"><svg class="ic" aria-hidden="true"><use href="#i-user"></use></svg> <span>${LANGNOW==='zh'?'用户':'User'}</span></span>
+       <button class="hexport" id="hexport" title="${LANGNOW==='zh'?'导出方案':'Export'}">⬇ ${LANGNOW==='zh'?'导出':'Export'}</button>`;
+    // 导出按钮点击事件（问题15的具体导出逻辑后续实现）
+    $('#hexport').onclick = () => {
+      toast(LANGNOW==='zh' ? '导出功能开发中，支持 PDF / Word / JPG / MD' : 'Export coming soon: PDF / Word / JPG / MD', 'info');
+    };
   } catch (e) {
     $('#hstat').innerHTML = `<span class="err-t">${t('hstat.offline')}</span>`;
   }
