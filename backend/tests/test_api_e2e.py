@@ -555,3 +555,82 @@ def test_replace_with_unknown_id_falls_back(client):
                 if v["code"] == "TEST-GHOST-1"), None)
     if vid:
         client.delete(f"/api/variants/{vid}")
+
+
+class TestSameGeometryDifferentCode:
+    """回归锁死：**同尺寸但 code 不同**的柜体必须各自入库、图也各归各。
+    真实 bug：前端 :func:`detectDuplicates` 曾用「宽±1mm + 高±1mm +
+    套数相等」判重，把 DWG 里三对物理不同的柜体误判成同一个，
+    叠加「替换」分支后互相覆盖图片。
+    """
+
+    # 真实 DWG「Cold and hot water ...detail 1.dwg」里的三对柜体，
+    # 尺寸与套数完全相同，但各自独立、图内容互不相同。
+    REAL_PAIRS = [
+        ("CP-7p-11", "CP-7p-16", 1415, 2350, 7),
+        ("CP-10p-08", "CP-10p-22", 1765, 2350, 10),
+        ("CP-13p-01", "CP-13p-23", 2115, 2350, 13),
+    ]
+
+    def test_same_geometry_different_code_both_created(self, client):
+        """先入 A 再入 B（几何全同、code 不同）→ 必须建 2 条。"""
+        a_code, b_code, w, h, pos = self.REAL_PAIRS[0]
+        n0 = len(client.get("/api/variants").json())
+        for code in (a_code, b_code):
+            up = client.post("/api/cupboards/from-dwg", json={
+                "source_file": "real.dwg", "source_name": "real",
+                "variants": [{"code": code, "rows": 1, "cols": pos,
+                              "w": w, "h": h, "positions": pos}],
+            })
+            assert up.status_code == 200, up.text
+            assert up.json()["created"] == 1, f"{code} 没入库"
+        vs = client.get("/api/variants").json()
+        assert len(vs) == n0 + 2, "同尺寸柜体被当重复合并了"
+        # 宽高套数确实一样 —— 这是本测试成立的前提
+        got = {v["code"]: v for v in vs}
+        assert got[a_code]["w"] == got[b_code]["w"]
+        assert got[a_code]["positions"] == got[b_code]["positions"]
+        for code in (a_code, b_code):
+            client.delete(f"/api/variants/{got[code]['id']}")
+
+    def test_each_variant_points_to_its_own_image(self, client):
+        """带 render 提交时，每条记录的 image_url 必须对应自己的 code。
+
+        真实 bug 现场：``CP-7p-11`` 的 ``image_path`` 指向了
+        ``CP-7p-16.jpg`` —— 前端把它的 code 判成已存在 CP-7p-16 并走了
+        替换分支，导致柜型点开看到的是另一个柜的图。
+        """
+        code, w, h, pos = "CP-IMG-OWN", 1415, 2350, 7
+        up = client.post("/api/cupboards/from-dwg", json={
+            "source_file": "real.dwg", "source_name": "real",
+            "renders": [
+                {"block_name": code, "ok": True,
+                 "image_name": f"{code}.jpg", "width_mm": w, "height_mm": h,
+                 "layer_counts": {}, "texts": []},
+            ],
+            "variants": [{"code": code, "block_name": code,
+                          "rows": 1, "cols": pos, "w": w, "h": h,
+                          "positions": pos}],
+        })
+        assert up.status_code == 200, up.text
+        assert up.json()["created"] == 1, up.text
+        v = next(x for x in client.get("/api/variants").json()
+                 if x["code"] == code)
+        assert v.get("image_url", "").endswith(f"{code}.jpg"), (
+            f"图片错位：{v.get('image_url')} 应为 {code}.jpg")
+        client.delete(f"/api/variants/{v['id']}")
+
+    def test_same_code_twice_is_still_deduped(self, client):
+        """同一 code 重复入库仍必须去重（不能矫枉过正）。"""
+        code, w, h, pos = "CP-SAMECODE-1", 1315, 2250, 6
+        n0 = len(client.get("/api/variants").json())
+        for _ in range(2):
+            up = client.post("/api/cupboards/from-dwg", json={
+                "source_file": "real.dwg", "source_name": "real",
+                "variants": [{"code": code, "rows": 1, "cols": pos,
+                              "w": w, "h": h, "positions": pos}],
+            })
+            assert up.status_code == 200, up.text
+        vs = client.get("/api/variants").json()
+        assert len(vs) == n0 + 1, "同一 code 被重复入库"
+        client.delete(f"/api/variants/{next(v['id'] for v in vs if v['code'] == code)}")

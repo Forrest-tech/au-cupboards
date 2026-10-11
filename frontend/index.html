@@ -3027,9 +3027,29 @@ function setCommitState(state) {
 
 /** 检测本次要入库的柜型里，哪些在柜型库中已存在（用户诉求 #E）。
  *
- *  判定口径必须与后端一致（宽±1mm、高±1mm、套数相等），
- *  否则前端提示「已存在」而真入库时后端又新建一条。
- *  放在前端做是为了**立刻**弹提示；后端仍会再校验一次兜底。
+ *  【真实 bug 修复】判定口径必须是 **variant_code 精确相同**，
+ *  不能用「宽±1mm + 高±1mm + 套数相等」这种几何口径。
+ *
+ *  实测事故（真实 DWG「Cold and hot water ...detail 1.dwg」）：
+ *  DWG 里本来就有**三对物理上不同的柜体**，宽高套数完全相同：
+ *      CP-7p-11   1415×2350  7 套      CP-7p-16   1415×2350  7 套
+ *      CP-10p-08  1765×2350  10 套     CP-10p-22  1765×2350  10 套
+ *      CP-13p-01  2115×2350  13 套     CP-13p-23  2115×2350  13 套
+ *  它们是图纸上六个不同位置的柜子，各自的图内容也不一样
+ *  （实测 sha1 互不相同），并且用户给的权威口径就是
+ *  「7 units = 3 套」——即这些同尺寸柜子**必须各自保留**。
+ *
+ *  旧代码用几何口径判重，于是：
+ *    1. CP-7p-11 被判成「已存在 CP-7p-16」→ 弹重复提示；
+ *    2. 用户选「替换」→ 后端把 CP-7p-16 的图写进 CP-7p-16 那条记录，
+ *       而真正该入库的 CP-7p-11 反而没入库；
+ *    3. 结果库里 23 柜只剩 20 条，且 CP-7p-11 的 image_path
+ *       指向了 CP-7p-16.jpg —— **柜型看图看错**。
+ *
+ *  正确口径：柜型的身份就是 ``variant_code``（它由 DWG 柜体序号生成，
+ *  同图重传时 code 不变）。几何相同只能作为**提示**，不能作为判重依据。
+ *  现在改为 code 相同才算重复；几何相同但 code 不同 → 视为不同柜型，
+ *  正常入库。
  */
 async function detectDuplicates() {
   S.dupList = [];
@@ -3039,11 +3059,13 @@ async function detectDuplicates() {
     const mine = dwgVariantsFromRenders((S.renders || []).filter(r => r.ok));
     if (!mine.length) return;
     const pool = (S.variants || []).filter(v => v.source === 'dwg');
+    // code -> 已有记录。同一code 只应有一条；若有，取第一条。
+    const byCode = new Map();
+    for (const x of pool) {
+      if (!byCode.has(String(x.code))) byCode.set(String(x.code), x);
+    }
     for (const v of mine) {
-      const hit = pool.find(x =>
-        Math.abs(Number(x.w) - Number(v.w)) <= 1 &&
-        Math.abs(Number(x.h) - Number(v.h)) <= 1 &&
-        Number(x.positions || 0) === Number(v.positions || 0));
+      const hit = byCode.get(String(v.code));
       if (hit) {
         S.dupList.push({ code: v.code, id: hit.id, w: v.w, h: v.h,
                          positions: v.positions, old: hit.code });
