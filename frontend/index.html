@@ -1141,16 +1141,48 @@ function doExport(fmt, fileHandle, customName) {
   saveExportBlob(blob, `${jname}.${ext}`, fileHandle);
 }
 
-/** PDF/DOCX/XLSX/JPG 走后端生成并保存 */
+/** PDF：前端直接用浏览器打印生成，不依赖后端 WeasyPrint（用户 Mac 上装不上系统库） */
+async function doExportPdfFrontend(jname, fileHandle) {
+  const zh = LANGNOW === 'zh';
+  const rpane = document.querySelector('#rpane');
+  if (!rpane) {
+    toast(zh ? '没有可导出的内容' : 'Nothing to export', 'err');
+    return;
+  }
+  // 新窗口写入右侧 HTML，调用浏览器打印（用户选"存储为 PDF"）
+  const w = window.open('', '_blank');
+  if (!w) {
+    toast(zh ? '浏览器阻止了弹窗，请允许后重试' : 'Popup blocked, please allow and retry', 'err');
+    return;
+  }
+  // 图片转 base64，确保打印时能显示
+  let html = rpane.innerHTML;
+  w.document.write(`<html><head><meta charset="utf-8"><title>${jname}</title>
+    <style>
+      body { font-family: -apple-system, sans-serif; font-size: 12px; color: #1e293b; padding: 20px; }
+      table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+      th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; font-size: 11px; }
+      th { background: #f1f5f9; }
+      img { max-width: 100%; height: auto; page-break-inside: avoid; }
+      .card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; margin: 10px 0; page-break-inside: avoid; }
+      @media print { body { padding: 0; } }
+    </style></head><body>${html}
+    <script>window.onload = () => { setTimeout(() => window.print(), 500); }<\/script>
+    </body></html>`);
+  w.document.close();
+  toast(zh ? '已打开打印预览，请选择"存储为 PDF"' : 'Print preview opened, choose "Save as PDF"', 'info');
+}
+
+/** DOCX/XLSX/JPG 走后端生成并保存；PDF 走前端浏览器打印 */
 async function doExportViaBackend(fmt, jname, fileHandle) {
   const zh = LANGNOW === 'zh';
+  // PDF 走前端，不经过后端
+  if (fmt === 'pdf') {
+    await doExportPdfFrontend(jname, fileHandle);
+    return;
+  }
   try {
-    // PDF：发送页面右侧的实际 HTML，原样转 PDF —— 用户要求与页面显示一致
     const body = { rows: buildExportData(), name: jname };
-    if (fmt === 'pdf') {
-      const rpane = document.querySelector('#rpane');
-      if (rpane) body.html = rpane.innerHTML;
-    }
     const res = await fetch(`/api/jobs/${S.jobId}/export/${fmt}`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
