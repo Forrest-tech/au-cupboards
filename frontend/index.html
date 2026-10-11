@@ -1357,8 +1357,9 @@ function renderTree() {
     h += `<div class="node lv1" style="color:var(--dim)">${t('tree.empty')}</div>`;
   }
   for (const p of S.projects) {
-    // 只有一个 item 高亮：选了楼层时项目不高亮 —— 用户要求
-    const on = (S.curBuilding === p.id && !S.floorFilter) ? ' on' : '';
+    // 项目节点不高亮 —— 它是容器标题，可选项是"所有楼层"和各楼层
+    // 用户要求：树里同时只有一个高亮项
+    const on = '';
     const job = S.job;
     const dw = p.drawings || [];
     // 楼栋节点上的箭头：折叠/展开。展开后每张图纸各占一个 item
