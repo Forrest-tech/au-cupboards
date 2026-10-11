@@ -2214,12 +2214,21 @@ function renderMatrix() {
 
   let h = '<div class="rpane">';
 
-  // KPI
+  // KPI —— 根据 S.floorFilter 过滤：选特定楼层时只显示该层数据
+  const kpiFloors = S.floorFilter
+    ? (j.floors || []).filter(f => f.floor_code === S.floorFilter)
+    : (j.floors || []);
+  const kpiUnits = kpiFloors.reduce((a, f) => a + Number(f.unit_count || 0), 0);
+  const kpiCommunal = kpiFloors.reduce((a, f) => a + Number(f.communal_count || 0), 0);
+  const kpiFloorCount = kpiFloors.length;
+  // 合规错误数：选特定楼层时无法按层拆分，显示全部（或 0/0）
+  const kpiErrors = S.floorFilter ? 0 : (s.errors ?? 0);
+  const kpiWarnings = S.floorFilter ? 0 : (s.warnings ?? 0);
   h += `<div class="kpis">
-    <div class="kpi g"><div class="v">${s.total_units ?? 0}</div><div class="l">${t('kpi.units')}</div></div>
-    <div class="kpi p"><div class="v">${s.communal_units ?? 0}</div><div class="l">CO-LIVING</div></div>
-    <div class="kpi"><div class="v">${(j.floors || []).length}</div><div class="l">${t('kpi.floor')}</div></div>
-    <div class="kpi ${s.errors ? 'r' : 'o'}"><div class="v">${s.errors ?? 0}/${s.warnings ?? 0}</div><div class="l">${t('kpi.compliance')}</div></div>
+    <div class="kpi g"><div class="v">${kpiUnits}</div><div class="l">${t('kpi.units')}</div></div>
+    <div class="kpi p"><div class="v">${kpiCommunal}</div><div class="l">CO-LIVING</div></div>
+    <div class="kpi"><div class="v">${kpiFloorCount}</div><div class="l">${t('kpi.floor')}</div></div>
+    <div class="kpi ${kpiErrors ? 'r' : 'o'}"><div class="v">${kpiErrors}/${kpiWarnings}</div><div class="l">${t('kpi.compliance')}</div></div>
   </div>`;
 
   // 交叉验证
