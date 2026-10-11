@@ -2291,10 +2291,6 @@ function renderMatrix() {
         <td colspan="2" class="muted">${g.u.length > 8 ? g.u.slice(0, 8).join(' ') + ' …' : g.u.join(' ')}</td>
         <td>
           <div class="mtxcell">
-            ${img
-              ? `<span class="mthumb" data-mt="${esc(img)}" title="${esc(code)}">
-                   <img loading="lazy" src="${esc(img)}" alt="${esc(code)}" onerror="this.closest('.mthumb').classList.add('no');this.remove()"></span>`
-              : `<span class="mthumb no" title="${esc(t('lib.noimg'))}">${ic('image-off')}</span>`}
             <span class="mtxinfo">
               <div><b class="mono">${esc(code)}</b>
                 ${v.name ? '<span class="muted"> — ' + esc(v.name) + '</span>' : ''}
