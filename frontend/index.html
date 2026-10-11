@@ -1363,6 +1363,10 @@ function renderTree() {
   // 柜型库 tab：树里**只**显示柜型分组，不再混入楼栋（用户诉求：
   //「切换到柜型库，还是显示的楼栋的内容」）
   if (S.view === 'cupboard') { renderTreeLibrary(); return; }
+  // 强制同步 floorFilter 与 floorSel，避免左右不一致 —— 用户多次报的 bug
+  // 建筑图纸 tab 以 floorSel 为准，工作台以 floorFilter 为准
+  if (S.view === 'building') S.floorFilter = S.floorSel;
+  else S.floorSel = S.floorFilter;
 
   // 问题8a：建筑项目树顶部同样加展开/收起工具栏
   let h = `<div class="sec treetoolbar"><span>${t('tree.projects')}</span>
