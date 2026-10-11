@@ -2000,9 +2000,11 @@ function renderMatrix() {
       // 缩略图来源：``unit.variant`` 里**没有 image_url**（job 接口不返回
       // 图片路径），所以按 variant id 去已加载的 S.variants 里查图。
       // 查不到再退回「本层 units 数匹配的柜型图」。
+      // 问题10：放宽匹配——id/code 任一命中即可；URL 为空时不渲染 img
       const img = S.variants.find(x =>
         String(x.id) === String(v.id) && x.image_url)?.image_url
-        || all.find(x => x.code === code)?.image_url || '';
+        || all.find(x => x.code === code)?.image_url
+        || all.find(x => x.code && code && x.code.replace(/-/g,'').toLowerCase() === code.replace(/-/g,'').toLowerCase())?.image_url || '';
       if (img) mtxThumbs.push([img, code]);
       h += `<tr>
         <td style="padding-left:16px;color:var(--dim)">└</td>
@@ -2012,7 +2014,7 @@ function renderMatrix() {
           <div class="mtxcell">
             ${img
               ? `<span class="mthumb" data-mt="${esc(img)}" title="${esc(code)}">
-                   <img loading="lazy" src="${esc(img)}" alt="${esc(code)}"></span>`
+                   <img loading="lazy" src="${esc(img)}" alt="${esc(code)}" onerror="this.closest('.mthumb').classList.add('no');this.remove()"></span>`
               : `<span class="mthumb no" title="${esc(t('lib.noimg'))}">${ic('image-off')}</span>`}
             <span class="mtxinfo">
               <div><b class="mono">${esc(code)}</b>
