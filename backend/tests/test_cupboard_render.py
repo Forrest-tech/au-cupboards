@@ -425,3 +425,79 @@ class TestRenderInternals:
         """字体探测不能抛异常 —— 它决定要不要渲染文字。"""
         from app.parsers.cupboard_render import _fonts_available
         assert isinstance(_fonts_available(), bool)
+
+
+class TestOutlierEntityFilter:
+    """离群实体过滤（本轮修的「图黑黢黢 + 尺寸不对」根因）。
+
+    实测事故（真实 DWG「Cold and hot water ...detail 1.dwg」）：
+      2CONC 图层有一条 **4414 × 6215mm** 的 LWPOLYLINE（建筑轮廓线），
+      它横跨整张图纸，任何位置的柜体其 bbox 都与它「有交集」，
+      于是被 :func:`_entity_near` 当成柜内零件抠进视图 ——
+      视图 bbox 从柜体的 ~915×1750mm 被撑到 4414×6215mm（放大 13~17 倍），
+      画布比例随之失真，内容缩在角落、仪表糊成黑块。
+      受影响的柜型：CP-3p-14 / CP-3p-15 / CP-4p-13。
+    """
+
+    def test_ratio_threshold_allows_normal_parts(self):
+        """阈值必须容得下柜内最大的正常零件。"""
+        from app.parsers.cupboard_render import _OUTLIER_AREA_RATIO
+        assert _OUTLIER_AREA_RATIO >= 2.0, (
+            "阈值太小会把正常的柜框线/尺寸标注一起误杀")
+        # 实测：柜内最大零件是 250×450mm 的 gas meter 表组
+        # （约 0.11 m²），最小的柜是 915×1750mm（约 1.6 m²）
+        assert 250 * 450 < (915 * 1750) * _OUTLIER_AREA_RATIO
+
+    def test_giant_polyline_is_rejected(self):
+        """4414×6215mm 的建筑轮廓线必须被拒（真实尺寸回归）。"""
+        import ezdxf
+        from app.parsers.cupboard_geometry import Rect
+        from app.parsers.cupboard_render import _entity_near
+        doc = ezdxf.new()
+        msp = doc.modelspace()
+        # 柜体 915 × 1750mm
+        rect = Rect(0.0, 0.0, 915.0, 1750.0, "1CO", None, -1, "LINE_PAIR")
+        # 一条覆盖整张图纸的巨型闭合多段线，起点落在柜内
+        giant = msp.add_lwpolyline(
+            [(100.0, 100.0), (4514.0, 100.0), (4514.0, 6315.0), (100.0, 6315.0)],
+            close=True)
+        giant.dxf.layer = "2CONC"
+        doc.layers.new("2CONC")
+        assert not _entity_near(giant, rect), (
+            "4414×6215mm 的建筑轮廓线被当成柜内零件了 —— 会把 bbox 撑大 17 倍")
+
+    def test_normal_part_inside_is_kept(self):
+        """柜内正常零件必须保留 —— 不能过滤过头。"""
+        import ezdxf
+        from app.parsers.cupboard_geometry import Rect
+        from app.parsers.cupboard_render import _entity_near
+        doc = ezdxf.new()
+        msp = doc.modelspace()
+        rect = Rect(0.0, 0.0, 915.0, 1750.0, "1CO", None, -1, "LINE_PAIR")
+        # 250 × 450mm 的 gas meter 表组轮廓（实测真实尺寸）
+        meter = msp.add_lwpolyline(
+            [(300.0, 600.0), (550.0, 600.0), (550.0, 1050.0), (300.0, 1050.0)],
+            close=True)
+        assert _entity_near(meter, rect), "柜内正常表组被误杀了"
+
+    def test_frame_line_on_border_is_kept(self):
+        """柜框线正好压在边界上，必须保留 —— 纯 contains 会漏。"""
+        import ezdxf
+        from app.parsers.cupboard_geometry import Rect
+        from app.parsers.cupboard_render import _entity_near
+        doc = ezdxf.new()
+        msp = doc.modelspace()
+        rect = Rect(0.0, 0.0, 915.0, 1750.0, "1CO", None, -1, "LINE_PAIR")
+        frame = msp.add_line((0.0, 0.0), (915.0, 1750.0))  # 对角线
+        assert _entity_near(frame, rect), "压在柜边界上的柜框线被误杀了"
+
+    def test_entity_far_away_is_rejected(self):
+        """完全在柜外的实体仍然要拒。"""
+        import ezdxf
+        from app.parsers.cupboard_geometry import Rect
+        from app.parsers.cupboard_render import _entity_near
+        doc = ezdxf.new()
+        msp = doc.modelspace()
+        rect = Rect(0.0, 0.0, 915.0, 1750.0, "1CO", None, -1, "LINE_PAIR")
+        far = msp.add_line((5000.0, 5000.0), (5100.0, 5100.0))
+        assert not _entity_near(far, rect)

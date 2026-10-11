@@ -1073,6 +1073,16 @@ def _cabinet_code(cup, idx: int) -> str:
     return f"CP-{n}p-{idx + 1:02d}"
 
 
+#: 离群实体面积阈值（倍数）。见 :func:`_entity_near` 的 docstring。
+#:
+#: 实测：真实 DWG 里柜内最大的正常零件是 250×450mm 的 gas meter 表组
+#: （占 1.8m 柜体面积的 0.1%）；而那条撑坏 bbox 的 2CONC 建筑轮廓线
+#: 是 4414×6215mm，是柜体面积的 **13～17 倍**。3.0 的阈值把两者
+#: 分得很开，留足余量：即使再宽裕的柜型（2165×2350mm），3 倍阈值也
+#: 只到 3.6 m²，远高于任何单个柜内零件。
+_OUTLIER_AREA_RATIO = 3.0
+
+
 def _entity_near(e, rect, tol: float = 2.0) -> bool:
     """实体是否落在 ``rect`` 内（含容差）。
 
@@ -1089,16 +1099,51 @@ def _entity_near(e, rect, tol: float = 2.0) -> bool:
 
     现在统一走 :func:`_entity_extents`（与柜型识别用的是同一个函数，
     保证「数出14 套」和「渲出 14 个表」必然一致）。
+
+    【真实 bug 修复】排除「面积远超柜体」的离群实体
+    ---------------------------------------------------------
+    判据从「bbox 与柜体**有交集**」收紧为「bbox 被柜体**基本包住**」。
+
+    实测事故（真实 DWG「Cold and hot water ...detail 1.dwg」）：
+      2CONC图层 有一条 **4414 × 6215mm** 的 LWPOLYLINE（建筑轮廓线），
+      它覆盖了整张图纸。任何落在图纸中间的柜体，它的 bbox 都与这条
+      巨型轮廓线「有交集」，于是被误当成柜内零件抠进视图。
+
+      后果有两条，都直接被用户看见：
+        1. 视图 bbox 从柜体的 ~915×1750mm 被撑到4414×6215mm
+           —— 放大13～17 倍。:func:`_pick_size` 按这个错误比例算画布，
+           于是「柜型图里只有左上角一小块、右下大片空白」。
+           用户原话：「解析的还是黑黢黢的。图的尺寸也是不对」。
+        2. 命中它的3 个柜型（CP-3p-14 / CP-3p-15 / CP-4p-13）各多出
+           一条 4414×6215mm 的粗轮廓线，这条线画出来又粗又长，
+           在缩略图上就是一道黑带 —— 这是「黑黢黢」的直接来源。
+
+      判据用**面积比**而不是「必须完全包含」：柜框线与柜体边界重合、
+      DIMENSION 标注会略微探出，纯 contains 会把正常的柜框线和尺寸标注
+      一起误杀（实测 CP-5p-*等 20 个柜的柜框线都压在边界上）。
+      ``max_ratio=3.0`` 表示「实体面积超过柜体 3 倍就放弃」——
+      正常柜内零件（最大 250×450mm 的 gas meter 表组）远小于此，
+      而 4414×6215mm 的建筑轮廓是 13～17 倍，一刀切得很干净。
     """
     try:
         r = _entity_extents(e)
     except Exception:
-        r = None
+        return False
     if r is None:
         return False
     # 有交集即算命中：柜框线正好压在边界上，纯 contains 会漏
-    return not (r.x1 < rect.x0 - tol or r.x0 > rect.x1 + tol
-                or r.y1 < rect.y0 - tol or r.y0 > rect.y1 + tol)
+    if (r.x1 < rect.x0 - tol or r.x0 > rect.x1 + tol
+            or r.y1 < rect.y0 - tol or r.y0 > rect.y1 + tol):
+        return False
+    # 离群过滤：见docstring 的实测事故说明
+    cab_w = rect.x1 - rect.x0
+    cab_h = rect.y1 - rect.y0
+    cab_area = cab_w * cab_h
+    if cab_area > 0:
+        ent_area = max(0.0, r.x1 - r.x0) * max(0.0, r.y1 - r.y0)
+        if ent_area > cab_area * _OUTLIER_AREA_RATIO:
+            return False
+    return True
 
 
 def rect_from_entity_safe(ent):
