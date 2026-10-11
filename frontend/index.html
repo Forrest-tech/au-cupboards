@@ -853,6 +853,22 @@ function applyI18n() {
     hb.innerHTML = `⬇ ${LANGNOW === 'zh' ? '导出' : 'Export'}`;
     hb.title = LANGNOW === 'zh' ? '导出方案' : 'Export';
   }
+  // 用户菜单：跟语言切换 —— 用户报的 bug
+  const um = $('#huserMenu');
+  if (um) {
+    const zh = LANGNOW === 'zh';
+    const uname = um.querySelector('.mhead b')?.textContent || 'Admin';
+    um.innerHTML = `
+      <div class="mhead"><b>${esc(uname)}</b><span>${zh ? '已登录' : 'Signed in'}</span></div>
+      <button data-uact="profile">${zh ? '👤 个人设置' : '👤 Profile settings'}</button>
+      <button data-uact="security">${zh ? '🔒 账号安全' : '🔒 Account security'}</button>
+      <button data-uact="prefs">${zh ? '⚙️ 偏好设置' : '⚙️ Preferences'}</button>
+      <button data-uact="logout" class="danger">${zh ? '🚪 退出登录' : '🚪 Sign out'}</button>`;
+    // 重新绑定点击事件
+    um.querySelectorAll('button').forEach(b => {
+      b.onclick = () => userMenuAction(b.dataset.uact);
+    });
+  }
   gotoView(S.view);
 }
 
