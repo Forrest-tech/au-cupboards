@@ -2721,13 +2721,8 @@ function showUnitsGroup(key, keepScroll) {
   else $('#viewer').innerHTML = `<div class="ph"><div class="big">${ic('image-off')}</div>
     <div>${t('lib.noimg')}</div></div>`;
 
-  let h = `<div class="sec" style="padding-left:0">
-      ${dispName(fname)} · <b>${n} ${t('lib.units')}</b> ·
-      ${LANGNOW === 'zh' ? '共' : ''} ${pool.length}
-      ${LANGNOW === 'zh' ? '种摆法' : (pool.length === 1 ? 'layout' : 'layouts')}
-      ${onlyId ? `<span style="color:var(--dim)"> · ${LANGNOW === 'zh' ? '仅显示' : 'showing'} ${
-        n}${suffixOf(items[0])}</span>` : ''}
-    </div>`;
+  // 用户要求去掉标题行（"FCD6...-COLD AND HOT WATER... · 3 套 · 共 2 种摆法"）
+  let h = '';
   if (pool.length > 1 && !onlyId) {
     h += `<div class="alert ok" style="margin-bottom:10px">
       ${LANGNOW === 'zh'
