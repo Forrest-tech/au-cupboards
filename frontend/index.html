@@ -1982,7 +1982,11 @@ function renderMatrix() {
 
   // 缩略图点开大图：走中栏的 showCupImage，与柜型库一致
   const mtxThumbs = [];
-  for (const f of (j.floors || [])) {
+  // 问题16b：按选中楼层过滤（S.floorFilter 为 null 时显示全部）
+  const floorsToShow = S.floorFilter
+    ? (j.floors || []).filter(f => f.floor_code === S.floorFilter)
+    : (j.floors || []);
+  for (const f of floorsToShow) {
     const units = (j.units || []).filter(u => u.floor === f.floor_code);
     const groups = {};
     for (const u of units) {
@@ -2014,7 +2018,7 @@ function renderMatrix() {
         || all.find(x => x.code && code && x.code.replace(/-/g,'').toLowerCase() === code.replace(/-/g,'').toLowerCase())?.image_url || '';
       if (img) mtxThumbs.push([img, code]);
       h += `<tr>
-        <td style="padding-left:16px;color:var(--dim)">└</td>
+        <td style="padding-left:16px"></td>
         <td class="num muted">${g.n}</td>
         <td colspan="2" class="muted">${g.u.length > 8 ? g.u.slice(0, 8).join(' ') + ' …' : g.u.join(' ')}</td>
         <td>
@@ -2183,7 +2187,13 @@ function emptyBox(_t, _s) {
 }
 
 // ============================================================ 动作
-function filterFloor(code) { S.floorFilter = S.floorFilter === code ? null : code; S.pane = 'detail'; syncTabs(); renderDetail(); }
+function filterFloor(code) {
+  // 问题16a：点击楼层不自动跳到单元明细 tab，停留在当前 tab
+  S.floorFilter = S.floorFilter === code ? null : code;
+  // 问题16b：楼层×柜型 tab 按选中楼层过滤（renderMatrix 会读 S.floorFilter）
+  if (S.pane === 'matrix') renderMatrix();
+  else renderDetail();
+}
 
 /** 某楼层要用哪些柜型 —— 按「该层 units 数」去柜型库里取。
  *
