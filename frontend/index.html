@@ -847,6 +847,12 @@ function applyI18n() {
   $$('[data-i18n-title]').forEach(e => { e.title = t(e.dataset.i18nTitle); });
   $('#lzh').classList.toggle('on', LANGNOW === 'zh');
   $('#len').classList.toggle('on', LANGNOW === 'en');
+  // 导出按钮：跟语言切换 —— 用户报的 bug
+  const hb = $('#hexport');
+  if (hb) {
+    hb.innerHTML = `⬇ ${LANGNOW === 'zh' ? '导出' : 'Export'}`;
+    hb.title = LANGNOW === 'zh' ? '导出方案' : 'Export';
+  }
   gotoView(S.view);
 }
 
