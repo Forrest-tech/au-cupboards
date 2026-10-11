@@ -1166,6 +1166,8 @@ async function doExportPdfFrontend(jname, fileHandle) {
       image: { type: 'jpeg', quality: 0.95 },
       html2canvas: { scale: 2, useCORS: true },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      // 避免卡片被分页截断 —— 用户要求
+      pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
     };
     const pdfBlob = await window.html2pdf().set(opt).from(rpane).outputPdf('blob');
     saveExportBlob(pdfBlob, `${jname}.pdf`, fileHandle);
