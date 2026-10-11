@@ -4232,9 +4232,11 @@ function gotoView(v) {
   const bpage = $('#bpage'); if (bpage) bpage.style.display = isBuilding ? 'none' : '';
   // 建筑图纸 tab 隐藏左树（竖条块），让 PDF 显示更宽 —— 用户要求
   // 2026-10-11 11:45 用户反悔：左树要恢复，只隐藏 pagelist
-  // 2026-10-11 19:25 用户要求：柜型库 tab 不要左树
-  const treeEl = $('#tree'); if (treeEl) treeEl.style.display = v === 'cupboard' ? 'none' : '';
-  const dragEl = $('#dragL'); if (dragEl) dragEl.style.display = v === 'cupboard' ? 'none' : '';
+  const treeEl = $('#tree'); if (treeEl) treeEl.style.display = '';
+  const dragEl = $('#dragL'); if (dragEl) dragEl.style.display = '';
+  // 2026-10-11 19:28 用户要求：柜型库 tab 隐藏右侧竖条（#rpane）
+  const rpaneEl = $('#rpane'); if (rpaneEl) rpaneEl.style.display = v === 'cupboard' ? 'none' : '';
+  const dragREl = $('#dragR'); if (dragREl) dragREl.style.display = v === 'cupboard' ? 'none' : '';
   // 隐藏页列表（#pagelist 里的 "1. A000"），只留 PDF —— 用户要求工作台与建筑图纸保持一致
   // 用 body class 强制隐藏，避免被内联样式覆盖
   document.body.classList.toggle('hide-pagelist', isBuilding || v === 'work');
