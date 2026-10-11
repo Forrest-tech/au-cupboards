@@ -403,6 +403,8 @@ body.resizing{cursor:col-resize;user-select:none}
   width:120px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--line);
   overflow-y:auto;padding:5px 0;
 }
+/* 建筑图纸 tab 强制隐藏 pagelist（"1. A000"）—— 用户多次要求 */
+body.hide-pagelist #pagelist{display:none !important}
 .page-list .pg{
   padding:4px 10px;font-size:11px;cursor:pointer;color:var(--dim);
   border-left:3px solid transparent;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
@@ -3990,8 +3992,8 @@ function gotoView(v) {
   const midBar = document.querySelector('.mid-bar');
   if (midBar) midBar.style.display = isBuilding ? 'none' : '';
   // 建筑图纸 tab 同时隐藏页列表（#pagelist 里的 "1. A000"），只留 PDF —— 用户要求
-  const pagelist = document.querySelector('#pagelist');
-  if (pagelist) pagelist.style.display = isBuilding ? 'none' : '';
+  // 用 body class 强制隐藏，避免被内联样式覆盖
+  document.body.classList.toggle('hide-pagelist', isBuilding);
   // 工作台也隐藏 A000 文件名标题（#mfn），保留翻页/缩放按钮 —— 用户要求
   const mfn = document.querySelector('#mfn');
   if (mfn) mfn.style.display = (v === 'work' || isBuilding) ? 'none' : '';
