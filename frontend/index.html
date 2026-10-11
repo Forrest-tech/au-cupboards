@@ -2317,25 +2317,28 @@ function renderMatrix() {
     // 上面的分组是「解析器实际派给各户的柜型」，这里补的是
     // 「这一层需要 N 户，柜型库里到底有几种 N Units 的柜可选」——
     // 两者不是一回事，缺一不可。
+    // 即使 all 为空也显示标题行，避免用户以为「L4没有对应的柜型图」是 bug
+    h += `<tr><td colspan="5" style="padding:8px 0 12px">
+      <div class="mtxlib">
+        <div class="mtxlibhd">${LANGNOW === 'zh'
+          ? `${f.floor_code} · ${n} Units → 柜型库中 ${all.length} 种`
+          : `${f.floor_code} · ${n} units → ${all.length} layouts in library`}</div>`;
     if (all.length) {
-      h += `<tr><td colspan="5" style="padding:8px 0 12px">
-        <div class="mtxlib">
-          <div class="mtxlibhd">${LANGNOW === 'zh'
-            ? `${f.floor_code} · ${n} Units → 柜型库中 ${all.length} 种`
-            : `${f.floor_code} · ${n} units → ${all.length} layouts in library`}</div>
-          <div class="cupgrid" style="padding:0">
-            ${all.map(v => `<div class="cupcard${v.image_url ? ' has-img' : ''}"
-              data-mtimg="${esc(v.image_url || '')}">
-              <div class="thumb">${v.image_url
-                ? `<img loading="lazy" src="${esc(v.image_url)}" alt="${esc(v.code)}">`
-                : `<div class="noph">${t('lib.noimg')}</div>`}</div>
-              <div class="meta">
-                <div class="code mono">${esc(v.code)}</div>
-                <div class="dim">${fmtMM(v.w)} × ${fmtMM(v.h)} mm</div>
-              </div></div>`).join('')}
-          </div>
-        </div></td></tr>`;
+      h += `<div class="cupgrid" style="padding:0">
+          ${all.map(v => `<div class="cupcard${v.image_url ? ' has-img' : ''}"
+            data-mtimg="${esc(v.image_url || '')}">
+            <div class="thumb">${v.image_url
+              ? `<img loading="lazy" src="${esc(v.image_url)}" alt="${esc(v.code)}">`
+              : `<div class="noph">${t('lib.noimg')}</div>`}</div>
+            <div class="meta">
+              <div class="code mono">${esc(v.code)}</div>
+              <div class="dim">${fmtMM(v.w)} × ${fmtMM(v.h)} mm</div>
+            </div></div>`).join('')}
+        </div>`;
+    } else {
+      h += `<div class="muted" style="padding:8px 0">${LANGNOW==='zh' ? '库中暂无该户数的柜型' : 'No matching layouts in library'}</div>`;
     }
+    h += `</div></td></tr>`;
   }
   h += '</tbody></table>';
 
@@ -3931,6 +3934,9 @@ function gotoView(v) {
   $('#dragL').style.display = isBuilding ? 'none' : '';
   // 建筑图纸 tab 隐藏整个中栏顶部工具栏（A000标题+按钮），只显示文档内容 —— 用户要求
   document.querySelector('.mid-bar').style.display = isBuilding ? 'none' : '';
+  // 工作台也隐藏 A000 文件名标题（#mfn），保留翻页/缩放按钮 —— 用户要求
+  const mfn = document.querySelector('#mfn');
+  if (mfn) mfn.style.display = (v === 'work' || isBuilding) ? 'none' : '';
   // 切 tab 时把左栏选中清掉：不同 tab 的树结构完全不同（柜型库是
   // units→model，工作台/建筑图纸是楼栋→图纸→楼层），留着上一次的
   // 高亮会让用户以为「这个 item 还选中着」。
