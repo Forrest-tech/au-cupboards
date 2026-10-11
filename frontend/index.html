@@ -1145,10 +1145,16 @@ function doExport(fmt, fileHandle, customName) {
 async function doExportViaBackend(fmt, jname, fileHandle) {
   const zh = LANGNOW === 'zh';
   try {
+    // PDF：发送页面右侧的实际 HTML，原样转 PDF —— 用户要求与页面显示一致
+    const body = { rows: buildExportData(), name: jname };
+    if (fmt === 'pdf') {
+      const rpane = document.querySelector('#rpane');
+      if (rpane) body.html = rpane.innerHTML;
+    }
     const res = await fetch(`/api/jobs/${S.jobId}/export/${fmt}`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ rows: buildExportData(), name: jname }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const blob = await res.blob();

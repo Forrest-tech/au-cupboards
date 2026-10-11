@@ -441,6 +441,26 @@ def export_report(job_id: int, fmt: str, body: dict[str, Any]):
     title = "Floor × Cupboard Plan"
 
     if fmt == "pdf":
+        # 用户要求：PDF 内容与页面右侧显示原样一致
+        # 前端发送 #rpane 的实际 HTML，用 WeasyPrint 转 PDF
+        html_content = body.get("html")
+        if html_content:
+            from weasyprint import HTML
+            # 基础样式，保证表格和图片正常显示
+            full_html = f"""<html><head><meta charset="utf-8">
+            <style>
+              body {{ font-family: sans-serif; font-size: 11px; color: #1e293b; }}
+              table {{ border-collapse: collapse; width: 100%; margin: 8px 0; }}
+              th, td {{ border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; }}
+              th {{ background: #f1f5f9; }}
+              img {{ max-width: 100%; height: auto; }}
+              .card {{ border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px; margin: 8px 0; }}
+            </style></head><body>{html_content}</body></html>"""
+            buf = io.BytesIO()
+            HTML(string=full_html).write_pdf(buf)
+            return Response(buf.getvalue(), media_type="application/pdf",
+                            headers={"Content-Disposition": f'attachment; filename="{name}.pdf"'})
+        # 降级：没有 HTML 时用原来的表格方式
         from reportlab.lib.pagesizes import A4
         from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Image, Spacer, PageBreak
         from reportlab.lib.styles import getSampleStyleSheet
