@@ -1362,40 +1362,23 @@ function renderTree() {
       <span class="ico">${ic('folder')}</span><span class="nm">${esc(p.name)}</span>
       <span class="ct">${dw.length}${t('tree.drawings')}</span></div>`;
     if (!open) continue;
-    // ---- 每张图纸一个 item ----
-    for (const d of dw) {
-      const sel = S.treeSel === 'floors' && S.openDrawing === d.id ? ' on' : '';
-      const dopen = S.openDrawing === d.id;
-      h += `<div class="node lv1${sel}" data-sel="d${d.id}">
-        <span class="tw">${d.latest_job_id ? twIcon(dopen) : '·'}</span>
-        <span class="ico">${ic('file-text')}</span><span class="nm">${esc(d.title || t('nav.building'))}</span>
-        <span class="ct">${d.page_count || 0}p</span></div>`;
-      // 图纸展开 -> 该图纸自己的楼层（按 latest_job_id 过滤）
-      const djob = (d.latest_job_id === S.jobId) ? job : null;
-      if (dopen && djob) {
-        h += `<div class="node lv1${S.treeSel === 'floors' ? ' on' : ''}" data-sel="floors">
-          <span class="tw">${twIcon(false)}</span>
-          <span class="ico">${ic('layers')}</span><span class="nm">${t('tree.floors')}</span>
-          <span class="ct">${djob.floors?.length || 0}</span></div>`;
-        if (S.treeSel === 'floors') {
-          for (const f of (djob.floors || [])) {
-            // 建筑图纸 tab 下当前楼层要高亮 —— 用户靠这个判断
-            //「右栏这批柜型是给哪一层看的」
-            const fo = S.view === 'building' && S.floorSel === f.floor_code
-              ? ' on' : '';
-            h += `<div class="node lv2${fo}" data-floor="${esc(f.floor_code)}">
-              <span class="nm">${esc(f.floor_code)}</span>
-              <span class="ct">${f.unit_count}${LANGNOW==='zh'?'户':' u'}${f.communal_count ? '+' + f.communal_count : ''}</span></div>`;
-          }
+    // 用户要求去掉图纸层（"1. A000"），楼层直接挂在项目下
+    if (job) {
+      h += `<div class="node lv1${S.treeSel === 'floors' ? ' on' : ''}" data-sel="floors">
+        <span class="tw">${twIcon(false)}</span>
+        <span class="ico">${ic('layers')}</span><span class="nm">${t('tree.floors')}</span>
+        <span class="ct">${job.floors?.length || 0}</span></div>`;
+      if (S.treeSel === 'floors') {
+        for (const f of (job.floors || [])) {
+          // 建筑图纸 tab 下当前楼层要高亮 —— 用户靠这个判断
+          //「右栏这批柜型是给哪一层看的」
+          const fo = S.view === 'building' && S.floorSel === f.floor_code
+            ? ' on' : '';
+          h += `<div class="node lv2${fo}" data-floor="${esc(f.floor_code)}">
+            <span class="nm">${esc(f.floor_code)}</span>
+            <span class="ct">${f.unit_count}${LANGNOW==='zh'?'户':' u'}${f.communal_count ? '+' + f.communal_count : ''}</span></div>`;
         }
       }
-    }
-    if (!dw.length && job) {
-      // 兼容：老数据只有 job 没有 drawing 记录
-      h += `<div class="node lv1${S.treeSel === 'floors' ? ' on' : ''}" data-sel="floors">
-        <span class="tw">${twIcon(false)}</span><span class="ico">${ic('layers')}</span>
-        <span class="nm">${t('tree.floors')}</span>
-        <span class="ct">${job.floors?.length || 0}</span></div>`;
     }
   }
   $('#tree').innerHTML = h;
