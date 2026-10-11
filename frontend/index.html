@@ -1281,7 +1281,14 @@ function autoSelectFirstInView() {
   // 建筑图纸 tab：刷新恢复来的楼层选中要直接兑现（否则右栏停在项目列表）
   if (S.view === 'building' && S.treeSel === 'floors' && S.floorSel) {
     const f = (S.job?.floors || []).find(x => x.floor_code === S.floorSel);
-    if (f) { showFloorPanel(S.floorSel); return; }
+    if (f) {
+      // 同步 floorFilter，保证左树高亮与右栏一致 —— 用户报的 bug：
+      // 左树显示"所有楼层"高亮，右栏却显示 L4
+      S.floorFilter = S.floorSel;
+      renderTree();
+      showFloorPanel(S.floorSel);
+      return;
+    }
     S.floorSel = null;
   }
   if (S.treeSel) {
