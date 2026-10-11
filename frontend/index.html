@@ -250,7 +250,9 @@ body.resizing{cursor:col-resize;user-select:none}
   position:relative;padding-right:58px;
 }
 .node:hover{background:var(--panel2)}
-.node.on{background:var(--panel2);border-left-color:var(--accent)}
+/* 问题6a：选中高亮加强 —— 更明显的背景色 + 左侧 accent 边框 + 文字加粗 */
+.node.on{background:#dbeafe;border-left-color:var(--accent)}
+.node.on .nm{font-weight:600;color:var(--accent2)}
 .node .ico{width:14px;text-align:center;opacity:.75;font-size:11px}
 /* 折叠箭头 */
 .node .tw{
@@ -1829,7 +1831,12 @@ function bindTree() {
       renderTree();
       return;
     }
-    if (n.dataset.b) { S.curBuilding = +n.dataset.b; S.treeSel = null; renderTree(); }
+    if (n.dataset.b) {
+      // 问题8b：点击根节点同时切换折叠/展开状态
+      const fk = 'b' + n.dataset.b;
+      S.fold[fk] = !S.fold[fk];
+      S.curBuilding = +n.dataset.b; S.treeSel = null; renderTree();
+    }
     else if (n.dataset.lu !== undefined) {
       // 柜型库根节点 = units 数量。点它 -> 右侧显示该套数下**全部** model。
       const nUnits = Number(n.dataset.lu);
