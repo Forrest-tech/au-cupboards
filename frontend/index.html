@@ -49,11 +49,20 @@ nav button{
 nav button:hover{background:var(--panel2);color:var(--txt)}
 nav button.on{background:var(--accent);color:#fff}
 .hstat{font-size:11px;color:var(--dim);white-space:nowrap;display:flex;align-items:center;gap:10px}
-.hstat b{color:var(--ok)}
-/* 问题13：用户区 + 导出区样式 */
-.huser{display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);cursor:pointer;font-size:12px}
-.huser:hover{background:var(--panel2)}
-.hexport{padding:5px 12px;border-radius:6px;background:var(--ok);color:#fff;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:5px}
+/* 问题13：标准网站式用户菜单 */
+.huser{position:relative}
+.huser-btn{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);cursor:pointer;font-size:12px;font-weight:500}
+.huser-btn:hover{background:var(--panel2)}
+.huser-btn .avatar{width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700}
+.huser-menu{position:absolute;right:0;top:calc(100% + 6px);min-width:180px;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:100;display:none;overflow:hidden}
+.huser-menu.on{display:block}
+.huser-menu .mhead{padding:10px 14px;border-bottom:1px solid var(--line);font-size:12px}
+.huser-menu .mhead b{display:block;font-size:13px}
+.huser-menu .mhead span{color:var(--dim);font-size:11px}
+.huser-menu button{display:flex;align-items:center;gap:8px;width:100%;padding:9px 14px;border:0;background:none;cursor:pointer;font-size:12.5px;color:var(--fg);text-align:left}
+.huser-menu button:hover{background:var(--panel2)}
+.huser-menu button.danger{color:#dc2626}
+.hexport{padding:5px 12px;border-radius:6px;background:var(--ok);color:#fff;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:5px;border:0;cursor:pointer}
 .hexport:hover{filter:brightness(0.95)}
 
 /* 语言切换 + 顶栏上传按钮 */
@@ -1070,12 +1079,45 @@ async function boot() {
     }
     // 记住后端给的 dwg_hint，供徽章点击时展示
     S.dwgHint = h.dwg_hint || null;
-    // 问题13：去掉"规则 v1.2"和"DWG 就绪"，换成用户区 + 导出区
+    // 问题13：标准网站式用户菜单（右上：导出 + 用户名下拉）
+    // 用户名为登录账号，默认显示；下拉含设置/退出等
+    const uname = (h.user_name || h.username || 'Admin');
+    const uinitial = uname.charAt(0).toUpperCase();
     $('#hstat').innerHTML =
-      `<span class="huser" id="huser" title="${LANGNOW==='zh'?'用户':'User'}"><svg class="ic" aria-hidden="true"><use href="#i-user"></use></svg> <span>${LANGNOW==='zh'?'用户':'User'}</span></span>
-       <button class="hexport" id="hexport" title="${LANGNOW==='zh'?'导出方案':'Export'}">⬇ ${LANGNOW==='zh'?'导出':'Export'}</button>`;
-    // 导出按钮点击事件（问题15：导出楼层×柜型结果）
+      `<button class="hexport" id="hexport" title="${LANGNOW==='zh'?'导出方案':'Export'}">⬇ ${LANGNOW==='zh'?'导出':'Export'}</button>
+       <span class="huser" id="huser">
+         <button class="huser-btn" id="huserBtn" title="${esc(uname)}">
+           <span class="avatar">${esc(uinitial)}</span><span>${esc(uname)}</span><span style="font-size:9px;color:var(--dim)">▾</span>
+         </button>
+         <div class="huser-menu" id="huserMenu">
+           <div class="mhead"><b>${esc(uname)}</b><span>${LANGNOW==='zh'?'已登录':'Signed in'}</span></div>
+           <button data-uact="profile">${LANGNOW==='zh'?'👤 个人设置':'👤 Profile settings'}</button>
+           <button data-uact="security">${LANGNOW==='zh'?'🔒 账号安全':'🔒 Account security'}</button>
+           <button data-uact="prefs">${LANGNOW==='zh'?'⚙️ 偏好设置':'⚙️ Preferences'}</button>
+           <button data-uact="logout" class="danger">${LANGNOW==='zh'?'🚪 退出登录':'🚪 Sign out'}</button>
+         </div>
+       </span>`;
+    // 导出按钮
     $('#hexport').onclick = () => showExportModal();
+    // 用户菜单开关
+    const ub = $('#huserBtn'), um = $('#huserMenu');
+    ub.onclick = (e) => { e.stopPropagation(); um.classList.toggle('on'); };
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('#huser')) um.classList.remove('on');
+    });
+    // 菜单项点击（目前为占位，后续接真实逻辑）
+    um.querySelectorAll('button[data-uact]').forEach(b => {
+      b.onclick = () => {
+        um.classList.remove('on');
+        const act = b.dataset.uact;
+        if (act === 'logout') {
+          toast(LANGNOW==='zh' ? '退出登录功能待接入' : 'Sign-out coming soon', 'info');
+        } else {
+          toast((LANGNOW==='zh' ? '「' : '"') + b.textContent.trim() +
+                (LANGNOW==='zh' ? '」功能待接入' : '" coming soon'), 'info');
+        }
+      };
+    });
   } catch (e) {
     $('#hstat').innerHTML = `<span class="err-t">${t('hstat.offline')}</span>`;
   }
