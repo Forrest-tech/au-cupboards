@@ -528,8 +528,6 @@ class TestOutlierEntityFilter:
         rect = Rect(0.0, 0.0, 915.0, 1750.0, "1CO", None, -1, "LINE_PAIR")
         far = msp.add_line((5000.0, 5000.0), (5100.0, 5100.0))
         assert not _entity_near(far, rect)
-
-
 # ======================================================================
 # 本轮修复：按《WorkBuddy渲染修复需求文档》恢复 DWG 原样导出
 #
