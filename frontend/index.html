@@ -1357,26 +1357,25 @@ function renderTree() {
     // 楼栋节点上的箭头：折叠/展开。展开后每张图纸各占一个 item
     const open = !S.fold['b' + p.id];
     h += `<div class="node${on}" data-b="${p.id}">
-      <span class="tw" data-fold="b${p.id}">${twIcon(open)}</span>
-      <span class="ico">${ic('folder')}</span><span class="nm">${esc(p.name)}</span>
+      <span class="nm">${esc(p.name)}</span>
       <span class="ct">${dw.length}${t('tree.drawings')}</span></div>`;
     if (!open) continue;
     // 用户要求去掉图纸层（"1. A000"），楼层直接挂在项目下
     if (job) {
-      h += `<div class="node lv1${S.treeSel === 'floors' ? ' on' : ''}" data-sel="floors">
-        <span class="tw">${twIcon(false)}</span>
-        <span class="ico">${ic('layers')}</span><span class="nm">${t('tree.floors')}</span>
+      // 用户要求：两层架构，去掉图标，"所有楼层"与 L1-L4 平级（不是折叠父节点）
+      const allOn = !S.floorSel || S.treeSel !== 'floors' ? '' : '';
+      // "所有楼层"按钮：与各楼层平级
+      h += `<div class="node lv1${!S.floorSel ? ' on' : ''}" data-floor="">
+        <span class="nm">${LANGNOW==='zh'?'所有楼层':'All floors'}</span>
         <span class="ct">${job.floors?.length || 0}</span></div>`;
-      if (S.treeSel === 'floors') {
-        for (const f of (job.floors || [])) {
-          // 建筑图纸 tab 下当前楼层要高亮 —— 用户靠这个判断
-          //「右栏这批柜型是给哪一层看的」
-          const fo = S.view === 'building' && S.floorSel === f.floor_code
-            ? ' on' : '';
-          h += `<div class="node lv2${fo}" data-floor="${esc(f.floor_code)}">
-            <span class="nm">${esc(f.floor_code)}</span>
-            <span class="ct">${f.unit_count}${LANGNOW==='zh'?'户':' u'}${f.communal_count ? '+' + f.communal_count : ''}</span></div>`;
-        }
+      for (const f of (job.floors || [])) {
+        // 建筑图纸 tab 下当前楼层要高亮 —— 用户靠这个判断
+        //「右栏这批柜型是给哪一层看的」
+        const fo = S.view === 'building' && S.floorSel === f.floor_code
+          ? ' on' : '';
+        h += `<div class="node lv1${fo}" data-floor="${esc(f.floor_code)}">
+          <span class="nm">${esc(f.floor_code)}</span>
+          <span class="ct">${f.unit_count}${LANGNOW==='zh'?'户':' u'}${f.communal_count ? '+' + f.communal_count : ''}</span></div>`;
       }
     }
   }
@@ -2442,7 +2441,13 @@ function emptyBox(_t, _s) {
 // ============================================================ 动作
 function filterFloor(code) {
   // 问题16a：点击楼层不自动跳到单元明细 tab，停留在当前 tab
-  S.floorFilter = S.floorFilter === code ? null : code;
+  // 空字符串表示"所有楼层"，直接清空过滤
+  if (!code) {
+    S.floorFilter = null;
+    S.floorSel = null;
+  } else {
+    S.floorFilter = S.floorFilter === code ? null : code;
+  }
   // 问题16b：楼层×柜型 tab 按选中楼层过滤（renderMatrix 会读 S.floorFilter）
   if (S.pane === 'matrix') renderMatrix();
   else renderDetail();
