@@ -240,6 +240,10 @@ body.resizing{cursor:col-resize;user-select:none}
 
 .sec{padding:9px 12px 4px;font-size:10px;font-weight:700;color:var(--dim);
   letter-spacing:1px;text-transform:uppercase}
+/* 问题2/3：树顶部工具栏 */
+.sectreetoolbar,.treetoolbar{display:flex;align-items:center;justify-content:space-between}
+.ttools{display:flex;gap:2px}
+.ttools .ib{padding:2px 5px;font-size:12px}
 .node{
   display:flex;align-items:center;gap:7px;padding:5px 12px;cursor:pointer;
   border-left:3px solid transparent;transition:.1s;
@@ -1130,7 +1134,12 @@ function renderTree() {
   //「切换到柜型库，还是显示的楼栋的内容」）
   if (S.view === 'cupboard') { renderTreeLibrary(); return; }
 
-  let h = `<div class="sec">${t('tree.projects')}</div>`;
+  // 问题8a：建筑项目树顶部同样加展开/收起工具栏
+  let h = `<div class="sec treetoolbar"><span>${t('tree.projects')}</span>
+    <span class="ttools">
+      <button class="ib" id="tExpandAll" title="${LANGNOW==='zh'?'全部展开':'Expand all'}">⤢</button>
+      <button class="ib" id="tCollapseAll" title="${LANGNOW==='zh'?'全部收起':'Collapse all'}">⤡</button>
+    </span></div>`;
   if (!S.projects.length) {
     h += `<div class="node lv1" style="color:var(--dim)">${t('tree.empty')}</div>`;
   }
@@ -1302,7 +1311,11 @@ function renderTreeLibrary() {
   }
   const unitsList = [...byUnits.values()].sort((a, b) => a.n - b.n);
 
-  let h = `<div class="sec">${t('tree.library')}</div>`;
+  let h = `<div class="sec treetoolbar"><span>${t('tree.library')}</span>
+    <span class="ttools">
+      <button class="ib" id="tExpandAll" title="${LANGNOW==='zh'?'全部展开':'Expand all'}">⤢</button>
+      <button class="ib" id="tCollapseAll" title="${LANGNOW==='zh'?'全部收起':'Collapse all'}">⤡</button>
+    </span></div>`;
   if (!unitsList.length) {
     h += `<div class="node lv1" style="color:var(--dim)">${t('dwg.empty')}</div>`;
     $('#tree').innerHTML = h;
@@ -1822,6 +1835,30 @@ async function doEditAction(act, ctx) {
 }
 
 function bindTree() {
+  // 问题3：全部展开 / 全部收起
+  const bex = $('#tExpandAll');
+  if (bex) bex.onclick = (e) => {
+    e.stopPropagation();
+    S.lfOpen = S.lfOpen || {};
+    // 展开所有 units 组
+    document.querySelectorAll('#tree .node[data-lu]').forEach(n => {
+      S.lfOpen['u' + n.dataset.lu] = true;
+    });
+    // 展开所有文件组
+    document.querySelectorAll('#tree .node[data-lf]').forEach(n => {
+      S.lfOpen[n.dataset.lf] = true;
+    });
+    // 展开所有建筑
+    Object.keys(S.fold).forEach(k => { if (k.startsWith('b')) S.fold[k] = false; });
+    renderTree();
+  };
+  const bcol = $('#tCollapseAll');
+  if (bcol) bcol.onclick = (e) => {
+    e.stopPropagation();
+    S.lfOpen = {};
+    Object.keys(S.fold).forEach(k => { if (k.startsWith('b')) S.fold[k] = true; });
+    renderTree();
+  };
   $$('#tree .node').forEach(n => n.onclick = ev => {
     // 点箭头只折叠/展开，不触发选中
     const tw = ev.target.closest('.tw');
