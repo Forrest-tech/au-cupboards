@@ -2127,8 +2127,6 @@ async function doEditAction(act, ctx) {
       await loadVariants();
       renderHub();
     }
-  } else if (act === 'bparse') {
-    $('#bparse')?.click();
   }
 }
 
@@ -2691,7 +2689,6 @@ function showFloorPanel(code) {
   $('#mfn').textContent = code + ' · ' + n + (LANGNOW === 'zh' ? ' 户' : ' units');
   $('#pagelist').innerHTML = '';
   resetViewer();
-  $('#bparse').style.display = 'none';
   if (S.jobId) showPdf(S.jobId, S.pages?.length ? S.pages : []);
 
   let h = '';
@@ -2835,7 +2832,6 @@ function showUnitsGroup(key, keepScroll) {
   resetViewer();
   // 问题4：去掉"X 张图纸"pill，不显示
   $('#bpage').style.display = 'none';
-  $('#bparse').style.display = 'none';
 
   // 尺寸标注块：图下方直接写实际尺寸（用户要求「图片 + 下面显示尺寸」）
   // 问题5：去掉所有"实测"字样，不显示 tag
@@ -2901,7 +2897,6 @@ function showVariantGroup(key) {
   resetViewer();
   // 问题4：去掉"X 张图纸"pill，不显示
   $('#bpage').style.display = 'none';
-  $('#bparse').style.display = 'none';
 
   // 默认展示第一张有图的柜型
   if (withImg.length) showCupImage(withImg[0].image_url);
@@ -3919,7 +3914,6 @@ function renderHub() {
     $('#pagelist').innerHTML = '';
     $('#viewer').innerHTML = `<div class="ph"><div class="big">${ic('image-off')}</div>
       <div>${t('mid.cup.hint')}</div></div>`;
-    $('#bparse').style.display = 'none';
   }
 
   let h = '';
