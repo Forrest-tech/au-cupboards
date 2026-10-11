@@ -5,8 +5,55 @@
 #
 # backend/requirements.txt 指向本文件，不再重复维护。
 #
-# 最低要求：Python 3.11+（本项目使用了 `X | None` 联合类型语法与
-# `list[str]` 泛型下标，Python 3.9 及以下无法解析）。
+# ---- 最低要求：Python 3.11+ （本项目使用了 `X | None` 联合类型语法与
+#      `list[str]` 泛型下标，Python 3.9 及以下无法解析）
+#
+# ============================================================================
+# 【macOS 排障】`ModuleNotFoundError: No module named 'uvicorn'`
+# ============================================================================
+# 这不是代码问题，是**当前解释器没装依赖**。先确认你用的是哪个 Python：
+#
+#     python3 -c "import sys; print(sys.executable)"
+#
+# 若输出是
+#     /Library/Frameworks/Python.framework/Versions/3.12/bin/python3
+# 说明你在用 python.org 安装的**系统级**Python（Homebrew 用户通常是
+# /opt/homebrew/bin/python3 或 /usr/local/bin/python3）。系统级Python
+# 默认**不带 pip**，所以 `python3 -m pip install uvicorn` 会一并报
+#     No module named pip
+#
+# 推荐做法 —— 建一个项目虚拟环境，与系统 Python 彻底隔离：
+#
+#     cd au-cupboards
+#     python3 -m venv .venv
+#     source .venv/bin/activate
+#     python -m pip install -U pip          # venv 自带的 pip 很旧，先升
+#     python -m pip install -r requirements.txt
+#
+# 之后**始终**用 venv 里的解释器启动（注意是 `python` 不是 `python3`，
+# 激活后 venv 里的 python3 也指向 venv，所以两者等价）：
+#
+#     cd backend
+#     python -m uvicorn app.api.server:app --host 0.0.0.0 --port 8000
+#
+# 验证环境是否正确（应输出 uvicorn 的版本号而非报错）：
+#     python -c "import uvicorn, fastapi, ezdxf, matplotlib; print(uvicorn.__version__)"
+#
+# ---- 若你不想用 venv（不推荐，但可行）----
+#     python3 -m ensurepip --upgrade# 先补pip
+#     python3 -m pip install --user -r requirements.txt
+# 注意：装完后**必须**用同一个 python3 路径启动，
+# 混用（装到A 解释器、用 B 解释器启动）就会出现本文件顶部这个报错。
+# 确认 pip 装到了哪里：
+#     python3 -m pip show uvicorn | grep -E "Location|Version"
+#
+# ---- macOS 上还有一个常见坑 ----
+# 如果 pip 安装时报 SSL 证书错误 / `CERTIFICATE_VERIFY_FAILED`，
+# 别去折腾 curl-ca-certs，用 Homebrew 的 Python：
+#     brew install python
+#     /opt/homebrew/bin/python3 -m venv .venv
+#
+
 #
 # ---- 关于 pdfplumber（重要）----
 # 报告第 08 章把 pdfplumber 列为 PDF 解析库，但实测**全库零引用** ——

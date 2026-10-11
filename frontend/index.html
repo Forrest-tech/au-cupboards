@@ -473,7 +473,21 @@ tr.floor-row td{background:#eef2f7;font-weight:700;border-top:2px solid var(--li
   display:inline-block;width:13px;height:13px;border:2px solid #fff6;
   border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;
 }
+/* 【真实 bug 修复】渲染中的图标必须自己转起来。
+ * 用户原话：「柜型图渲染中，这个按钮是卡死的状态，没有动态旋转」。
+ * 根因：rendering 态用的是 ic('refresh') —— 一个**静态 SVG**，
+ * 从来没有动画；而 .spin 只在 parsing 态用。所以按钮看着就是死的。
+ * 这里给图标套一个旋转动画，与 .spin 同一套关键帧。 */
+.spinref{display:inline-block;animation:sp .9s linear infinite;
+  transform-origin:50% 50%}
+.spinref .ic{vertical-align:-.125em}
 @keyframes sp{to{transform:rotate(360deg)}}
+/* 尊重系统「减少动态效果」设置：此时不再转，但保留一个静态的
+ * 进度条在动（见 .prog），避免用户完全失去「还在跑」的反馈。 */
+@media (prefers-reduced-motion:reduce){
+  .spin,.spinref{animation:none}
+  .spin{border-top-color:#fff}
+}
 .toast{
   position:fixed;bottom:18px;right:18px;background:var(--panel);
   border:1px solid var(--line);border-left:3px solid var(--accent);
@@ -2711,7 +2725,7 @@ function showDwgResult(r) {
   const btn = $('#bgo');
   if (btn) {
     btn.disabled = true;
-    btn.innerHTML = `${ic('refresh')} ${t('up.rendering')}`;
+    btn.innerHTML = `<span class="spinref">${ic('refresh')}</span> ${t('up.rendering')}`;
     btn.onclick = null;
   }
 
@@ -2935,8 +2949,39 @@ async function renderCupboards(storedName) {
   setCommitState('rendering');
   // 上部的拖拽区/文件摘要/PDF 预览此刻已无意义，收起它们把高度让给图库。
   $('.modal.split .mbody')?.classList.add('busy');
+  // 秒级计时器句柄声明在 try **之外** —— catch / finally 都要用到它。
+  // 若声明在 try 内，catch 分支就够不着，渲染失败后计时器会一直跑，
+  // 用户会看到秒数一直涨，误以为还在渲染。
+  let peTimer = null;
   try {
+    // 渲染期间把进度区重新亮出来 —— 解析完成时它是显示的，但为了不与
+    // 图库抢纵向空间，showDwgResult 的收尾会把 display 关掉。
+    // 这里必须显式打开，否则上面那个秒级计时器写进 #pe 的文字
+    // 用户根本看不见（#prog 隐藏时 #pe 也不可见）。
+    $('#prog').style.display = 'block';
+    $('#pb').style.width = '8%';
     $('#pm').textContent = t('lib.rendering');
+    // 【体验修复】后端 render_cupboards 是**同步 def**，FastAPI 丢进线程池，
+    // 执行期间 uvicorn 一行日志都不打（实测 23 柜约 27 秒）。这段静默期
+    // 里用户看不到任何数字，误以为卡死。这里起一个秒级计时器，
+    // 把已用秒数打到 #pe 上，让「还在跑」这件事可见。
+    const rt0 = Date.now();
+    peTimer = setInterval(() => {
+      const el = $('#pe');
+      if (!el) return;
+      const s = Math.round((Date.now() - rt0) / 1000);
+      const tips = LANGNOW === 'zh'
+        ? ['正在解析 DWG 几何…', '正在按柜体切图…', '正在渲染高清柜型图…']
+        : ['parsing DWG geometry…', 'splitting cabinets…', 'rendering hi-res images…'];
+      el.textContent = `${tips[Math.min(2, Math.floor(s / 8))]} · ${s}s`;
+      // 进度条缓步前进到 90%，永远不到 100% —— 真实完成时才拉满，
+      // 否则用户会以为卡在 99%。实测 23 柜约 27s，所以 90% 用 30s 走完。
+      const bar = $('#pb');
+      if (bar) bar.style.width = Math.min(90, 8 + (s / 30) * 82) + '%';
+    }, 1000);
+    // 秒级计时器挂在**外层** try 上（rt0/peTimer 在 try 之前声明），
+    // finally 也放外层 —— 否则 const r 会被关进内层 try，后面用 r 的
+    // 代码全在另一个作用域里，直接炸 `r is not defined`。
     const r = await api('/cupboards/render', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ file: storedName }),
@@ -2983,6 +3028,14 @@ async function renderCupboards(storedName) {
     $('#prog').style.display = 'none';
     toast(t('lib.rendering') + ' → ' + e.message, 'err');
     return [];
+  } finally {
+    // 无论成功还是失败都必须停表，否则秒数会一直涨。
+    if (peTimer) clearInterval(peTimer);
+    // 成功才拉满进度条；失败时 catch 已把整个 #prog 藏了。
+    if (S.renders.length) {
+      const bar = $('#pb');
+      if (bar) bar.style.width = '100%';
+    }
   }
 }
 
@@ -3013,7 +3066,7 @@ function setCommitState(state) {
   if (!b) return;
   const map = {
     parsing:   [`<span class="spin"></span> ${t('up.parsing')}`, true],
-    rendering: [`${ic('refresh')} ${t('up.rendering')}`, true],
+    rendering: [`<span class="spinref">${ic('refresh')}</span> ${t('up.rendering')}`, true],
     ready:     [t('up.commit'), false],
     abort:     [`${ic('x')} ${LANGNOW === 'zh' ? '已放弃入库' : 'Import aborted'}`, true],
     fail:      [t('up.nogo'), true],
