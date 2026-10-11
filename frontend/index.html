@@ -416,8 +416,6 @@ body.resizing{cursor:col-resize;user-select:none}
 }
 /* 建筑图纸 tab 强制隐藏 pagelist（"1. A000"）—— 用户多次要求 */
 body.hide-pagelist #pagelist{display:none !important}
-body.hide-right #right{display:none !important}
-body.hide-right #dragR{display:none !important}
 .page-list .pg{
   padding:4px 10px;font-size:11px;cursor:pointer;color:var(--dim);
   border-left:3px solid transparent;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
@@ -4236,9 +4234,6 @@ function gotoView(v) {
   // 2026-10-11 11:45 用户反悔：左树要恢复，只隐藏 pagelist
   const treeEl = $('#tree'); if (treeEl) treeEl.style.display = '';
   const dragEl = $('#dragL'); if (dragEl) dragEl.style.display = '';
-  // 2026-10-11 19:28 用户要求：柜型库 tab 隐藏右侧竖条
-  // 用 body class + CSS，比 inline style 可靠
-  document.body.classList.toggle('hide-right', v === 'cupboard');
   // 隐藏页列表（#pagelist 里的 "1. A000"），只留 PDF —— 用户要求工作台与建筑图纸保持一致
   // 用 body class 强制隐藏，避免被内联样式覆盖
   document.body.classList.toggle('hide-pagelist', isBuilding || v === 'work');
