@@ -663,7 +663,6 @@ tr.floor-row td{background:#eef2f7;font-weight:700;border-top:2px solid var(--li
       <button class="btn" id="bzout" title="zoom out"><svg class="ic" aria-hidden="true"><use href="#i-zoom-out"></use></svg></button>
       <span class="badge" id="bzoom">100%</span>
       <button class="btn" id="bzin" title="zoom in"><svg class="ic" aria-hidden="true"><use href="#i-zoom-in"></use></svg></button>
-      <button class="btn pri" id="bparse" data-i18n="btn.reparse">重新解析</button>
     </div>
     <div style="display:flex;flex:1;min-height:0">
       <div class="page-list" id="pagelist"></div>
@@ -2050,7 +2049,6 @@ function bindEditMenu() {
       }
       items.push(['clear', ic('eraser'), LANGNOW === 'zh' ? '清空柜型库' : 'Clear library']);
     } else {
-      items.push(['bparse', ic('refresh'), LANGNOW === 'zh' ? '重新解析' : 'Re-parse']);
       items.push(['clear', ic('eraser'), LANGNOW === 'zh' ? '清空解析结果' : 'Clear results']);
     }
 
