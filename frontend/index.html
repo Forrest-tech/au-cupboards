@@ -2862,14 +2862,14 @@ function setZoom(z) {
  *  重排，拖动过程里抖动明显；transform 只做视觉缩放，跟手。 */
 function applyZoomToImages() {
   const z = S.zoom || 1;
-  // 中栏的柜型图（showCupImage 渲染的 #cupimg）与右栏卡片缩略图都缩放。
+  // 问题14：缩放只影响中栏（#cupimg），不影响右栏缩略图
   // 用 transform 而非改 width/height：改布局宽高会让 flex 容器跟着
   // 重排，拖动过程里抖得厉害；transform 是纯视觉缩放，跟手。
-  $$('#cupimg, #rpane .thumb img').forEach(im => {
+  $$('#cupimg').forEach(im => {
     im.style.transform = z === 1 ? '' : `scale(${z})`;
   });
   // 放大后要能滚到四周，给承载块显式 overflow + 预留缩放余量
-  $$('.cupview, .zoomslot').forEach(sl => {
+  $$('.cupview').forEach(sl => {
     sl.style.overflow = z > 1 ? 'auto' : 'hidden';
   });
 }
@@ -3775,6 +3775,14 @@ $('#bprev').onclick = () => pageStep(-1);
 $('#bnext').onclick = () => pageStep(1);
 $('#bzin').onclick = () => setZoom((S.zoom || 1) * 1.25);
 $('#bzout').onclick = () => setZoom((S.zoom || 1) / 1.25);
+// 问题12：触摸板 pinch 缩放（浏览器里 pinch 会转成 ctrl+wheel）
+$('#viewer').addEventListener('wheel', (e) => {
+  if (e.ctrlKey || e.metaKey) {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    setZoom((S.zoom || 1) * factor);
+  }
+}, { passive: false });
 $('#bparse').onclick = () => openUpload('building');
 // 点遮罩关闭 —— 但解析中closeModal 自身会拒绝，这里只拦住冒泡
 $('#mask').onclick = e => { if (e.target.id === 'mask') closeModal(); };
