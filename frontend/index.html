@@ -1249,6 +1249,9 @@ async function boot() {
     S.openDrawing = resume.dwg ?? null;
     S.floorFilter = resume.floor ?? null;
     S.floorSel = resume.fsel ?? null;
+    // 纠正：如果 treeSel 是 floors（工作台/建筑图纸的楼层），但 view 存成了 cupboard，
+    // 说明存错了，切回 work —— 用户报的刷新后跳 tab bug
+    if (S.treeSel === 'floors' && S.view === 'cupboard') S.view = 'work';
   }
   // 自动恢复最近一次解析结果 —— 否则刷新后界面是空的
   try {
