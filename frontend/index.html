@@ -1665,7 +1665,9 @@ function renderTreeLibrary() {
       for (const lb of u.labels) {
         const key = u.key + '@' + lb.v.id;
         const on = S.treeSel === key ? ' on' : '';
-        const disp = vLabel(lb.v, lb.suffix.replace(/^-\s*/, 'Model '));
+        // 单模型组强制显示 Model A（用户要求：不能空白）
+        let disp = vLabel(lb.v, lb.suffix.replace(/^-\s*/, 'Model '));
+        if (!disp) disp = 'Model A';
         h += `<div class="node lv2${on}" data-lg="${esc(key)}" data-vid="${esc(lb.v.id)}">
           <span class="nm">${esc(disp)}</span>
           <span class="ct">${fmtMM(lb.v.w)}×${fmtMM(lb.v.h)}</span>
