@@ -3927,13 +3927,14 @@ function gotoView(v) {
   $('#bhelp').style.display = v === 'work' ? '' : 'none';
   // 问题1：建筑图纸 tab 下隐藏编辑按钮和页码 pill
   const isBuilding = v === 'building';
-  $('#bedit').style.display = isBuilding ? 'none' : '';
-  $('#bpage').style.display = isBuilding ? 'none' : '';
+  const bedit = $('#bedit'); if (bedit) bedit.style.display = isBuilding ? 'none' : '';
+  const bpage = $('#bpage'); if (bpage) bpage.style.display = isBuilding ? 'none' : '';
   // 建筑图纸 tab 隐藏左树（竖条块），让 PDF 显示更宽 —— 用户要求
-  $('#tree').style.display = isBuilding ? 'none' : '';
-  $('#dragL').style.display = isBuilding ? 'none' : '';
+  const treeEl = $('#tree'); if (treeEl) treeEl.style.display = isBuilding ? 'none' : '';
+  const dragEl = $('#dragL'); if (dragEl) dragEl.style.display = isBuilding ? 'none' : '';
   // 建筑图纸 tab 隐藏整个中栏顶部工具栏（A000标题+按钮），只显示文档内容 —— 用户要求
-  document.querySelector('.mid-bar').style.display = isBuilding ? 'none' : '';
+  const midBar = document.querySelector('.mid-bar');
+  if (midBar) midBar.style.display = isBuilding ? 'none' : '';
   // 工作台也隐藏 A000 文件名标题（#mfn），保留翻页/缩放按钮 —— 用户要求
   const mfn = document.querySelector('#mfn');
   if (mfn) mfn.style.display = (v === 'work' || isBuilding) ? 'none' : '';
