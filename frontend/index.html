@@ -3074,7 +3074,8 @@ async function loadExports(jobId) {
     // 柜型库 tab 不显示导出栏：导的是建筑解析结果，跟当前看柜型无关，
     // 而且 5 个按钮会把中栏挤到放不下柜型图。loadJob 是在 gotoView
     // 之后跑的，所以这里必须再判一次 tab，不能只靠 syncTabsForView。
-    if (S.view === 'cupboard') return;
+    // 工作台也不显示：用户要求去掉绿色导出按钮
+    if (S.view === 'cupboard' || S.view === 'work') return;
     const bar = document.createElement('div');
     bar.id = 'bexp';
     bar.style.cssText = 'display:flex;gap:5px;flex:0 0 auto';
