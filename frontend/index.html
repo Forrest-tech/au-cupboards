@@ -2164,9 +2164,10 @@ function bindTree() {
       // 注意：data-floor=""（所有楼层）是空字符串，不能用 truthy 判断
       if (S.view === 'building') {
         S.treeSel = 'floors';
-        S.floorSel = S.floorSel === n.dataset.floor ? null : n.dataset.floor;
-        // 空字符串转为 null，保持语义一致
-        if (S.floorSel === '') S.floorSel = null;
+        // 用户要求：点击后保持，不 toggle —— 点 L4 就一直是 L4，再点 L4 不变回所有楼层
+        let code = n.dataset.floor;
+        if (code === '') code = null; // 所有楼层
+        S.floorSel = code;
         renderTree();
         if (S.floorSel) showFloorPanel(S.floorSel);
         else { S.floorFilter = null; showAllFloorsPanel(); }
