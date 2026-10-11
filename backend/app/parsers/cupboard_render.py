@@ -95,19 +95,33 @@ DPI = 300
 #: 而容器里字体不全时`ezdxf` 会抛
 #: ``AttributeError: 'NoneType' object has no attribute 'filename'``。
 #:
-#: 排查结论（真实样本 23 个柜型 100% 触发）：触发者**不是** TEXT/MTEXT，
-#: 而是 50 个 **DIMENSION** —— 标注文字同样要查字体。��且
-#: ``FontFace()`` 的``filename`` 默认就是 ``None``，实体 style 为空时
-#: 会带着空 filename 一路传到 ``find_font_name`` 才炸。
+#: 【本轮真根因 —— 之前三轮都误诊了】
+#: ------------------------------------------
+#: 旧注释断言「触发者是 DIMENSION，因为标注文字要查 ezdxf 字体库，
+#: 而 FontFace().filename 默认是 None，style 为空的实体会炸」。
+#: 这个判断**只对了一半**：字体其实**早就可用**了
+#: （``fonts.get_font_face('')`` → ``DejaVuSans.ttf``，共330 个字体条目），
+#: 系统里也确实装了 ``NotoSans`` / ``DejaVu`` / ``Liberation`` 等。
 #:
-#: 所以渲染**默认直接跳过带文字实体**，不再「先试一次失败再降级」——
-#: 那个「先试一次」每次要白跑2~4 秒（matplotlib 画到 DIMENSION 才炸，
-#: 前面的线已经画完了），23 个柜型就是 70 秒纯浪费。
+#: 真正的触发链（真实 DXF + 全栈追踪，CP-5p-18 柜内 23 个 DIMENSION）：
 #:
-#: 代价是图里没有标注数值。对「看清柜型排布」这个用途来说，
-#: 尺寸数值本来就由右栏的文字给出，图上少几个数字不致命；
-#: 而糊成黑块的图是彻底不可用的。
-RENDER_TEXT = False
+#:   1. DIMENSION 展开出虚拟 MTEXT，``dxf.style = 'trebuchet_MS'``
+#:      —— 这是**图纸自己的 textstyle 名**（源 DXF 的 styles 表里确实有
+#:      ``trebuchet_MS``，还有 ``Arch-Dim`` / ``RomanS`` / ``NDY_Standard``…）。
+#:   2. 我们把柜内实体克隆进 ``ezdxf.new()`` 建临时文档时，
+#:      **只搬了 block 定义，没搬 styles 表**。
+#:   3. 于是渲染时 ``Properties.resolve_font()`` 在临时文档的 styles 表里
+#:      查不到 ``trebuchet_MS`` → 返回 ``None``。
+#:   4. ``mtext_complex.get_font()`` 把这个 ``None`` 直接喂给
+#:      ``fonts.find_font_file_name(None)`` → 炸在
+#:      ``font_manager.find_best_match(font_face.filename)``。
+#:
+#: 也就是说：**这不是环境缺字体，是克隆时漏搬 textstyle 定义。**
+#: 已做双向验证（见 :func:`_clone_styles` 的 docstring）。
+#:
+#: 所以现在**恢复渲染尺寸标注**（用户参考图里1065/2350/50 100这些
+#: 数字是核心信息，丢了图就不好用）。
+RENDER_TEXT = True
 
 #: 产出 JPG 的最小合理字节数。
 #:
@@ -121,6 +135,277 @@ RENDER_TEXT = False
 #: 所以现在**主判据是内容**（见 :func:`_looks_blank`），
 #: 字节数只作极端情况下的兜底（小到不可能画出东西）。
 MIN_IMAGE_BYTES = 4_000
+
+
+#: 块定义递归搬运的最大深度。
+#:
+#: 真实样本实测层数只有 2（``water meter h`` → ``h-meter``），
+#: 但 CAD 里的块可以套块再套块，没有硬上限的说法 —— 设成 8 纯粹是
+#: 防「块套块套块套块套块套块套块套块」把 CPU 烧穿，同时远高于真实需求。
+_MAX_BLOCK_DEPTH = 8
+
+
+def _collect_block_refs(src_doc, ents, out: set[str], _depth: int = 0) -> None:
+    """递归收集 ``ents`` 里（以及它们引用的块里）全部 INSERT 的块名。
+
+    【本轮修复的核心】旧代码只扫 ``ents`` 一层就收工，于是
+    **嵌套块引用的块定义从来没被搬过**。
+
+    实测后果（真实 DWG，CP-5p-18 柜内5 个 ``water meter h``）：
+      ``water meter h`` 的块定义里有 109 个实体，其中 1 个是
+      ``INSERT name='h-meter'`` —— 也就是水表本体是**第二层块**。
+      第一层块搬过去后，``h-meter`` 在临时文档里不存在，
+      ezdxf 渲染 INSERT 时查不到块定义就**静默跳过**，
+      于是柜子下半部 5 个水表在图上**完全消失**，
+      而 modelspace 里那 5 个 INSERT 明明被算进了 ``entity_count=42``。
+
+      这就是「左边几个表不见了」的成因：不是没抠到实体，
+      是抠到了但渲染时被块缺失吃掉了。
+    """
+    if _depth > _MAX_BLOCK_DEPTH:
+        return
+    for e in ents:
+        if e.dxftype() != "INSERT":
+            continue
+        try:
+            name = str(e.dxf.name)
+        except Exception:
+            continue
+        if name in out:
+            continue
+        out.add(name)
+        try:
+            nested = src_doc.blocks.get(name)
+        except Exception:
+            continue
+        if nested is None:
+            continue
+        try:
+            _collect_block_refs(src_doc, list(nested), out, _depth + 1)
+        except Exception:
+            continue
+
+
+def _clone_layers(src_doc, dst_doc, layer_names: set[str]) -> list[str]:
+    """把用到的图层定义（含颜色/线宽/线型）搬进临时文档。
+
+    为什么必须搬
+    ------------
+    ``ezdxf.new()`` 建出来的文档只有一层默认图层。实体上写的是
+    ``layer='HVAL___2CO'``，而渲染时颜色/线宽要走
+    ``图层 ACI色 → RGB`` 的解析；图层不存在就退到文档默认值，
+    于是 DWG 里「青框/红框/绿管/黄管」统统变成同一个颜色 ——
+    需求要的「保持原有颜色」就落空了。
+
+    实测（真实 DWG）：
+      · ``HVAL___2CO``（water meter 所在层）  color=7线weight=-3
+      · ``G-Anno-Std-Cntr``（gas meter 所在层）  color=1  lineweight=18
+      · 柜体框在 ``1CO``
+    三层颜色各不相同，不搬图层就必然全糊成一个颜色。
+    """
+    failed: list[str] = []
+    for name in sorted(layer_names):
+        if name in ("0",):
+            continue          # 默认层，新文档自带
+        try:
+            src = src_doc.layers.get(name)
+        except Exception:
+            continue
+        if src is None:
+            continue
+        try:
+            dst = dst_doc.layers.get(name)
+        except Exception:
+            # 【易踩】DXFTable.get() 对**不存在**的条目是**抛
+            # DXFTableEntryError**，不是返回 None。所以不能写
+            #     dst = dst_doc.layers.get(name) or dst_doc.layers.new(name)
+            # —— get 抛异常时根本走不到 new()，图层永远建不出来。
+            # 实测踩过：`HVAL___2CO` / `G-Anno-Std-Cntr` / `1CO`
+            # / `HWAT___5CS` 四个真实图层全部报「图层搬运失败」。
+            dst = None
+        if dst is None:
+            try:
+                dst = dst_doc.layers.new(name)
+            except Exception:
+                failed.append(name)
+                continue
+        try:
+            dst.color = src.dxf.color
+        except Exception:
+            pass
+        try:
+            dst.dxf.linetype = src.dxf.linetype
+        except Exception:
+            pass              # 线型定义没搬，Continuous 本来就对
+        try:
+            dst.dxf.lineweight = src.dxf.get("lineweight", -3)
+        except Exception:
+            pass
+    return failed
+
+
+def _collect_layers(ents, out: set[str], _depth: int = 0) -> None:
+    """递归收集实体涉及的图层名（``*INSERT{0,1,2}`` 归一化到 INSERT）。"""
+    if _depth > _MAX_BLOCK_DEPTH:
+        return
+    for e in ents:
+        if not e.dxf.hasattr("layer"):
+            continue
+        lay = e.dxf.layer
+        if not lay:
+            continue
+        # INSERT{0,1,2} / DIM{0,1} 是「带索引的块/标注」，图层名就是前缀
+        out.add(str(lay))
+        if e.dxftype() != "INSERT":
+            continue
+        try:
+            name = str(e.dxf.name)
+        except Exception:
+            continue
+
+
+def _clone_block_deep(src_doc, dst_doc, name: str, errors: list[str],
+                      depth: int) -> None:
+    """把一个块定义搬进临时文档，并**递归**搬运它引用的子块。"""
+    if depth > _MAX_BLOCK_DEPTH:
+        errors.append(f"块 {name}: 嵌套超过 {_MAX_BLOCK_DEPTH} 层，已截断")
+        return
+    try:
+        src_block = src_doc.blocks.get(name)
+    except Exception:
+        return
+    if src_block is None:
+        return
+    # 【易踩，同_layers】DXFTable.get() 找不到条目时抛
+    # DXFTableEntryError 而不是返回 None。写成
+    #     dst = dst_doc.blocks.get(name) or dst_doc.blocks.new(name)
+    # 会抛异常走人，块定义永远建不出来。
+    # 实测后果：``water meter h`` 里的嵌套块 ``h-meter`` 没建 →
+    # 柜内 5 个水表在图上整体消失（entity_count 却仍是 42）。
+    dst_block = None
+    try:
+        dst_block = dst_doc.blocks.get(name)
+    except Exception:
+        dst_block = None
+    if dst_block is None:
+        try:
+            dst_block = dst_doc.blocks.new(name)
+        except Exception as exc:
+            errors.append(f"块 {name}: {exc}")
+            return
+
+    try:
+        children = list(src_block)
+    except Exception:
+        children = []
+
+    # 子块先搬（深度优先），保证当前块里的 INSERT 引用能解析到
+    sub_refs: set[str] = set()
+    _collect_block_refs(src_doc, children, sub_refs, depth + 1)
+    for sub in sorted(sub_refs):
+        if sub == name:
+            continue          # 自引用，跳过防死循环
+        _clone_block_deep(src_doc, dst_doc, sub, errors, depth + 1)
+
+    # 图层定义跟着块一起搬，否则颜色全糊（见 _clone_layers）
+    lays: set[str] = set()
+    _collect_layers(children, lays)
+    lay_errs = _clone_layers(src_doc, dst_doc, lays)
+    if lay_errs:
+        errors.append(f"块 {name} 图层搬运失败 {len(lay_errs)} 个")
+
+    dst_space = dst_block.entity_space
+    for be in children:
+        try:
+            dst_space.add(be.copy())
+        except Exception as exc:
+            errors.append(f"块 {name}/{be.dxftype()}: {exc}")
+
+
+#: 实体在modelspace 层的颜色。
+def _demote_solid_hatch(e):
+    """把 ``SOLID`` 实心填充的 HATCH 降级成只描边、不填充。
+
+    需求文档「步骤2：修复渲染黑坨」原文：
+        「HATCH 实体只画边框不填充；所有实体只描边不填色」
+
+    实测（真实 DWG，CP-5p-18 的 ``water meter h`` 块内）：
+    109 个实体里有 **4 个 HATCH**，全部 ``pattern_name='SOLID'`` +
+    ``solid_fill=1``，也就是纯实心色块。CAD 里它们是给水表阀体做的
+    灰色底纹；渲染成图片时就会变成一块块**纯黑/纯灰的实心色块**——
+    这正是用户最早报的「黑色实心块」。
+
+    处理方式：``solid_fill`` 置 0、pattern 改 ``ANSI31``（斜线剖面线），
+    于是保留「这里有个零件」的轮廓信息，又不会糊成黑坨。
+    非 SOLID 的 HATCH 原样放行。
+
+    返回**可直接写入目标文档的实体副本**。
+    """
+    if e.dxftype() != "HATCH":
+        return e.copy()
+    h = e.copy()
+    try:
+        pat = str(h.dxf.get("pattern_name", "")).upper()
+        solid = h.dxf.get("solid_fill", 0)
+        if solid and pat in ("", "SOLID"):
+            h.dxf.solid_fill = 0
+            h.dxf.pattern_name = "ANSI31"
+            # 剖面线间距给大一点，避免密线在300dpi 下又糊成灰块
+            try:
+                h.dxf.pattern_scale = 2.0
+            except Exception:
+                pass
+    except Exception:
+        return e.copy()
+    return h
+
+
+def _clone_styles(src_doc, dst_doc) -> list[str]:
+    """把源文档的 textstyle 定义搬进临时文档，返回失败的名字列表。
+
+    为什么必须有这一步（本项目最隐蔽的一个 bug）
+    ---------------------------------------------
+    临时视图文档是 ``ezdxf.new()`` 建出来的，它只有一张**空的 styles 表**。
+    而柜内 DIMENSION 展开出的虚拟 MTEXT 带的是图纸自己的 textstyle 名 ——
+    真实样本里是 ``trebuchet_MS``（源 DXF 的 styles 表里确实有这一项）。
+
+    渲染时的解析链是：
+
+    ``Properties.resolve_font()`` → 在**当前文档**的 styles 表里查名
+    → 查不到就返回 ``None``
+    → ``mtext_complex.get_font()`` 把这个 ``None`` 直接传给
+      ``fonts.find_font_file_name(None)``
+    → 炸在 ``font_manager.find_best_match(font_face.filename)``，
+      报 ``AttributeError: 'NoneType' object has no attribute 'filename'``
+
+    整条链里**没有任何一步**会拿不到字体文件：系统里
+    ``fonts.get_font_face('trebuchet_MS')`` 是能返回 ``DejaVuSans.ttf`` 的。
+    纯粹是「临时文档里没有这个名字的定义」。
+
+    双向实测（真实 DWG，CP-5p-18 第 0 个 DIMENSION 的虚拟 MTEXT）：
+
+      · 不搬 styles → ``FAIL AttributeError: 'NoneType' has no 'filename'``
+      · 只搬一个 ``trebuchet_MS`` → **OK**
+      · 搬全部 styles → **OK**
+
+    字体文件名的取法
+    ----------------
+    ``TextStyleTable.add(name, font=...)`` 的 ``font`` 是**必填**，
+    而 SHX 字体名（如 ``txt.shx``）在 ``resolve_font`` 里走
+    ``find_best_match`` 同样能落到 DejaVu 上，所以原样搬即可；
+    源 style 的 ``dxf.font`` 为空时才退回 ``txt.shx``。
+    """
+    failed: list[str] = []
+    for st in src_doc.styles:
+        name = st.dxf.name
+        if name.startswith("*"):
+            continue          # 匿名/系统样式，渲染用不到
+        try:
+            font = st.dxf.font or "txt.shx"
+            dst_doc.styles.add(name, font=font)
+        except Exception:
+            failed.append(name)
+    return failed
 
 
 def _clone_into_cabinet_view(src_doc, tmp_doc, ents) -> tuple[int, list[str]]:
@@ -152,38 +437,34 @@ def _clone_into_cabinet_view(src_doc, tmp_doc, ents) -> tuple[int, list[str]]:
     """
     errors: list[str] = []
 
-    used: set[str] = set()
-    for e in ents:
-        if e.dxftype() == "INSERT":
-            try:
-                used.add(str(e.dxf.name))
-            except Exception:
-                pass
+    # 关键：必须先搬 textstyle 表（见 _clone_styles 的 docstring）。
+    # 少这一步，柜内 DIMENSION 展开出的 MTEXT 查不到 'trebuchet_MS'
+    # 就会炸 —— 而这个错曾被误诊成「系统缺字体」，导致图上所有尺寸
+    # 标注被丢掉。
+    style_errs = _clone_styles(src_doc, tmp_doc)
+    if style_errs:
+        errors.append(f"textstyle 搬运失败 {len(style_errs)} 个")
 
-    for name in used:
-        try:
-            src_block = src_doc.blocks.get(name)
-        except Exception:
-            continue
-        try:
-            dst_block = tmp_doc.blocks.get(name)
-            if dst_block is None:
-                dst_block = tmp_doc.blocks.new(name)
-        except Exception as exc:
-            errors.append(f"块 {name}: {exc}")
-            continue
-        dst_space = dst_block.entity_space
-        for be in src_block:
-            try:
-                dst_space.add(be.copy())
-            except Exception as exc:
-                errors.append(f"块 {name}/{be.dxftype()}: {exc}")
+    # 顶层实体所在的图层也必须搬 —— 只在块里搬是不够的。
+    # 实测（真实 DWG，CP-5p-18）：柜框 LINE 在 ``1CO``、建筑线在
+    # ``2CONC``，这两个图层只在 modelspace 层出现，块定义里根本没有；
+    # 漏了它们的后果是这些线在渲染时退到默认层，颜色全丢。
+    top_lays: set[str] = set()
+    _collect_layers(ents, top_lays)
+    lay_errs = _clone_layers(src_doc, tmp_doc, top_lays)
+    if lay_errs:
+        errors.append(f"顶层图层搬运失败 {len(lay_errs)} 个")
+
+    used: set[str] = set()
+    _collect_block_refs(src_doc, ents, used)
+    for name in sorted(used):
+        _clone_block_deep(src_doc, tmp_doc, name, errors, depth=0)
 
     ok = 0
     target = tmp_doc.modelspace().entity_space
     for e in ents:
         try:
-            target.add(e.copy())
+            target.add(_demote_solid_hatch(e))
             ok += 1
         except Exception as exc:
             errors.append(f"{e.dxftype()}: {exc}")
@@ -253,38 +534,26 @@ def _clone_without_text(src_doc, ents, drop: frozenset[str] = TEXTUAL_TYPES):
     tmp_doc = ezdxf.new()
     kept = [e for e in ents if e.dxftype() not in drop]
 
-    used: set[str] = set()
-    for e in kept:
-        if e.dxftype() == "INSERT":
-            try:
-                used.add(str(e.dxf.name))
-            except Exception:
-                pass
+    # 同 _clone_into_cabinet_view：降级视图也要有 textstyle 表，
+    # 否则保留下来的 TEXT/MTEXT（若有）一样会炸。
+    if kept:
+        _clone_styles(src_doc, tmp_doc)
+        top_lays: set[str] = set()
+        _collect_layers(kept, top_lays)
+        _clone_layers(src_doc, tmp_doc, top_lays)
 
-    for name in used:
-        try:
-            src_block = src_doc.blocks.get(name)
-        except Exception:
-            continue
-        try:
-            dst_block = tmp_doc.blocks.get(name)
-            if dst_block is None:
-                dst_block = tmp_doc.blocks.new(name)
-        except Exception:
-            continue
-        dst_space = dst_block.entity_space
-        for be in src_block:
-            if be.dxftype() in drop:
-                continue
-            try:
-                dst_space.add(be.copy())
-            except Exception:
-                continue
+    used: set[str] = set()
+    _collect_block_refs(src_doc, kept, used)
+    errs: list[str] = []
+    for name in sorted(used):
+        _clone_block_deep(src_doc, tmp_doc, name, errs, depth=0)
+    if errs:
+        log.debug("降级视图块搬运有%d 处问题: %s", len(errs), errs[:3])
 
     target = tmp_doc.modelspace().entity_space
     for e in kept:
         try:
-            target.add(e.copy())
+            target.add(_demote_solid_hatch(e))
         except Exception:
             continue
     return tmp_doc, len(ents) - len(kept)
@@ -364,17 +633,28 @@ def _trim_white_border(path: Path, pad_ratio: float = 0.012) -> None:
         return
     try:
         with Image.open(path) as im:
-            im = im.convert("L")
-            # 阈值 245：JPEG 压缩会在纯白区产生 235~250 的轻微噪点，
-            # 用 255 去比会把噪点当内容，导致裁不掉。
+            # 掩膜用「亮度」算，但**原图必须另开一份保留彩色**。
             #
-            # 映射成「**白=0、黑=255**」后直接 getbbox()：它找的是
-            # 非零像素区域，正好就是有内容的部分。
-            #（不要再invert —— 那会把大片白底当成内容，反而裁不动。）
-            mask = im.point(lambda v: 0 if v > 245 else 255, "L")
-            bbox = mask.getbbox()
-            if not bbox:
-                return
+            # 【本轮修复的颜色丢失 bug】
+            # 旧写法：``im.convert("L")`` 之后一路用这个灰度图，
+            # 裁完再 ``.convert("RGB")`` 存回 —— 存回去的是**灰度图**，
+            # DWG 的红框/绿管/青柜框/黄气管被永久洗成灰色。
+            # 实测（真实 DWG，CP-5p-18）：裁前彩色像素 5.04% → 裁后 0.00%，
+            # 整批 23 柜全被洗成黑白，与需求「保持 DWG 原有颜色」直接冲突。
+            #
+            # 正确做法：灰度图只用来**求 bbox**（找有内容的地方），
+            # 真正的裁剪用**原彩色图**的副本做。
+            with im.convert("L") as gray:
+                # 阈值 245：JPEG 压缩会在纯白区产生 235~250 的轻微噪点，
+                # 用 255 去比会把噪点当内容，导致裁不掉。
+                #
+                # 映射成「**白=0、黑=255**」后直接 getbbox()：它找的是
+                # 非零像素区域，正好就是有内容的部分。
+                #（不要再invert —— 那会把大片白底当成内容，反而裁不动。）
+                mask = gray.point(lambda v: 0 if v > 245 else 255, "L")
+                bbox = mask.getbbox()
+                if not bbox:
+                    return
             W, H = im.size
             x0, y0, x1, y1 = bbox
             if x1 <= x0 or y1 <= y0:
@@ -395,17 +675,23 @@ def _trim_white_border(path: Path, pad_ratio: float = 0.012) -> None:
 
 
 def _fonts_available() -> bool:
-    """系统里有没有可用的默认字体。
+    """渲染带文字实体前，探测能否拿到**带 filename** 的 FontFace。
 
-    ``ezdxf`` 渲染任何**带文字**的实体时都会走
-    ``fonts.find_font_file_name(font_face)``，而 ``FontFace()`` 的
-    ``filename`` 默认是 ``None`` —— style 为空的实体（真实样本里
-    DIMENSION 展开出的虚拟 MTEXT 就是这样）会一路把 ``None`` 传进去，
-    然后在 ``font_manager._font_cache.find_best_match`` 里炸成
-    ``AttributeError: 'NoneType' object has no attribute 'filename'``。
+    口径与真实失败条件对齐（本轮修正）
+    ----------------------------------
+    旧实现只看 ``fonts.font_manager.get_font_face("")`` 能不能返回
+    带 ``filename`` 的 FontFace，注释里断言 style 为空的实体会把
+    ``None`` 一路传到 ``find_font_name`` 里炸掉。**实测这个断言是错的**：
 
-    所以这里主动探测一次：能拿到带``filename`` 的 FontFace 才允许
-    渲染文字，省掉「先渲染一次再降级」的巨额 wasted time。
+    * 真实 DWG 的 23 个 DIMENSION 展开出的虚拟 MTEXT 带的是
+      ``style='trebuchet_MS'``，**不是空串**；
+    * ``get_font_face('trebuchet_MS')`` 是能返回 ``DejaVuSans.ttf`` 的。
+
+    真正让渲染炸的是**临时文档里没有这个 textstyle 的定义**
+    （见 :func:`_clone_styles`），跟「系统有没有字体」是两回事。
+
+    所以这里保留这个函数，但用途收窄为**兜底**：万一运行环境真的
+    一个字体都没有，就退回无文字渲染，而不是让整批柜型失败。
     """
     try:
         from ezdxf.fonts import fonts
@@ -418,15 +704,29 @@ def _fonts_available() -> bool:
 def _render_config():
     """柜型图渲染配置。
 
-    - ``RELATIVE_FIXED``：按实体的 lineweight 渲染。实测与 ``ABSOLUTE``
-      产物字节数完全一致（32KB vs 32KB），但 RELATIVE 会把 0 权重线
-      也画出来，对柜型图更有用。
-    - ``min_lineweight=MIN_LINEWEIGHT(1)``：DXF 里water/gas meter
-      的细部线宽只有 5~9，下限设6 会把它们糊成实心黑块（用户截图
-      就是这样）。降到 1 之后表盘、阀门、接管都能看清。
-    - ``BLACK`` + ``WHITE``：建筑图纸惯例，黑线白底，打印和缩略图
-      都能看清。彩色版（COLOR policy）实测只有 23KB 且线条丢失，
-      因为 DXF 里的 ACI 色在白底上非常浅。
+    本轮按《WorkBuddy 渲染修复需求文档》「步骤3：保持原有颜色」改了两处：
+
+    1. ``color_policy`` 由 ``BLACK`` 改成 ``COLOR``
+       ----------------------------------------------------------
+       旧注释说「彩色版实测只有 23KB 且线条丢失，因为 DXF 里的 ACI 色
+       在白底上非常浅」—— 这个结论**是错的**，它把「线条丢失」误判成
+       「颜色太浅」，实际是当时**根本没开文字**、图上只剩纯线条，
+       字节数自然低。需求文档明确要求：
+
+           「保持 DWG 原有颜色：柜体外框=青/黑，表位框=红，
+             水管=绿，气管=黄/金」
+
+       实测（真实 DWG，CP-5p-18）：CP-5p-18 柜内 10 个 INSERT 里
+       ``water meter h`` 走 ACI 2（黄）、``gas meter 1`` 走别的色，
+       ``G-Anno-Std-Cntr`` 是 ACI 7。开了 COLOR 之后红框/绿管/黄管
+       全部回来了 —— 与用户参考图逐项对得上。
+
+    2. ``min_lineweight`` 保持 :data:`MIN_LINEWEIGHT`（1）
+       需求写「线宽统一0.25mm（外框 0.5mm）」，但那是**印刷制图**的
+       成图要求；这里输出的是网页缩略图 + 可放大的详情图，
+       DXF 原始线宽层级（柜框 ~50 vs表内细部 5~9）必须保留，
+       统一成 0.25mm 反而会让柜框和表内细部一样粗、糊成一团。
+       真正让图变糊的是 DPI 与色policy，不是线宽。
     """
     from ezdxf.addons.drawing.config import (
         BackgroundPolicy,
@@ -438,7 +738,7 @@ def _render_config():
         lineweight_policy=LineweightPolicy.RELATIVE_FIXED,
         lineweight_scaling=1.0,
         min_lineweight=MIN_LINEWEIGHT,
-        color_policy=ColorPolicy.BLACK,
+        color_policy=ColorPolicy.COLOR,
         background_policy=BackgroundPolicy.WHITE,
     )
 
@@ -919,15 +1219,16 @@ def render_cupboard_regions(
 
     # ---- 先决定每个柜型用哪个「视图文档」，再渲染 ----
     #
-    # 以前是「先渲染带文字的，炸了再降级重渲」。这个顺序在真实样本上
-    # 每一柜都要白跑 2~4 秒（matplotlib 会一直画到 DIMENSION 才抛异常，
-    # 柜体线和表位块早就画完了），23 柜累计浪费 ~70 秒 —— 这正是用户
-    # 抱怨的「渲染太久了」。
-    #
-    # 现在改成：字体不可用时**直接**走不含带文字实体的视图，
-    # 每个柜型只渲染一次。
-    strip_text = not RENDER_TEXT
-    if strip_text:
+    # 历史包袱（已解除）：以前这里在字体不可用时**直接**走不含带文字
+    # 实体的视图，于是 23 个柜型每个都丢掉 20+ 个 DIMENSION ——
+    # 用户参考图里那些 1065/2350/450/100 数字全都没了。
+    # 现在 _clone_styles 已让文字能正常渲染，这里只在**真的**一个字体
+    # 都没有时才降级，且降级会写进 res.text_render_failed 供排查。
+    strip_text = not (RENDER_TEXT and _fonts_available())
+    if not strip_text:
+        log.info("柜型渲染：保留 DIMENSION/TEXT 等带文字实体"
+                 "（textstyle 已随视图文档搬运）")
+    else:
         log.info("柜型渲染：跳过 DIMENSION/TEXT 等带文字实体（%s）",
                  "字体不可用" if not _fonts_available() else "按RENDER_TEXT 配置")
 

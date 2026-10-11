@@ -411,15 +411,42 @@ class TestRenderInternals:
         assert _auto_workers(100) <= MAX_RENDER_WORKERS
         assert _auto_workers(0) >= 1, "空任务列表也要返回合法并行度"
 
-    def test_render_config_is_black_on_white(self):
-        """建筑图纸惯例：黑线白底。彩色版实测只有 23KB 且线条丢失。"""
+    def test_render_config_is_color_on_white(self):
+        """白底 + **原色**（不是黑线）。
+
+        【本轮改动】原断言是 ``ColorPolicy.BLACK``，理由写的是
+        「彩色版实测只有 23KB 且线条丢失」—— **这个结论是错的**，
+        它把「线条丢失」误判成「颜色太浅」，实际是当时**根本没开文字**
+        （见 :func:`_clone_styles` 的 bug），图上只剩纯线条，
+        字节数自然低。
+
+        需求文档「步骤3：保持原有颜色」明确要求：
+            「保持 DWG 原有颜色：柜体外框=青/黑，表位框=红，
+              水管=绿，气管=黄/金」
+
+        改COLOR 后实测 23 柜：彩色像素占比 4.92%~8.39%（平均 6.72%），
+        与 DWG 里「彩色实体约占 1/15」的比例吻合。
+        白底不变（印刷与缩略图观感需求）。
+        """
         from ezdxf.addons.drawing.config import BackgroundPolicy, ColorPolicy
         from app.parsers.cupboard_render import _render_config
         cfg = _render_config()
-        assert cfg.color_policy == ColorPolicy.BLACK
-        #背景用的是 BackgroundPolicy 枚举，不是 ColorPolicy
+        assert cfg.color_policy == ColorPolicy.COLOR
+        # 背景用的是 BackgroundPolicy 枚举，不是 ColorPolicy
         assert cfg.background_policy == BackgroundPolicy.WHITE
         assert cfg.min_lineweight == MIN_LINEWEIGHT
+
+    def test_render_text_is_enabled(self):
+        """必须渲染尺寸标注。
+
+        【本轮改动】原来 ``RENDER_TEXT=False``，理由是「字体不可用会炸」。
+        真根因是临时文档里没有 textstyle 定义（不是系统缺字体），
+        已由 :func:`_clone_styles` 解决，所以标注必须打开 ——
+        用户参考图里1065/2350/450 这些数字是核心信息。
+        """
+        from app.parsers.cupboard_render import RENDER_TEXT
+        assert RENDER_TEXT is True, (
+            "尺寸标注必须渲染 —— 需求「目标效果要点」明确要求「保留尺寸标注」")
 
     def test_fonts_available_probe_does_not_raise(self):
         """字体探测不能抛异常 —— 它决定要不要渲染文字。"""
@@ -501,3 +528,230 @@ class TestOutlierEntityFilter:
         rect = Rect(0.0, 0.0, 915.0, 1750.0, "1CO", None, -1, "LINE_PAIR")
         far = msp.add_line((5000.0, 5000.0), (5100.0, 5100.0))
         assert not _entity_near(far, rect)
+
+
+# ======================================================================
+# 本轮修复：按《WorkBuddy渲染修复需求文档》恢复 DWG 原样导出
+#
+# 需求原文：
+#   「保持 DWG 原有颜色：柜体外框=青/黑，表位框=红，水管=绿，气管=黄/金」
+#   「保留尺寸标注」
+#   「HATCH 实体只画边框不填充」
+#
+# 下面每条测试都对应本轮挖出并修掉的一个**真**bug —— 三个都是
+# 「代码看着对、跑起来静默丢东西」的类型，靠读代码永远看不出来，
+# 必须用真实 DWG 渲出来量像素才能抓到。
+# ======================================================================
+
+
+class TestColorPreservation:
+    """颜色丢失的三道防线。
+
+    实测踩坑链：彩色渲染明明打开了（``ColorPolicy.COLOR``），
+    成图彩色像素却是 **0.00%**。逐层排查后发现三处独立失色：
+
+      1. 临时文档没有**顶层实体**的图层定义（只在块里搬了）
+      2. 块定义搬运只做一层，嵌套块（``h-meter``）没搬
+      3. ``_trim_white_border`` 用灰度图裁剪后把**灰度图**存回，
+         把颜色永久洗掉（裁前 5.04% → 裁后 0.00%）
+    """
+
+    def _sat_ratio(self, path: Path) -> float:
+        """彩色像素占比。阈值 max-min>30，与人工目视一致。"""
+        from PIL import Image
+        with Image.open(path) as im:
+            im = im.convert("RGB")
+            try:
+                px = list(im.get_flattened_data())
+            except AttributeError:
+                px = list(im.getdata())
+        return sum(1 for p in px if max(p) - min(p) > 30) / len(px)
+
+    def test_render_config_uses_color_policy(self):
+        """渲染配置必须是 COLOR 而不是 BLACK。
+
+        旧代码硬编码 ``ColorPolicy.BLACK``，把 DWG 的彩色全压成灰。
+        """
+        from ezdxf.addons.drawing.config import ColorPolicy
+        from app.parsers.cupboard_render import _render_config
+        cfg = _render_config()
+        assert cfg.color_policy == ColorPolicy.COLOR, (
+            "渲染配置必须是 COLOR —— 需求明确要求「保持 DWG 原有颜色」")
+
+    def test_trim_white_border_keeps_color(self, out_dir):
+        """裁白边**不能**把彩色洗成灰色。
+
+        这是本轮最隐蔽的一个 bug：裁剪本身做的是对的（找到内容 bbox），
+        但它拿灰度图当中间态，裁完把灰度图存了回去 ——
+        于是一张5% 彩色的图裁完变成 0% 彩色。
+
+        用一张带彩色块的图走一遍裁剪，前后彩色占比必须基本不变。
+        """
+        from PIL import Image, ImageDraw
+        from app.parsers.cupboard_render import _trim_white_border
+
+        src = out_dir / "colored.jpg"
+        im = Image.new("RGB", (600, 800), (255, 255, 255))
+        d = ImageDraw.Draw(im)
+        # 内容区：中央一小块，叠一条鲜红与一条纯绿
+        d.rectangle([200, 300, 400, 500], outline=(0, 200, 0), width=6)
+        d.line([200, 300, 400, 500], fill=(255, 0, 0), width=8)
+        im.save(src, format="JPEG", quality=95)
+
+        before = self._sat_ratio(src)
+        _trim_white_border(src)
+        after = self._sat_ratio(src)
+
+        assert before > 0.01, f"测试样本本身该有彩色，实测 {before:.4f}"
+        assert after > before * 0.8, (
+            f"裁白边把彩色洗掉了：{before:.4f} → {after:.4f}"
+            "（_trim_white_border 是不是又拿灰度图存回去了？）")
+
+    def test_clone_layers_copies_top_level_layers(self):
+        """**顶层实体**所在的图层也必须搬进临时文档。
+
+        实测（真实 DWG，CP-5p-18）：柜框 LINE 在 ``1CO``、建筑线在
+        ``2CONC``，这两个图层只在 modelspace 层出现，块定义里根本没有。
+        只在 ``_clone_block_deep`` 里搬图层的话，这两个永远建不出来。
+        """
+        import ezdxf
+        from app.parsers.cupboard_render import _clone_into_cabinet_view
+
+        src = ezdxf.new()
+        lay = src.layers.new("1CO")
+        lay.color = 4                      # ACI 4 = 青
+        line = src.modelspace().add_line((0, 0), (100, 100))
+        line.dxf.layer = "1CO"
+
+        dst = ezdxf.new()
+        _clone_into_cabinet_view(src, dst, [line])
+
+        got = None
+        try:
+            got = dst.layers.get("1CO")
+        except Exception:
+            got = None
+        assert got is not None, (
+            "顶层实体的图层（1CO）没被搬进临时文档 —— "
+            "渲染时退到默认层，颜色全丢")
+        assert got.dxf.color == 4, (
+            f"图层色没搬过来：期望 ACI 4（青），实际 {got.dxf.color}")
+
+
+class TestNestedBlockClone:
+    """嵌套块必须递归搬运。
+
+    实测（真实 DWG，CP-5p-18）：``water meter h`` 的块定义里有 109 个
+    实体，其中 1 个是 ``INSERT name='h-meter'`` —— 水表本体是第二层块。
+    旧代码只搬一层，``h-meter`` 在临时文档里不存在，ezdxf 渲染 INSERT
+    时查不到块定义就**静默跳过**，柜子下半部 5 个水表在图上整体消失，
+    而 ``entity_count`` 仍是 42 —— 看着一切正常。
+    """
+
+    def test_collect_block_refs_is_recursive(self):
+        """块引用收集必须递归到嵌套层。"""
+        import ezdxf
+        from app.parsers.cupboard_render import _collect_block_refs
+
+        src = ezdxf.new()
+        inner = src.blocks.new("h-meter")
+        inner.add_line((0, 0), (10, 0))
+        outer = src.blocks.new("water meter h")
+        outer.add_line((0, 0), (10, 0))
+        ref = outer.add_blockref("h-meter", (5, 5))
+        top = src.modelspace().add_blockref("water meter h", (0, 0))
+
+        out: set = set()
+        _collect_block_refs(src, [top], out)
+        assert "water meter h" in out
+        assert "h-meter" in out, (
+            "嵌套块 h-meter 没被收集 —— 水表会整块从图上消失")
+
+    def test_nested_block_actually_lands_in_view_doc(self):
+        """临时文档里必须真的有嵌套块的定义。"""
+        import ezdxf
+        from app.parsers.cupboard_render import _clone_into_cabinet_view
+
+        src = ezdxf.new()
+        inner = src.blocks.new("h-meter")
+        inner.add_line((0, 0), (10, 0))
+        outer = src.blocks.new("water meter h")
+        outer.add_line((0, 0), (10, 0))
+        outer.add_blockref("h-meter", (5, 5))
+        ins = src.modelspace().add_blockref("water meter h", (0, 0))
+
+        dst = ezdxf.new()
+        _clone_into_cabinet_view(src, dst, [ins])
+
+        names = {b.name for b in dst.blocks}
+        assert "water meter h" in names
+        assert "h-meter" in names, (
+            "嵌套块 h-meter 的定义没建出来 —— 渲出来是空框")
+
+    def test_dxf_table_lookup_semantics_differ(self):
+        """``layers.get()`` 找不到会抛异常，``blocks.get()`` 返回 None。
+
+        这是本轮踩到的坑：两者的「不存在」表现**不一样**，
+        所以不能一律写成
+            ``dst = tbl.get(name) or tbl.new(name)``
+
+        · ``layers.get()`` 直接抛 ``DXFTableEntryError`` —— 惯用写法
+          会在抛异常处走人，图层定义永远建不出来。
+          实测报错「图层搬运失败 4 个」就是这么来的。
+        · ``blocks.get()`` 返回 ``None``，此时 ``or`` 短路正常工作。
+
+        这条测试把两者的差异钉死，防止有人「顺手统一成惯用写法」。
+        """
+        import ezdxf
+        from ezdxf.lldxf.const import DXFTableEntryError
+
+        doc = ezdxf.new()
+        with pytest.raises(DXFTableEntryError):
+            doc.layers.get("__definitely_not_exist__")
+        assert doc.blocks.get("__definitely_not_exist__") is None
+
+
+class TestSolidHatchDemotion:
+    """SOLID HATCH 必须降级成只描边（需求「步骤2」）。"""
+
+    def test_solid_hatch_becomes_pattern(self):
+        """SOLID + solid_fill 的 HATCH 必须被降级。"""
+        import ezdxf
+        from app.parsers.cupboard_render import _demote_solid_hatch
+
+        doc = ezdxf.new()
+        h = doc.modelspace().add_hatch(color=7)
+        h.dxf.pattern_name = "SOLID"
+        h.dxf.solid_fill = 1
+        h.paths.add_polyline_path([(0, 0), (10, 0), (10, 10), (0, 10)],
+                                  is_closed=True)
+
+        out = _demote_solid_hatch(h)
+        assert out.dxf.solid_fill == 0, (
+            "SOLID 填充没关掉 —— 水表阀体会渲成一块黑色实心块")
+        assert str(out.dxf.pattern_name).upper() != "SOLID", (
+            "pattern 还是 SOLID，应该换成剖面线图案")
+
+    def test_non_solid_hatch_untouched(self):
+        """非 SOLID 的 HATCH 原样放行 —— 不能过度处理。"""
+        import ezdxf
+        from app.parsers.cupboard_render import _demote_solid_hatch
+
+        doc = ezdxf.new()
+        h = doc.modelspace().add_hatch(color=3)
+        h.dxf.pattern_name = "ANSI31"
+        h.dxf.solid_fill = 0
+
+        out = _demote_solid_hatch(h)
+        assert str(out.dxf.pattern_name).upper() == "ANSI31"
+        assert out.dxf.solid_fill == 0
+
+    def test_non_hatch_passes_through(self):
+        """非 HATCH 实体原样复制。"""
+        import ezdxf
+        from app.parsers.cupboard_render import _demote_solid_hatch
+
+        doc = ezdxf.new()
+        line = doc.modelspace().add_line((0, 0), (10, 10))
+        out = _demote_solid_hatch(line)
+        assert out.dxftype() == "LINE"
