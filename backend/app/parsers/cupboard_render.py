@@ -317,7 +317,9 @@ def _clone_block_deep(src_doc, dst_doc, name: str, errors: list[str],
     dst_space = dst_block.entity_space
     for be in children:
         try:
-            dst_space.add(be.copy())
+            # 同主实体一样，块内的 SOLID HATCH 也要降级，否则嵌套块里的
+            # 实心填充（如 water meter 阀体底纹）仍会渲成黑坨
+            dst_space.add(_demote_solid_hatch(be))
         except Exception as exc:
             errors.append(f"块 {name}/{be.dxftype()}: {exc}")
 
