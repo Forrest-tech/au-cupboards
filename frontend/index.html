@@ -2254,6 +2254,8 @@ function showFloorPanel(code) {
   }
 
   // ---- 3. 该 units 数对应的全部柜型种类（用户核心诉求）----
+  // 问题9：建筑图纸 tab 不显示柜型库部分，只显示楼/楼层信息
+  if (S.view !== 'building') {
   h += `<div class="sec" style="padding-left:0">${
     LANGNOW === 'zh' ? `柜型库中 ${n} Units 的全部种类`
                     : `All ${n}-unit cupboards in the library`}</div>`;
@@ -2283,6 +2285,7 @@ function showFloorPanel(code) {
     }
     h += '</div>';
   }
+  } // 问题9：结束 building tab 隐藏柜型库部分的 if
   $('#rpane').innerHTML = h;
   // 楼层选中也要持久化 —— 刷新后要回到这一层。saveViewState 原本
   // 只在 gotoView 末尾调，那时 floorSel 还是上一次的旧值。
