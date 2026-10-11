@@ -421,6 +421,98 @@ def job_exports(job_id: int) -> dict[str, Any]:
     return latest
 
 
+@app.post("/api/jobs/{job_id}/export/{fmt}")
+def export_report(job_id: int, fmt: str, body: dict[str, Any]):
+    """问题15：直接生成楼层×柜型报告（pdf/docx/xlsx/jpg），返回文件流。
+
+    body: {"rows": [{"floor","units","cupboards"}], "name": "文件名(不含扩展名)"}
+    """
+    from fastapi.responses import Response
+    import io
+
+    fmt = fmt.lower()
+    if fmt not in ("pdf", "docx", "xlsx", "jpg"):
+        raise HTTPException(400, f"不支持的格式: {fmt}")
+    rows = body.get("rows") or []
+    name = str(body.get("name") or "export")
+
+    headers = ["Floor", "Units", "Cupboards"]
+    data = [[r.get("floor", ""), str(r.get("units", "")), r.get("cupboards", "")] for r in rows]
+    title = "Floor × Cupboard Plan"
+
+    if fmt == "pdf":
+        from reportlab.lib.pagesizes import A4
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib import colors
+        buf = io.BytesIO()
+        doc = SimpleDocTemplate(buf, pagesize=A4)
+        styles = getSampleStyleSheet()
+        elems = [Paragraph(title, styles["Title"])]
+        t = Table([headers] + data)
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f5f5f5")),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+        elems.append(t)
+        doc.build(elems)
+        return Response(buf.getvalue(), media_type="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="{name}.pdf"'})
+
+    if fmt == "docx":
+        from docx import Document
+        doc = Document()
+        doc.add_heading(title, 1)
+        t = doc.add_table(rows=1 + len(data), cols=3)
+        for j, h in enumerate(headers):
+            t.rows[0].cells[j].text = h
+        for i, row in enumerate(data):
+            for j, v in enumerate(row):
+                t.rows[i + 1].cells[j].text = v
+        buf = io.BytesIO()
+        doc.save(buf)
+        return Response(buf.getvalue(),
+                        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        headers={"Content-Disposition": f'attachment; filename="{name}.docx"'})
+
+    if fmt == "xlsx":
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Plan"
+        ws.append(headers)
+        for row in data:
+            ws.append(row)
+        buf = io.BytesIO()
+        wb.save(buf)
+        return Response(buf.getvalue(),
+                        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        headers={"Content-Disposition": f'attachment; filename="{name}.xlsx"'})
+
+    # jpg：把表格画成图片
+    from PIL import Image, ImageDraw
+    col_w, row_h = 260, 32
+    W, H = col_w * 3 + 40, row_h * (len(data) + 1) + 60
+    img = Image.new("RGB", (W, H), "white")
+    d = ImageDraw.Draw(img)
+    d.text((20, 15), title, fill="black")
+    y = 45
+    for ri, row in enumerate([headers] + data):
+        x = 20
+        for v in row:
+            d.rectangle([x, y, x + col_w, y + row_h], outline="#cccccc",
+                        fill="#f5f5f5" if ri == 0 else "white")
+            d.text((x + 6, y + 8), str(v)[:40], fill="black")
+            x += col_w
+        y += row_h
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=88)
+    return Response(buf.getvalue(), media_type="image/jpeg",
+                    headers={"Content-Disposition": f'attachment; filename="{name}.jpg"'})
+
+
 @app.get("/api/download")
 def download(path: str):
     p = Path(path).resolve()

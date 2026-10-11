@@ -925,7 +925,6 @@ function modal(html, cls = '') {
   m.className = 'modal' + (cls ? ' ' + cls : '');
   m.innerHTML = html;
   $('#mask').classList.add('on');
-}
 
 
 /* ============================================================ 版本错配横幅
@@ -997,14 +996,14 @@ function showExportModal() {
       </label>
       <div style="display:flex;flex-direction:column;gap:6px;font-size:13px">
         <span style="font-weight:600">${zh?'保存位置':'Save to'}</span>
-        <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;cursor:pointer">
-          <input type="radio" name="expLoc" value="download" checked>
-          <span>💾 ${zh?'本地下载':'Download to device'}</span>
-        </label>
-        <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;cursor:pointer;opacity:.5">
-          <input type="radio" name="expLoc" value="cloud" disabled>
-          <span>☁️ ${zh?'云端（暂未开通）':'Cloud (coming soon)'}</span>
-        </label>
+        <div style="display:flex;gap:8px">
+          <input id="expPath" readonly placeholder="${zh?'默认下载目录':'Default download folder'}"
+            style="flex:1;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;background:var(--panel2);color:var(--dim)">
+          <button class="btn" id="expBrowse" type="button">${zh?'浏览…':'Browse…'}</button>
+        </div>
+        <div class="muted" style="font-size:11px">${zh
+          ? '不选则保存到浏览器默认下载目录'
+          : 'Leave empty to use the browser default download folder'}</div>
       </div>
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:4px">
         <button class="btn" onclick="closeModal()">${zh?'取消':'Cancel'}</button>
@@ -1012,18 +1011,37 @@ function showExportModal() {
       </div>
     </div>`;
   $('#mask').classList.add('on');
+  // 浏览按钮：用 File System Access API 让用户选保存位置
+  window._expFileHandle = null;
+  const browseBtn = document.querySelector('#expBrowse');
+  const pathInput = document.querySelector('#expPath');
+  if (browseBtn) browseBtn.onclick = async () => {
+    const zh2 = LANGNOW === 'zh';
+    try {
+      if (!window.showSaveFilePicker) {
+        toast(zh2 ? '当前浏览器不支持选择路径，将使用默认下载' : 'Browser does not support path picking, using default download', 'info');
+        return;
+      }
+      const fmtSel = document.querySelector('#expFmt')?.value || 'pdf';
+      const handle = await window.showSaveFilePicker({
+        suggestedName: `export.${fmtSel}`,
+        types: [{ description: 'Export', accept: {'*/*': [`.${fmtSel}`]} }],
+      });
+      window._expFileHandle = handle;
+      if (pathInput) { pathInput.value = handle.name; pathInput.style.color = 'var(--fg)'; }
+    } catch (e) {
+      if (e.name !== 'AbortError') toast(String(e.message || e), 'err');
+    }
+  };
 }
 
 /** 读取对话框选择并执行导出 */
 function doExportConfirm() {
   const fmt = document.querySelector('#expFmt')?.value || 'pdf';
-  const loc = document.querySelector('input[name="expLoc"]:checked')?.value || 'download';
-  if (loc !== 'download') {
-    toast(LANGNOW==='zh' ? '云端存储暂未开通' : 'Cloud storage coming soon', 'info');
-    return;
-  }
+  // 路径选择：如果用户点了"浏览"选了位置，用 File System Access API 保存
+  const picked = window._expFileHandle || null;
   closeModal();
-  doExport(fmt);
+  doExport(fmt, picked);
 }
 
 function buildExportData() {
@@ -1043,30 +1061,38 @@ function buildExportData() {
   return rows;
 }
 
-function doExport(fmt) {
+/** 统一保存：优先写入用户选定的文件句柄，否则触发浏览器下载 */
+async function saveExportBlob(blob, filename, fileHandle) {
+  const zh = LANGNOW === 'zh';
+  if (fileHandle) {
+    try {
+      const w = await fileHandle.createWritable();
+      await w.write(blob);
+      await w.close();
+      toast(zh ? `已保存到 ${fileHandle.name}` : `Saved to ${fileHandle.name}`, 'ok');
+      return;
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+      toast((zh ? '写入失败，改用下载：' : 'Write failed, falling back to download: ') + e.message, 'err');
+    }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast(zh ? `已导出 ${filename}` : `Exported ${filename}`, 'ok');
+}
+
+function doExport(fmt, fileHandle) {
   const rows = buildExportData();
   const jname = (S.job?.name || 'export').replace(/[^\w\-]+/g, '_');
   const zh = LANGNOW === 'zh';
   const title = zh ? '楼层×柜型方案' : 'Floor × Cupboard';
 
-  // PDF：用浏览器打印（标准做法）
-  if (fmt === 'pdf') {
-    const w = window.open('', '_blank');
-    w.document.write(`<html><head><meta charset="utf-8"><title>${jname}</title>
-      <style>body{font-family:sans-serif}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:8px}th{background:#f5f5f5}</style>
-      </head><body><h1>${title}</h1>
-      <table><tr><th>${zh?'楼层':'Floor'}</th><th>${zh?'户数':'Units'}</th><th>${zh?'匹配柜型':'Cupboards'}</th></tr>${
-      rows.map(r => `<tr><td>${r.floor}</td><td>${r.units}</td><td>${r.cupboards}</td></tr>`).join('')
-      }</table></body></html>`);
-    w.document.close();
-    w.focus();
-    setTimeout(() => w.print(), 300);
-    toast(zh ? '已打开打印对话框，请选择"另存为 PDF"' : 'Print dialog opened — choose "Save as PDF"', 'ok');
-    return;
-  }
-  // DOCX / XLSX / JPG：走后端生成（后端有 python-docx / openpyxl / Pillow）
-  if (['docx', 'xlsx', 'jpg'].includes(fmt)) {
-    doExportViaBackend(fmt, jname);
+  // PDF / DOCX / XLSX / JPG：走后端直接生成
+  if (['pdf', 'docx', 'xlsx', 'jpg'].includes(fmt)) {
+    doExportViaBackend(fmt, jname, fileHandle);
     return;
   }
 
@@ -1090,16 +1116,11 @@ function doExport(fmt) {
     mime = 'text/html'; ext = 'html';
   }
   const blob = new Blob([content], { type: mime + ';charset=utf-8' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `${jname}.${ext}`;
-  a.click();
-  URL.revokeObjectURL(a.href);
-  toast(zh ? `已导出 ${jname}.${ext}` : `Exported ${jname}.${ext}`, 'ok');
+  saveExportBlob(blob, `${jname}.${ext}`, fileHandle);
 }
 
-/** DOCX/XLSX/JPG 走后端生成并下载 */
-async function doExportViaBackend(fmt, jname) {
+/** PDF/DOCX/XLSX/JPG 走后端生成并保存 */
+async function doExportViaBackend(fmt, jname, fileHandle) {
   const zh = LANGNOW === 'zh';
   try {
     const res = await fetch(`/api/jobs/${S.jobId}/export/${fmt}`, {
@@ -1109,15 +1130,10 @@ async function doExportViaBackend(fmt, jname) {
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const blob = await res.blob();
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${jname}.${fmt}`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-    toast(zh ? `已导出 ${jname}.${fmt}` : `Exported ${jname}.${fmt}`, 'ok');
+    saveExportBlob(blob, `${jname}.${fmt}`, fileHandle);
   } catch (e) {
     toast((zh ? '后端导出失败，已降级为 HTML：' : 'Backend export failed, fell back to HTML: ') + e.message, 'err');
-    doExport('html');
+    doExport('html', fileHandle);
   }
 }
 
