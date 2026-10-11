@@ -4170,7 +4170,6 @@ $('#viewer').addEventListener('wheel', (e) => {
     setZoom((S.zoom || 1) * factor);
   }
 }, { passive: false });
-$('#bparse').onclick = () => openUpload('building');
 // 点遮罩关闭 —— 但解析中closeModal 自身会拒绝，这里只拦住冒泡
 $('#mask').onclick = e => { if (e.target.id === 'mask') closeModal(); };
 document.addEventListener('keydown', e => {
