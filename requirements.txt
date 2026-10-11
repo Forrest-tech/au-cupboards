@@ -123,3 +123,4 @@ pytest==9.0.2
 # 与 python-multipart 同类问题：开发机全局环境恰好有，测试全绿，
 # 干净环境才暴露。由 tests/test_dependencies.py 的 TestTestDependencies 守卫。
 httpx==0.28.1
+weasyprint==66.0

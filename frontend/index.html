@@ -1161,7 +1161,7 @@ async function doExportViaBackend(fmt, jname, fileHandle) {
     saveExportBlob(blob, `${jname}.${fmt}`, fileHandle);
   } catch (e) {
     toast((zh ? '后端导出失败，已降级为 HTML：' : 'Backend export failed, fell back to HTML: ') + e.message, 'err');
-    doExport('html', fileHandle);
+    doExport('html', fileHandle, jname);
   }
 }
 
