@@ -1300,7 +1300,8 @@ function autoSelectFirstInView() {
   }
   // 建筑图纸 tab：第一个 item 是楼栋，直接点它只会展开、不会加载内容。
   // 用户要的是「默认选中第一个 item，中间显示完整 PDF，右边显示楼层
-  // 信息」—— 所以这里自动往下钻到楼层列表，钻到第一个真实楼层。
+  // 信息」—— 所以这里自动往下钻到楼层列表。
+  // 用户要求：默认进入是"所有楼层"，不自动选第一个楼层 —— 2026-10-11
   if (S.view === 'building') {
     const p = S.projects[0];
     if (!p) { renderHub(); return; }
@@ -1309,10 +1310,11 @@ function autoSelectFirstInView() {
     S.curBuilding = p.id;
     S.openDrawing = d.id;
     S.treeSel = 'floors';
+    S.floorSel = null;
+    S.floorFilter = null;
     renderTree();
-    const f0 = (S.job?.floors || [])[0];
-    if (f0) { S.floorSel = f0.floor_code; showFloorPanel(f0.floor_code); }
-    else { renderHub(); if (S.jobId) showPdf(S.jobId, S.pages || []); }
+    showAllFloorsPanel();
+    if (S.jobId) showPdf(S.jobId, S.pages || []);
     return;
   }
   const first = $('#tree .node');
