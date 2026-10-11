@@ -667,8 +667,8 @@ tr.floor-row td{background:#eef2f7;font-weight:700;border-top:2px solid var(--li
       <div class="page-list" id="pagelist"></div>
       <div class="viewer" id="viewer">
         <!-- 静态 HTML 里的 ${...} 不会被求值，必须给真实文本，
-             boot() 会用 t('mid.ph') 覆盖 -->
-        <div class="ph"><div class="big"><svg class="ic" aria-hidden="true"><use href="#i-file-text"></use></svg></div><div>上传建筑图纸后在此原样预览</div></div>
+             boot() 会用 data-i18n 覆盖 -->
+        <div class="ph"><div class="big"><svg class="ic" aria-hidden="true"><use href="#i-file-text"></use></svg></div><div data-i18n="mid.ph">上传建筑图纸后在此原样预览</div></div>
       </div>
     </div>
     <div class="mid-bar">
@@ -878,6 +878,10 @@ function applyI18n() {
     });
   }
   gotoView(S.view);
+  // 语言切换后，动态渲染的内容（#viewer 占位、#rpane）也要重刷，
+  // 否则残留旧语言的文本 —— 用户报的 bug
+  if (S.view === 'cupboard') renderHub();
+  else if (S.view === 'building' && !S.jobId) resetViewer();
 }
 
 const S = {          // 全局状态
