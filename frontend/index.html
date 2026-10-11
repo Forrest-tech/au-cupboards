@@ -294,8 +294,9 @@ body.resizing{cursor:col-resize;user-select:none}
  * .rowact 绝对定位、不占布局宽度，所以按钮出现不会让整棵树横向抖动。
  */
 .rowact{
-  position:absolute;right:4px;top:50%;transform:translateY(-50%);
+  position:absolute;right:8px;top:50%;transform:translateY(-50%);
   display:flex;gap:2px;
+  background:var(--panel);padding:2px;border-radius:6px}
   /* 【真实 bug 修复】不能靠 opacity+pointer-events 来隐藏。
    *
    * `pointer-events:none` 会让按钮**完全不可点**，而且不只触屏 ——
