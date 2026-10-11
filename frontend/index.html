@@ -3932,8 +3932,9 @@ function gotoView(v) {
   const bedit = $('#bedit'); if (bedit) bedit.style.display = isBuilding ? 'none' : '';
   const bpage = $('#bpage'); if (bpage) bpage.style.display = isBuilding ? 'none' : '';
   // 建筑图纸 tab 隐藏左树（竖条块），让 PDF 显示更宽 —— 用户要求
-  const treeEl = $('#tree'); if (treeEl) treeEl.style.display = isBuilding ? 'none' : '';
-  const dragEl = $('#dragL'); if (dragEl) dragEl.style.display = isBuilding ? 'none' : '';
+  // 2026-10-11 11:45 用户反悔：左树要恢复，只隐藏 pagelist
+  const treeEl = $('#tree'); if (treeEl) treeEl.style.display = '';
+  const dragEl = $('#dragL'); if (dragEl) dragEl.style.display = '';
   // 建筑图纸 tab 隐藏整个中栏顶部工具栏（A000标题+按钮），只显示文档内容 —— 用户要求
   const midBar = document.querySelector('.mid-bar');
   if (midBar) midBar.style.display = isBuilding ? 'none' : '';
