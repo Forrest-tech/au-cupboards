@@ -2169,7 +2169,7 @@ function bindTree() {
         if (S.floorSel === '') S.floorSel = null;
         renderTree();
         if (S.floorSel) showFloorPanel(S.floorSel);
-        else { S.floorFilter = null; renderHub(); }
+        else { S.floorFilter = null; showAllFloorsPanel(); }
       } else {
         filterFloor(n.dataset.floor);
       }
@@ -2534,6 +2534,36 @@ function cupboardsForUnits(n) {
  *    2. 该层每一户的柜型（来自解析结果的variant）
  *    3. **该层 units 数对应的全部柜型种类**（来自柜型库/DWG，带缩略图）
  */
+
+/** 建筑图纸 tab：点"所有楼层"时右栏显示所有楼层的信息 —— 用户要求 */
+function showAllFloorsPanel() {
+  const j = S.job;
+  if (!j) return;
+  const floors = j.floors || [];
+  let h = `<div class="rpane"><div class="sec" style="padding-left:0">${t('tree.projects')}</div>`;
+  h += `<div class="kpirow">
+    <div class="kpi"><div class="v">${floors.length}</div><div class="l">${t('kpi.floor')}</div></div>
+    <div class="kpi g"><div class="v">${floors.reduce((a, f) => a + Number(f.unit_count || 0), 0)}</div><div class="l">${t('kpi.units')}</div></div>
+  </div>`;
+  h += `<table><thead><tr><th>${t('mtx.floor')}</th><th class="num">${t('mtx.units')}</th><th class="num">COLIVING</th><th class="num">${t('mtx.area')}</th></tr></thead><tbody>`;
+  for (const f of floors) {
+    h += `<tr class="floor-row" data-floor="${esc(f.floor_code)}" style="cursor:pointer">
+      <td><b>${esc(f.floor_code)}</b></td>
+      <td class="num">${f.unit_count || 0}</td>
+      <td class="num">${f.communal_count || 0}</td>
+      <td class="num">${num(f.total_area_m2, 1)}</td></tr>`;
+  }
+  h += `</tbody></table></div>`;
+  $('#rpane').innerHTML = h;
+  // 点行跳到该楼层
+  $$('#rpane .floor-row').forEach(r => r.onclick = () => {
+    const code = r.dataset.floor;
+    S.floorSel = code;
+    renderTree();
+    showFloorPanel(code);
+  });
+}
+
 function showFloorPanel(code) {
   const j = S.job;
   const f = (j?.floors || []).find(x => x.floor_code === code);
