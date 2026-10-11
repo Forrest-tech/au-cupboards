@@ -1839,6 +1839,7 @@ function bindTree() {
     }
     else if (n.dataset.lu !== undefined) {
       // 柜型库根节点 = units 数量。点它 -> 右侧显示该套数下**全部** model。
+      // 问题6b：中间显示第一个 model 的大图
       const nUnits = Number(n.dataset.lu);
       S.lfOpen = S.lfOpen || {};
       const ukey = 'u' + nUnits;
@@ -1847,7 +1848,17 @@ function bindTree() {
       S.lfOpen[ukey] = true;
       S.treeSel = ukey;
       renderTree();
-      showUnitsGroup(unitsGroupKey(nUnits));
+      const gkey = unitsGroupKey(nUnits);
+      showUnitsGroup(gkey);
+      // 中间显示第一个 model 的大图
+      const pool = S.variants.filter(v => v.source === 'dwg' && Number(v.positions || 0) === nUnits)
+        .sort((a, b) => (Number(a.w) - Number(b.w)) || String(a.code).localeCompare(String(b.code)));
+      if (pool[0]?.image_url) {
+        const v0 = pool[0];
+        showCupImage(v0.image_url, `<b>${fmtMM(v0.w)} × ${fmtMM(v0.h)} mm</b>${
+          v0.label ? ' · ' + esc(v0.label) : ''}<div class="muted">${
+          nUnits} ${t('lib.units')}</div>`);
+      }
       return;
     }
     else if (n.dataset.lf) {
@@ -1878,10 +1889,25 @@ function bindTree() {
     }
     else if (n.dataset.lg) {
       // 点子节点：只改选中态，展开态保持不变 —— 树不会自己收起。
+      // 问题6b：中间显示该 model 的详情大图，右侧保持显示该套数下全部 model
       const k = n.dataset.lg;
       S.treeSel = k;
       renderTree();
-      showUnitsGroup(k);
+      // 从 key 解析出 units 数，右侧显示整组
+      const at = String(k).indexOf('@');
+      const base = at >= 0 ? String(k).slice(0, at) : String(k);
+      const hash = base.lastIndexOf('#');
+      const nUnits = hash >= 0 ? Number(base.slice(hash + 1)) : 0;
+      if (nUnits) showUnitsGroup(unitsGroupKey(nUnits));
+      else showUnitsGroup(k);
+      // 中间显示该具体 model 的大图
+      const vid = at >= 0 ? String(k).slice(at + 1) : '';
+      const v = vid ? S.variants.find(x => String(x.id) === vid) : null;
+      if (v?.image_url) {
+        showCupImage(v.image_url, `<b>${fmtMM(v.w)} × ${fmtMM(v.h)} mm</b>${
+          v.label ? ' · ' + esc(v.label) : ''}<div class="muted">${
+          v.positions ?? '?'} ${t('lib.units')}${v.grid ? ' · ' + esc(v.grid) : ''}</div>`);
+      }
     }
     else if (n.dataset.sel) {
       const k = n.dataset.sel;
