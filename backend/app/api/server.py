@@ -1285,6 +1285,50 @@ def list_corrections(job_id: int) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------- 静态前端
 
 
+#: 内联 SVG favicon（与 index.html 里的 data URI 图形一致）。
+#:
+#: 【为什么需要这个端点】index.html 里已经写了 `<link rel="icon" href="data:...">`，
+#: 但**浏览器并不保证**因此就不去请求 /favicon.ico ——
+#: 实测（真实日志，每次开页面都能看到）：
+#:     GET /favicon.ico HTTP/1.1" 404 Not Found
+#: 标签页未聚焦时、部分浏览器/书签场景仍会主动探测这个路径。
+#: 后端原先只有 GET /，其他路径一律 404，这条探测日志就一直刷，
+#: 会**干扰排查真正的问题**（真正要紧的是 500，不是 404）。
+#:
+#: 不用静态文件、也不引 CDN：内联 SVG 字符串，不产生 I/O、不引外部资源，
+#: 保持与本项目「图标全部内联、离线可用」的一致做法。
+#: 实测浏览器直接访问 http://127.0.0.1:8000/favicon.ico 返回 200。
+FAVICON_SVG = (
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>"
+    "<rect width='32' height='32' rx='6' fill='#2563eb'/>"
+    "<g fill='none' stroke='#fff' stroke-width='2' stroke-linecap='round'>"
+    "<rect x='8' y='6' width='16' height='20' rx='1.5'/>"
+    "<path d='M8 13h16M8 19h16'/></g>"
+    "<circle cx='16' cy='9.5' r='1.6' fill='#fff'/>"
+    "<circle cx='16' cy='16' r='1.6' fill='#fff'/>"
+    "<circle cx='16' cy='22.5' r='1.6' fill='#fff'/></svg>"
+)
+
+
+@app.get("/favicon.ico")
+@app.get("/favicon.svg")
+def favicon() -> Response:
+    """favicon。**必须带 no-store**：见上面 FAVICON_SVG 的注释。
+
+    补``Cache-Control`` 还有一个附带好处：用户以后要是真放了个
+    favicon.ico 文件到 frontend/，也不会被这条 200 的响应挡住
+    （开发者工具里勾了 Disable cache 就能立刻看到效果）。
+    """
+    return Response(
+        content=FAVICON_SVG,
+        media_type="image/svg+xml",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )
+
+
 @app.get("/")
 def index() -> FileResponse:
     fe = Path(__file__).resolve().parents[3] / "frontend/index.html"

@@ -990,3 +990,44 @@ class TestContinuousPdfScroll:
                     "pageStep", "bindScrollNav", "resetViewer"]:
             n = len(re.findall(rf"function {fnm}\(", script))
             assert n == 1, f"{fnm} 有 {n} 个定义，后者会静默覆盖前者"
+
+
+class TestFavicon:
+    """favicon 必须存在且**零 404**。
+
+    真实日志（用户报告）：每次打开页面都刷一条
+        GET /favicon.ico HTTP/1.1" 404 Not Found
+    看着不起眼，但它**污染排查环境** —— 真正要紧的是 500，
+    混在中间的 404 让人误以为前端整体挂了。
+    """
+
+    def test_link_rel_icon_is_inline_data_uri(self, html: str):
+        """图标必须是内联 data URI，不能引外部文件/CDN。
+
+        项目要求离线可用（现场解析 DWG），CDN 挂了就全崩——
+        与 Lucide 图标全部内联的既定做法一致。
+        """
+        m = re.search(r'<link\s+rel="icon"\s+href="([^"]+)"', html)
+        assert m, "index.html 里没有 <link rel=\"icon\">"
+        href = m.group(1)
+        assert href.startswith("data:image/svg+xml"), \
+            f"favicon 必须是内联 data URI，实际是{href[:60]}"
+
+    def test_favicon_svg_uses_accent_color(self, html: str):
+        """图标用界面主色 #2563eb，与整体视觉一致。"""
+        m = re.search(r'<link\s+rel="icon"\s+href="([^"]+)"', html)
+        assert m and "%232563eb" in m.group(1).lower(), \
+            "图标底色应与 --accent(#2563eb) 一致"
+
+    def test_no_external_icon_reference(self, html: str):
+        """不得引用**真正的**外部图标文件（会引入 CDN 依赖且离线失效）。
+
+        判据里排除了 SVG 命名空间：data URI 里必然含
+        ``http://www.w3.org/2000/svg``，直接匹配 ``https?://``
+        会把每一个内联图标都误判成外链（第一版就踩了这个坑）。
+        真正要防的是 href 以 ``http://`` / ``https://`` / ``//`` 开头。
+        """
+        for m in re.finditer(r'<link\s+rel="icon"\s+href="([^"]+)"', html):
+            href = m.group(1).strip()
+            assert href.startswith("data:"), \
+                f"图标 href 不是 data URI，而是外部引用：{href[:80]}"

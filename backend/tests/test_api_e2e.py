@@ -634,3 +634,48 @@ class TestSameGeometryDifferentCode:
         vs = client.get("/api/variants").json()
         assert len(vs) == n0 + 1, "同一 code 被重复入库"
         client.delete(f"/api/variants/{next(v['id'] for v in vs if v['code'] == code)}")
+
+
+class TestFaviconEndpoint:
+    """``GET /favicon.ico`` 必须 200 —— 实测日志里长期刷 404。"""
+
+    def test_favicon_ico_returns_200(self, client):
+        """用户报告的 404 就是这个端点缺失。"""
+        r = client.get("/favicon.ico")
+        assert r.status_code == 200, f"favicon.ico 返回 {r.status_code}，应 200"
+        assert r.headers["content-type"].startswith("image/svg+xml"), \
+            f"content-type 应为 image/svg+xml，实际 {r.headers.get('content-type')}"
+        assert r.text.lstrip().startswith("<svg"), "响应体不是合法 SVG"
+
+    def test_favicon_svg_alias(self, client):
+        """同时支持 /favicon.svg —— 部分浏览器与书签会请求这个扩展名。"""
+        assert client.get("/favicon.svg").status_code == 200
+
+    def test_favicon_has_no_store(self, client):
+        """必须带 no-store：避免浏览器把旧图标缓存住。
+
+        换图标后用户强刷也拿不到新图，只能手动清缓存 —— 实测踩过。
+        """
+        cc = client.get("/favicon.ico").headers.get("cache-control", "")
+        assert "no-store" in cc or "no-cache" in cc, \
+            f"缺 no-store/no-cache，实际 Cache-Control: {cc!r}"
+
+    def test_favicon_and_backend_svg_match(self, client):
+        """端点返回的图形必须与 index.html 里内联的 data URI **一致**。
+
+        两份图标各写一处很容易漂移（改了 HTML 忘了改端点，反之亦然），
+        结果 data URI 显示新图标、浏览器探测走端点拿到旧图标。
+        """
+        import re as _re
+        from pathlib import Path
+        from app.api.server import FAVICON_SVG
+        html = (Path(__file__).resolve().parents[2]
+                / "frontend" / "index.html").read_text(encoding="utf-8")
+        m = _re.search(r'<link\s+rel="icon"\s+href="([^"]+)"', html)
+        assert m, "index.html 缺 <link rel=icon>"
+        from urllib.parse import unquote
+        inline = unquote(m.group(1).split(",", 1)[1])
+        # data URI 里用的是双引号包裹属性，端点里用的是单引号，统一再比
+        norm = lambda s: s.replace('"', "'").replace(" ", "")
+        assert norm(inline) == norm(FAVICON_SVG), (
+            "index.html 内联图标与后端端点图形不一致，会出现两个不同图标")
