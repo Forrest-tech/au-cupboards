@@ -2245,6 +2245,9 @@ function variantGroups() {
 function renderMatrix() {
   const j = S.job;
   if (!j) return emptyBox(t('empty.notparsed'), t('empty.t1'));
+  // 强制同步，避免左树高亮与右栏内容不一致 —— 用户报的 bug
+  if (S.view === 'building') S.floorFilter = S.floorSel;
+  else S.floorSel = S.floorFilter;
   const s = j.summary || {};
   const cv = j.cross_validation || {};
 
