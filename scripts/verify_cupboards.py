@@ -42,32 +42,52 @@ GREEN, RED, YELLOW, RESET = (
     "\033[32m", "\033[31m", "\033[33m", "\033[0m")
 
 
-def _load_rows() -> list[tuple]:
+def _load_rows() -> tuple[list[tuple], list[tuple]]:
+    """读库，返回 ``(dwg 变体, 非 dwg 变体)``。
+
+    【真实 bug 修复】初版把**全部**变体都算进去，于是后端启动时
+    :func:`ensure_variants` 播的 7 条种子（``source='seed_poc'``，
+    code 形如 ``CP-TRI-1x3`` / ``CP-QUAD-1x4``）被误算成
+    「Ground Truth 不吻合」+「缺图」——实测用户本地报出
+    「3 units 应为 2 实际 4」「缺图 7 个」全是假警报，
+    而那 23 个 dwg 变体本身是对的。
+
+    种子数据没有 DWG 实测尺寸、也没有渲染图（``image_path`` 为空），
+    本来就不该参与「图有没有换新 / 套数对不对」的校验。
+    """
     if not DB.exists():
         print(f"{RED}找不到数据库 {DB}{RESET}")
         print("   柜型库是运行期数据（.gitignore），首次使用请先上传 DWG 入库。")
         sys.exit(1)
     con = sqlite3.connect(DB)
-    rows = con.execute(
+    cur = con.execute(
         "select variant_code, positions_total, image_path, source, w, h "
         "from cupboard_variants order by positions_total, id"
-    ).fetchall()
+    )
+    rows = cur.fetchall()
     con.close()
-    return rows
+    dwg = [r for r in rows if (r[3] or "") == "dwg"]
+    other = [r for r in rows if (r[3] or "") != "dwg"]
+    return dwg, other
 
 
 def main() -> int:
-    rows = _load_rows()
+    rows, seeds = _load_rows()
     if not rows:
-        print(f"{RED}柜型库是空的（0 个变体）{RESET}")
+        print(f"{RED}柜型库里没有 dwg 来源的柜型（0 个）{RESET}")
         print("   → 在浏览器里走一遍：柜型库 → 上传图纸 → 渲染 → 确认入库")
+        if seeds:
+            print(f"   （库里只有 {len(seeds)} 条种子数据，非 DWG 实测）")
         return 1
 
-    print(f"库位置   {DB}")
-    print(f"变体数   {len(rows)}")
-    dwg = sum(1 for r in rows if r[3] == "dwg")
-    units = sum(int(r[1] or 0) for r in rows)
-    print(f"dwg 来源 {dwg}    units 合计 {units}")
+    if seeds:
+        print(f"{YELLOW}另有 {len(seeds)} 条非 dwg 种子数据"
+              f"（{', '.join(sorted(r[0] for r in seeds)[:5])}…），"
+              f"不参与本次校验{RESET}")
+
+    print(f"库位置     {DB}")
+    print(f"dwg 变体   {len(rows)}")
+    print(f"units 合计 {sum(int(r[1] or 0) for r in rows)}")
 
     ok = True
 
@@ -101,22 +121,54 @@ def main() -> int:
     else:
         print(f"{GREEN}[PASS] 一图多变体 0{RESET}")
 
-    # ---- 3. 分辨率与黑块 ----
-    try:
-        from PIL import Image
-    except ImportError:
-        print(f"{YELLOW}未装 Pillow/numpy，跳过画质检查{RESET}"
-              "（pip install pillow numpy）")
-        return 0 if ok else 1
+    # ---- 3. 分辨率 ----
+    #
+    # 只读图片尺寸，不需要 Pillow —— 用标准库按文件头解析。
+    # 【实测踩坑】初版依赖 Pillow，用户本地没装就直接跳过了整段检查，
+    # 输出一句「跳过画质检查」，等于没验。这里改成零依赖，
+    # 保证「图到底换没换」这条最关键的判据任何环境都能跑。
+    def _img_width(path: pathlib.Path) -> int | None:
+        """按文件头读图片宽度（支持 PNG / JPEG，不解码像素）。"""
+        try:
+            head = path.open("rb").read(32)
+        except OSError:
+            return None
+        if head[:8] == b"\x89PNG\r\n\x1a\n":
+            # IHDR: 宽高是 4 字节大端，偏移 16/20
+            return int.from_bytes(head[16:20], "big") or None
+        if head[:2] == b"\xff\xd8":
+            # JPEG: 从 SOI 往后找 SOFn 段
+            data = path.read_bytes()
+            i = 2
+            while i < len(data) - 9:
+                if data[i] != 0xFF:
+                    i += 1
+                    continue
+                marker = data[i + 1]
+                # SOF0..SOF15，排除 DHT(C4)/JPG(C8)/DAC(CC)
+                if 0xC0 <= marker <= 0xCF and marker not in (
+                        0xC4, 0xC8, 0xCC):
+                    return int.from_bytes(data[i + 7:i + 9], "big") or None
+                seg = int.from_bytes(data[i + 2:i + 4], "big")
+                i += 2 + max(seg, 2)
+        return None
 
     widths = []
+    unreadable = []
     for r in rows:
         p = ROOT / "var" / r[2]
         if not p.exists():
+            unreadable.append(r[0])
             continue
-        with Image.open(p) as im:
-            widths.append(int(im.size[0]))
+        w = _img_width(p)
+        if w:
+            widths.append(w)
+        else:
+            unreadable.append(r[0])
 
+    if unreadable:
+        ok = False
+        print(f"{RED}[FAIL] 有图无法读取：{unreadable[:6]}{RESET}")
     if not widths:
         print(f"{RED}[FAIL] 没有可读的图{RESET}")
         return 1
