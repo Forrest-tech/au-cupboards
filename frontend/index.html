@@ -2266,10 +2266,24 @@ function renderMatrix() {
       // 图片路径），所以按 variant id 去已加载的 S.variants 里查图。
       // 查不到再退回「本层 units 数匹配的柜型图」。
       // 问题10：放宽匹配——id/code 任一命中即可；URL 为空时不渲染 img
+      // 注意：矩阵里的 code（如 CP-TRI-1x3）和库里的 code（如 CP-7p-02）
+      // 是两套命名体系，直接匹配永远命中不了。改成从 code 里解析 units 数
+      //（如 "1x3"→3），再按 units 数去库里找图。
+      const parseUnits = (c) => {
+        const m = String(c || '').match(/(\d+)\s*x\s*(\d+)/i);
+        if (m) return Number(m[1]) * Number(m[2]);
+        const tri = String(c || '').match(/TRI/i) ? 3 : null;
+        const quad = String(c || '').match(/QUAD/i) ? 4 : null;
+        const six = String(c || '').match(/SIX/i) ? 6 : null;
+        return tri || quad || six || null;
+      };
+      const needUnits = parseUnits(code);
+      const byUnits = needUnits ? cupboardsForUnits(needUnits) : [];
       const img = S.variants.find(x =>
         String(x.id) === String(v.id) && x.image_url)?.image_url
         || all.find(x => x.code === code)?.image_url
-        || all.find(x => x.code && code && x.code.replace(/-/g,'').toLowerCase() === code.replace(/-/g,'').toLowerCase())?.image_url || '';
+        || (byUnits[0]?.image_url || '')
+        || (all[0]?.image_url || '');
       if (img) mtxThumbs.push([img, code]);
       h += `<tr>
         <td style="padding-left:16px"></td>
