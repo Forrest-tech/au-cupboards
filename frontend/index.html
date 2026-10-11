@@ -857,7 +857,7 @@ function applyI18n() {
   const um = $('#huserMenu');
   if (um) {
     const zh = LANGNOW === 'zh';
-    const uname = um.querySelector('.mhead b')?.textContent || 'Admin';
+    const uname = um.querySelector('.mhead b')?.textContent || 'Forrest';
     um.innerHTML = `
       <div class="mhead"><b>${esc(uname)}</b><span>${zh ? '已登录' : 'Signed in'}</span></div>
       <button data-uact="profile">${zh ? '👤 个人设置' : '👤 Profile settings'}</button>
@@ -1267,7 +1267,7 @@ async function boot() {
     S.dwgHint = h.dwg_hint || null;
     // 问题13：标准网站式用户菜单（右上：导出 + 用户名下拉）
     // 用户名为登录账号，默认显示；下拉含设置/退出等
-    const uname = (h.user_name || h.username || 'Admin');
+    const uname = (h.user_name || h.username || 'Forrest');
     const uinitial = uname.charAt(0).toUpperCase();
     $('#hstat').innerHTML =
       `<button class="hexport" id="hexport" title="${LANGNOW==='zh'?'导出方案':'Export'}">⬇ ${LANGNOW==='zh'?'导出':'Export'}</button>
