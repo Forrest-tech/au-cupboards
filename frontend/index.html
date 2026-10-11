@@ -1140,7 +1140,7 @@ function doExport(fmt, fileHandle, customName) {
   saveExportBlob(blob, `${jname}.${ext}`, fileHandle);
 }
 
-/** PDF：前端直接用浏览器打印生成，不依赖后端 WeasyPrint（用户 Mac 上装不上系统库） */
+/** PDF：前端直接用 html2pdf 生成，不弹打印窗口 —— 用户要求 */
 async function doExportPdfFrontend(jname, fileHandle) {
   const zh = LANGNOW === 'zh';
   const rpane = document.querySelector('#rpane');
@@ -1148,32 +1148,30 @@ async function doExportPdfFrontend(jname, fileHandle) {
     toast(zh ? '没有可导出的内容' : 'Nothing to export', 'err');
     return;
   }
-  // 新窗口写入右侧 HTML，调用浏览器打印（用户选"存储为 PDF"）
-  const w = window.open('', '_blank');
-  if (!w) {
-    toast(zh ? '浏览器阻止了弹窗，请允许后重试' : 'Popup blocked, please allow and retry', 'err');
-    return;
+  toast(zh ? '正在生成 PDF…' : 'Generating PDF…', 'info');
+  try {
+    // 动态加载 html2pdf.js（html2canvas + jsPDF）
+    if (!window.html2pdf) {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+        s.onload = resolve;
+        s.onerror = reject;
+        document.head.appendChild(s);
+      });
+    }
+    const opt = {
+      margin: 10,
+      filename: `${jname}.pdf`,
+      image: { type: 'jpeg', quality: 0.95 },
+      html2canvas: { scale: 2, useCORS: true },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+    };
+    const pdfBlob = await window.html2pdf().set(opt).from(rpane).outputPdf('blob');
+    saveExportBlob(pdfBlob, `${jname}.pdf`, fileHandle);
+  } catch (e) {
+    toast((zh ? 'PDF 生成失败：' : 'PDF failed: ') + e.message, 'err');
   }
-  // 图片转 base64，确保打印时能显示
-  let html = rpane.innerHTML;
-  w.document.write(`<html><head><meta charset="utf-8"><title>${jname}</title>
-    <style>
-      body { font-family: -apple-system, sans-serif; font-size: 12px; color: #1e293b; padding: 20px; }
-      table { border-collapse: collapse; width: 100%; margin: 10px 0; }
-      th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; font-size: 11px; }
-      th { background: #f1f5f9; }
-      img { max-width: 45%; max-height: 380px; height: auto; page-break-inside: avoid; margin: 4px; }
-      .card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; margin: 10px 0; page-break-inside: avoid; }
-      .card img { display: inline-block; vertical-align: top; }
-      @media print {
-        body { padding: 0; }
-        img { max-height: 360px; }
-      }
-    </style></head><body>${html}
-    <script>window.onload = () => { setTimeout(() => window.print(), 500); }<\/script>
-    </body></html>`);
-  w.document.close();
-  toast(zh ? '已打开打印预览，请选择"存储为 PDF"' : 'Print preview opened, choose "Save as PDF"', 'info');
 }
 
 /** DOCX/XLSX/JPG 走后端生成并保存；PDF 走前端浏览器打印 */
