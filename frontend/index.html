@@ -1346,8 +1346,8 @@ function renderTree() {
   // 问题8a：建筑项目树顶部同样加展开/收起工具栏
   let h = `<div class="sec treetoolbar"><span>${t('tree.projects')}</span>
     <span class="ttools">
-      <button class="ib" id="tExpandAll" title="${LANGNOW==='zh'?.全部展开.:.Expand all.}">${ic("expand-all")}</button>
-      <button class="ib" id="tCollapseAll" title="${LANGNOW==='zh'?.全部收起.:.Collapse all.}">${ic("collapse-all")}</button>
+      <button class="ib" id="tExpandAll" title="${LANGNOW==='zh'?'全部展开':'Expand all'}">${ic('expand-all')}</button>
+      <button class="ib" id="tCollapseAll" title="${LANGNOW==='zh'?'全部收起':'Collapse all'}">${ic('collapse-all')}</button>
     </span></div>`;
   if (!S.projects.length) {
     h += `<div class="node lv1" style="color:var(--dim)">${t('tree.empty')}</div>`;
@@ -1502,8 +1502,8 @@ function renderTreeLibrary() {
 
   let h = `<div class="sec treetoolbar"><span>${t('tree.library')}</span>
     <span class="ttools">
-      <button class="ib" id="tExpandAll" title="${LANGNOW==='zh'?.全部展开.:.Expand all.}">${ic("expand-all")}</button>
-      <button class="ib" id="tCollapseAll" title="${LANGNOW==='zh'?.全部收起.:.Collapse all.}">${ic("collapse-all")}</button>
+      <button class="ib" id="tExpandAll" title="${LANGNOW==='zh'?'全部展开':'Expand all'}">${ic('expand-all')}</button>
+      <button class="ib" id="tCollapseAll" title="${LANGNOW==='zh'?'全部收起':'Collapse all'}">${ic('collapse-all')}</button>
     </span></div>`;
   if (!unitsList.length) {
     h += `<div class="node lv1" style="color:var(--dim)">${t('dwg.empty')}</div>`;
