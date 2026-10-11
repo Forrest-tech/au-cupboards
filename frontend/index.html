@@ -197,10 +197,7 @@ nav button.on{background:var(--accent);color:#fff}
   min-height:100%;padding:14px;background:var(--panel2);gap:12px
 }
 .cupview img{max-width:100%;height:auto;background:#fff;
-  border:1px solid var(--line);border-radius:6px;
-  /* zoom 用 transform 缩放，不改布局宽高（改了 flex 会跟着抖）。
-     默认不缩放，避免残留内联样式被裁切。 */
-  transform-origin:center center;transition:transform .08s linear}
+  border:1px solid var(--line);border-radius:6px}
 /* 缩放时 scrollable，1 倍时 hidden —— setZoom 里按需切换 overflow */
 .zoomslot{max-width:100%;max-height:calc(100vh - 190px);overflow:hidden;
   display:flex;align-items:center;justify-content:center}
@@ -3291,13 +3288,19 @@ function setZoom(z) {
  *  重排，拖动过程里抖动明显；transform 只做视觉缩放，跟手。 */
 function applyZoomToImages() {
   const z = S.zoom || 1;
-  // 问题14：缩放只影响中栏（#cupimg），不影响右栏缩略图
-  // 用 transform 而非改 width/height：改布局宽高会让 flex 容器跟着
-  // 重排，拖动过程里抖得厉害；transform 是纯视觉缩放，跟手。
+  // 缩放用 width 而非 transform：transform 不改变布局尺寸，
+  // overflow 容器感知不到放大，滚不动。用 width 则容器能正确滚动。
   $$('#cupimg').forEach(im => {
-    im.style.transform = z === 1 ? '' : `scale(${z})`;
+    im.style.width = z === 1 ? '' : `${z * 100}%`;
+    im.style.transform = '';
+    im.style.maxWidth = z === 1 ? '' : 'none';
   });
-  // 放大后要能滚到四周，给承载块显式 overflow + 预留缩放余量
+  // 放大后 .zoomslot 可滚动查看四周
+  $$('.zoomslot').forEach(sl => {
+    sl.style.overflow = z > 1 ? 'auto' : 'hidden';
+    sl.style.alignItems = z > 1 ? 'flex-start' : 'center';
+    sl.style.justifyContent = z > 1 ? 'flex-start' : 'center';
+  });
   $$('.cupview').forEach(sl => {
     sl.style.overflow = z > 1 ? 'auto' : 'hidden';
   });
