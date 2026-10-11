@@ -1354,6 +1354,8 @@ function restoreSelection() {
   if (!sel) return;
   if (sel === 'floors') {
     if (S.view === 'building' && S.floorSel) { showFloorPanel(S.floorSel); return; }
+    // 工作台：走 filterFloor，保证与点击"所有楼层"完全一致的渲染路径 —— 用户报的初始化显示不对 bug
+    if (S.view === 'work') { filterFloor(S.floorFilter || ''); return; }
     renderPane();
     return;
   }
