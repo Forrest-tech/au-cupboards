@@ -883,7 +883,9 @@ function applyI18n() {
   // 语言切换后，动态渲染的内容（#viewer 占位、#rpane）也要重刷，
   // 否则残留旧语言的文本 —— 用户报的 bug
   if (S.view === 'cupboard') renderHub();
-  else if (S.view === 'building' && !S.jobId) resetViewer();
+  else if (S.view === 'building' && !S.jobId) {
+    $('#viewer').innerHTML = `<div class="ph"><div class="big">${ic('file-text')}</div><div>${t('mid.ph')}</div></div>`;
+  }
   else if (S.view === 'work' && !S.jobId) {
     // 工作台无数据时，中栏残留的可能是其他 tab 的占位文本，清掉
     $('#viewer').innerHTML = `<div class="ph"><div class="big">${ic('file-text')}</div><div>${t('mid.ph')}</div></div>`;
