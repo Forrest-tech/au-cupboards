@@ -2464,6 +2464,8 @@ function filterFloor(code) {
     S.floorSel = S.floorFilter;
   }
   renderTree();
+  // 持久化选中态，刷新后保持不变（用户要求）
+  saveViewState();
   // 问题16b：楼层×柜型 tab 按选中楼层过滤（renderMatrix 会读 S.floorFilter）
   if (S.pane === 'matrix') renderMatrix();
   else renderDetail();
