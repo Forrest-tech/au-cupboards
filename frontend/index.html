@@ -2504,13 +2504,14 @@ function emptyBox(_t, _s) {
 function filterFloor(code) {
   // 问题16a：点击楼层不自动跳到单元明细 tab，停留在当前 tab
   // 空字符串表示"所有楼层"，直接清空过滤
+  // 用户要求与建筑图纸 tab 同一套逻辑：点击后保持，不 toggle
   if (!code) {
     S.floorFilter = null;
     S.floorSel = null;
   } else {
-    S.floorFilter = S.floorFilter === code ? null : code;
+    S.floorFilter = code;
     // 工作台也要同步 S.floorSel，否则左树高亮不更新（用户报的 bug）
-    S.floorSel = S.floorFilter;
+    S.floorSel = code;
   }
   renderTree();
   // 持久化选中态，刷新后保持不变（用户要求）
