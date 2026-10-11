@@ -1071,6 +1071,12 @@ function buildExportData() {
       floor: f.floor_code,
       units: n,
       cupboards: matched.map(v => `${v.code || ''} (${fmtMM(v.w)}×${fmtMM(v.h)}mm)`).join('; ') || '-',
+      // 柜型图 URL 列表 —— 用于 PDF 导出嵌入图片（用户要求：导出内容与页面显示一致）
+      images: matched.filter(v => v.image_url).map(v => ({
+        code: v.code || '',
+        url: v.image_url,
+        w: v.w, h: v.h,
+      })),
     });
   }
   return rows;
@@ -4077,7 +4083,8 @@ function gotoView(v) {
       $('#mfn').textContent = t('mid.none');
     }
     // renderHub/resetViewer 会把提示清掉，切回工作台要重新挂上
-    $('#bhelp').style.display = S.jobId && S.pages?.length ? '' : 'none';
+    // #bhelp 已在 c4a3a63 被去掉，这里只留空检查，避免 gotoView('work') 中断
+    const bhelp2 = $('#bhelp'); if (bhelp2) bhelp2.style.display = S.jobId && S.pages?.length ? '' : 'none';
     renderPane();
     // 导出栏在 hub tab 里被 loadExports 跳过了（loadExports 是异步的，
     // 切回工作台时它不会自己再跑一遍），这里补一次。
