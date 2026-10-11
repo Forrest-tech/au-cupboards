@@ -2630,8 +2630,13 @@ function renderPages(pages) {
        <div class="pno">${i + 1} / ${S.pages.length}</div>
      </div>`).join('');
 
+  // 问题7：过滤掉无用的空 "Site:" 条目（标题为空或仅为 Site/Site: 的页不显示）
+  const isUselessSite = (p) => {
+    const t = (p.title || '').trim();
+    return t === '' || /^site\s*:?\s*$/i.test(t);
+  };
   $('#pagelist').innerHTML = S.pages.map((p, i) =>
-    `<div class="pg" data-p="${i}">${i + 1}. ${esc((p.title || '').slice(0, 14) || 'p' + (i + 1))}</div>`).join('');
+    `<div class="pg" data-p="${i}"${isUselessSite(p) ? ' style="display:none"' : ''}>${i + 1}. ${esc((p.title || '').slice(0, 14) || 'p' + (i + 1))}</div>`).join('');
   $$('#pagelist .pg').forEach(e => e.onclick = () => gotoPage(+e.dataset.p));
 
   observePages();
@@ -3590,6 +3595,10 @@ function gotoView(v) {
   $('#bup').style.display = v === 'work' ? 'none' : 'inline-block';
   // 滚动提示只在工作台的连续预览里才有意义
   $('#bhelp').style.display = v === 'work' ? '' : 'none';
+  // 问题1：建筑图纸 tab 下隐藏编辑按钮和页码 pill
+  const isBuilding = v === 'building';
+  $('#bedit').style.display = isBuilding ? 'none' : '';
+  $('#bpage').style.display = isBuilding ? 'none' : '';
   // 切 tab 时把左栏选中清掉：不同 tab 的树结构完全不同（柜型库是
   // units→model，工作台/建筑图纸是楼栋→图纸→楼层），留着上一次的
   // 高亮会让用户以为「这个 item 还选中着」。
