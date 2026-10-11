@@ -2904,12 +2904,13 @@ const A4_RATIO = 1.414;
  *  smooth滚动，单页预览会莫名偏移。统一在这里收口。 */
 function resetViewer() {
   const v = $('#viewer');
+  if (!v) return;
   v.classList.remove('scrollmode');
   v.scrollTop = 0;
-  $('#bprev').style.display = 'none';
-  $('#bnext').style.display = 'none';
-  $('#bpage').style.display = 'none';
-  $('#bhelp').style.display = 'none';
+  const bprev = $('#bprev'); if (bprev) bprev.style.display = 'none';
+  const bnext = $('#bnext'); if (bnext) bnext.style.display = 'none';
+  const bpage = $('#bpage'); if (bpage) bpage.style.display = 'none';
+  const bhelp = $('#bhelp'); if (bhelp) bhelp.style.display = 'none';
 }
 
 /** 打开一份 PDF —— 整份连续排开，不做一页一屏 */
@@ -3922,9 +3923,9 @@ function gotoView(v) {
   $$('nav button').forEach(x => x.classList.toggle('on', x.dataset.view === v));
   // 上传按钮只在「柜型库」「建筑图纸」两个 tab 出现 ——
   // 工作台是看解析结果的，不该摆上传入口
-  $('#bup').style.display = v === 'work' ? 'none' : 'inline-block';
+  const bup = $('#bup'); if (bup) bup.style.display = v === 'work' ? 'none' : 'inline-block';
   // 滚动提示只在工作台的连续预览里才有意义
-  $('#bhelp').style.display = v === 'work' ? '' : 'none';
+  const bhelp = $('#bhelp'); if (bhelp) bhelp.style.display = v === 'work' ? '' : 'none';
   // 问题1：建筑图纸 tab 下隐藏编辑按钮和页码 pill
   const isBuilding = v === 'building';
   const bedit = $('#bedit'); if (bedit) bedit.style.display = isBuilding ? 'none' : '';
