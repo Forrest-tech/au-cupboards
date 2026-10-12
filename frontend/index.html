@@ -1444,6 +1444,18 @@ function autoSelectFirstInView() {
     else renderDetail();
     return;
   }
+  // 柜型库默认：选中 DWG 根节点（用户要求：刷新/进入默认选 root）
+  if (S.view === 'cupboard') {
+    const root = $('#tree [data-lfroot]');
+    if (root) {
+      S.treeSel = 'lfroot';
+      S.lfOpen = S.lfOpen || {};
+      S.lfOpen['root'] = true;
+      renderTree();
+      showLibraryOverview();
+      return;
+    }
+  }
   const first = $('#tree .node');
   if (first) { first.click(); return; }
   // 树是空的（柜型库没数据 / 没解析过）—— 中右两栏也别留上一 tab 的残影
@@ -1670,7 +1682,8 @@ function renderTreeLibrary() {
   let rootName = files.length === 1 ? files[0].fname : t('tree.library');
   if (!rootName || !rootName.trim()) rootName = 'DWG';
   const rootOpen = S.lfOpen['root'] !== false; // 默认展开
-  h += `<div class="node lv1" data-lfroot="1">
+  const rootSel = S.treeSel === 'lfroot' ? ' on' : '';
+  h += `<div class="node lv1${rootSel}" data-lfroot="1">
     <span class="nm" style="font-weight:600">${esc(rootName)}</span>
     ${S.treeEditMode ? `<span class="treedrop"><button class="ib" data-emenu="dwg:${esc(rootName)}" title="${LANGNOW==='zh'?'操作':'Actions'}">${ic('more')}</button></span>` : ''}</div>`;
   if (rootOpen) {
@@ -1709,6 +1722,23 @@ function renderTreeLibrary() {
   } // end if (rootOpen)
   $('#tree').innerHTML = h;
   bindTree();
+}
+
+/** 柜型库根节点（DWG）选中时：显示该文件下全部柜型总览 */
+function showLibraryOverview() {
+  renderHub();
+  // 中栏显示第一个柜型的大图（如果有）
+  const first = S.variants.find(v => v.source === 'dwg');
+  if (first) {
+    // 触发显示第一个变体，复用现有逻辑
+    const grp = libraryGroups()[0]?.units[0];
+    if (grp && grp.labels[0]) {
+      const lb = grp.labels[0];
+      showVariantDetail(lb.v.id);
+      return;
+    }
+  }
+  $('#viewer').innerHTML = `<div class="ph"><div class="big">${ic('file-text')}</div><div>${t('mid.ph')}</div></div>`;
 }
 
 /** 某个 units 数对应的 group key（showUnitsGroup 要用）。
@@ -2362,10 +2392,17 @@ function bindTree() {
       S.curBuilding = +n.dataset.b; S.treeSel = null; renderTree();
     }
     else if (n.dataset.lfroot !== undefined) {
-      // 柜型库文件根节点：点它展开/收起
+      // 柜型库文件根节点：选中它，显示该文件下全部柜型（用户要求默认选中 root）
       S.lfOpen = S.lfOpen || {};
-      S.lfOpen['root'] = S.lfOpen['root'] === false ? true : false;
-      renderTree();
+      // 如果已经是展开状态，点击则选中；如果是收起状态，点击先展开
+      if (S.lfOpen['root'] !== false && S.treeSel !== 'lfroot') {
+        S.treeSel = 'lfroot';
+        renderTree();
+        showLibraryOverview();
+      } else {
+        S.lfOpen['root'] = S.lfOpen['root'] === false ? true : false;
+        renderTree();
+      }
     }
     else if (n.dataset.lu !== undefined) {
       // 柜型库根节点 = units 数量。点它 -> 右侧显示该套数下**全部** model。
