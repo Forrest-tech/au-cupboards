@@ -1503,9 +1503,14 @@ async function loadTree() {
     if (jobId) {
       try {
         const j = await api(`/jobs/${jobId}`);
+        // 存完整 job 结构，右侧面板 showFloorPanel 用 S.job 时能直接切换
         p.jobData = {
-          floors: j.floors || j.multi_signals?.floor_summary || [],
-          units: j.units || [],
+          summary: j.summary, floors: j.floors || j.multi_signals?.floor_summary || [],
+          units: j.units || [], multi_signals: j.multi_signals,
+          diagnostics: j.diagnostics, warnings: j.warnings || [],
+          cross_validation: j.cross_validation || {},
+          rule_desc: j.rule_desc || {},
+          config_version: j.config_version,
         };
       } catch (e) { p.jobData = null; }
     }
@@ -2438,7 +2443,12 @@ function bindTree() {
       // 工作台 tab：沿用原来的户表筛选。
       // 注意：data-floor=""（所有楼层）是空字符串，不能用 truthy 判断
       // 【修复】记录选中的 building ID，确保高亮只出现在一个 building 下
-      if (n.dataset.b) S.selBuildingId = +n.dataset.b;
+      // 同时把 S.job 切换到该 building 的 job，右侧面板才显示对的数据
+      if (n.dataset.b) {
+        S.selBuildingId = +n.dataset.b;
+        const bp = S.projects.find(pp => pp.id === S.selBuildingId);
+        if (bp?.jobData) S.job = bp.jobData;
+      }
       if (S.view === 'building') {
         S.treeSel = 'floors';
         // 用户要求：点击后保持，不 toggle —— 点 L4 就一直是 L4，再点 L4 不变回所有楼层
