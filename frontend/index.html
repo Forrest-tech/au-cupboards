@@ -1124,32 +1124,53 @@ async function doExportConfirm() {
   if (buildingIds.length <= 1) {
     await doExport(fmt, picked, customName);
   } else {
-    // 暂时用分文件导出，合成PDF有bug待修
-    for (const bid of buildingIds) {
-      const bp = S.projects.find(pp => pp.id == bid);
-      if (!bp) continue;
-      let jobData = bp.jobData;
-      if (!jobData) {
-        const drawings = bp.drawings || [];
-        const latestDrawing = drawings[drawings.length - 1];
-        const jobId = latestDrawing?.latest_job_id;
-        if (jobId) {
-          try {
-            const j = await api(`/jobs/${jobId}`);
-            jobData = { ...j, jobId };
-            bp.jobData = jobData;
-          } catch (e) { continue; }
+    // 保存完整 UI 状态
+    const saved = {
+      job: S.job, jobId: S.jobId, selBuildingId: S.selBuildingId,
+      pane: S.pane, view: S.view, floorFilter: S.floorFilter,
+      floorSel: S.floorSel, treeSel: S.treeSel,
+    };
+    // 全屏遮罩
+    const mask = document.createElement('div');
+    mask.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:999999;display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px';
+    mask.textContent = (LANGNOW === 'zh' ? `正在导出 ${buildingIds.length} 个建筑…` : `Exporting ${buildingIds.length} buildings...`);
+    document.body.appendChild(mask);
+    try {
+      for (const bid of buildingIds) {
+        const bp = S.projects.find(pp => pp.id == bid);
+        if (!bp) continue;
+        let jobData = bp.jobData;
+        if (!jobData) {
+          const drawings = bp.drawings || [];
+          const latestDrawing = drawings[drawings.length - 1];
+          const jobId = latestDrawing?.latest_job_id;
+          if (jobId) {
+            try {
+              const j = await api(`/jobs/${jobId}`);
+              jobData = { ...j, jobId };
+              bp.jobData = jobData;
+            } catch (e) { continue; }
+          }
         }
+        if (!jobData) continue;
+        S.job = jobData; S.jobId = jobData.jobId; S.selBuildingId = bid;
+        const suffix = '_' + (bp.name || ('b' + bid)).replace(/[\\/:*?"<>|]/g, '_').slice(0, 30);
+        await doExport(fmt, picked, (customName || 'cupboards') + suffix);
+        await new Promise(r => setTimeout(r, 800));
       }
-      if (!jobData) continue;
-      const origJob = S.job, origJobId = S.jobId, origSel = S.selBuildingId;
-      S.job = jobData; S.jobId = jobData.jobId; S.selBuildingId = bid;
-      const suffix = '_' + (bp.name || ('b' + bid)).replace(/[\\/:*?"<>|]/g, '_').slice(0, 30);
-      await doExport(fmt, picked, (customName || 'cupboards') + suffix);
-      S.job = origJob; S.jobId = origJobId; S.selBuildingId = origSel;
-      await new Promise(r => setTimeout(r, 800));
+    } finally {
+      if (mask.parentNode) mask.parentNode.removeChild(mask);
+      // 完整恢复
+      S.job = saved.job; S.jobId = saved.jobId; S.selBuildingId = saved.selBuildingId;
+      S.pane = saved.pane; S.view = saved.view;
+      S.floorFilter = saved.floorFilter; S.floorSel = saved.floorSel; S.treeSel = saved.treeSel;
+      // 用 gotoView 正确恢复视图（不只是 renderTree）
+      if (typeof gotoView === 'function') gotoView(saved.view);
+      else renderTree();
+      // 根据原来的 pane 恢复右栏
+      if (saved.pane === 'matrix' && typeof renderMatrix === 'function') renderMatrix();
+      else if (typeof showAllFloorsPanel === 'function') showAllFloorsPanel();
     }
-    renderTree();
   }
 }
 
