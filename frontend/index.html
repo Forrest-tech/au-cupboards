@@ -1668,7 +1668,8 @@ function renderTreeLibrary() {
   if (!rootName || !rootName.trim()) rootName = 'DWG';
   const rootOpen = S.lfOpen['root'] !== false; // 默认展开
   h += `<div class="node lv1" data-lfroot="1">
-    <span class="nm" style="font-weight:600">${esc(rootName)}</span></div>`;
+    <span class="nm" style="font-weight:600">${esc(rootName)}</span>
+    ${S.treeEditMode ? `<span class="treedrop"><button class="ib" data-emenu="dwg:${esc(rootName)}" title="${LANGNOW==='zh'?'操作':'Actions'}">${ic('more')}</button></span>` : ''}</div>`;
   if (rootOpen) {
     h += `<div class="lfroot-children">`;
 
@@ -1938,6 +1939,14 @@ function bindTreeRename() {
         btn(zh ? '删除项目' : 'Delete building', 'trash', true, () => {
           if (!confirm(zh ? `删除建筑项目「${nm}」及其下全部图纸和解析结果？` : `Delete building "${nm}"?`)) return;
           delBuilding(id);
+        });
+      } else if (type === 'dwg') {
+        const fname = rest.join(':');
+        btn(zh ? '删除图纸' : 'Delete drawing', 'trash', true, () => {
+          const ids = S.variants.filter(v => (v.source_name || v.dwg_name) === fname).map(v => v.id);
+          if (!ids.length) return;
+          if (!confirm(zh ? `删除图纸「${fname}」下的全部 ${ids.length} 个柜型？` : `Delete all ${ids.length} variants from "${fname}"?`)) return;
+          delVariants(ids);
         });
       }
       // 移动功能：演示版暂留空
