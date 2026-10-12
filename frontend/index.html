@@ -2868,14 +2868,14 @@ function bindTree() {
       S.lfOpen[n.dataset.lf] = true;
     });
     // 展开所有建筑
-    Object.keys(S.fold).forEach(k => { if (k.startsWith('b')) S.fold[k] = false; });
+    (S.projects || []).forEach(pp => { S.fold['b' + pp.id] = false; });
     renderTree();
   };
   const bcol = $('#tCollapseAll');
   if (bcol) bcol.onclick = (e) => {
     e.stopPropagation();
     S.lfOpen = {};
-    Object.keys(S.fold).forEach(k => { if (k.startsWith('b')) S.fold[k] = true; });
+    (S.projects || []).forEach(pp => { S.fold['b' + pp.id] = true; });
     renderTree();
   };
   // 编辑模式切换：显示每项的操作下拉菜单（工作台无此按钮，天然跳过）
