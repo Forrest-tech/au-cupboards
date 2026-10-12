@@ -732,13 +732,26 @@ def get_job(job_id: int) -> dict[str, Any]:
         if not j:
             raise HTTPException(404, "任务不存在")
         ms = j.multi_signals or {}
+        floors = ms.get("floor_summary", [])
+        # 【商业回退】住宅为0时，用商业空间数据填充 floors（独立逻辑，不影响住宅）
+        commercial = ms.get("commercial")
+        if not floors and commercial and commercial.get("floors"):
+            floors = [
+                {
+                    "floor_code": f.get("floor_code"),
+                    "unit_count": f.get("space_count", 0),
+                    "labels": f.get("spaces", []),
+                    "is_commercial": True,
+                }
+                for f in commercial["floors"]
+            ]
         return {
             "id": j.id,
             "status": j.status.value,
             "config_version": j.config_version,
             "multi_signals": ms,
             "summary": _summary_from(ms),
-            "floors": ms.get("floor_summary", []),
+            "floors": floors,
             "units": _units_payload(pl.engine, job_id),
             "diagnostics": j.diagnostics or {},
             "rule_desc": _rule_descriptions(),
