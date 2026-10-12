@@ -1503,8 +1503,7 @@ async function loadTree() {
     if (jobId) {
       try {
         const j = await api(`/jobs/${jobId}`);
-        // 存完整 job 结构，右侧面板 showFloorPanel 用 S.job 时能直接切换
-        // 同时存 jobId，中间 PDF 预览 showPdf 需要
+        // 存完整 job 结构，切换时同步使用，避免异步竞态
         p.jobData = {
           jobId: jobId,
           summary: j.summary, floors: j.floors || j.multi_signals?.floor_summary || [],
@@ -1513,17 +1512,27 @@ async function loadTree() {
           cross_validation: j.cross_validation || {},
           rule_desc: j.rule_desc || {},
           config_version: j.config_version,
+          pages: j.multi_signals?.pages || [],
+          page_count: j.multi_signals?.page_count || 1,
         };
       } catch (e) { p.jobData = null; }
     }
   }
   // 【修复】初始化 S.job 和 S.selBuildingId，避免刷新后左右不一致
-  // 默认选中第一个 building
+  // 默认选中第一个 building，三栏同步
   if (S.projects.length && !S.selBuildingId) {
     S.selBuildingId = S.projects[0].id;
   }
   const selP = S.projects.find(pp => pp.id === S.selBuildingId);
-  if (selP?.jobData) S.job = selP.jobData;
+  if (selP?.jobData) {
+    S.job = selP.jobData;
+    S.jobId = selP.jobData.jobId;
+    // 中间 PDF 初始化
+    const pages = selP.jobData.pages?.length ? selP.jobData.pages
+      : Array.from({ length: selP.jobData.page_count || 1 }, (_, i) => ({ title: 'p' + (i + 1) }));
+    // 延迟调用，等 DOM 就绪
+    setTimeout(() => showPdf(S.jobId, pages), 0);
+  }
   renderTree();
 }
 
@@ -2451,27 +2460,24 @@ function bindTree() {
       // 建筑图纸 tab：点楼层 -> 右栏显示该层 units 数对应的柜型种类；
       // 工作台 tab：沿用原来的户表筛选。
       // 注意：data-floor=""（所有楼层）是空字符串，不能用 truthy 判断
-      // 【修复】记录选中的 building ID，确保高亮只出现在一个 building 下
+      // 【修复】单点同步三栏：左树高亮 + 中间 PDF + 右边数据，原子更新避免竞态
       if (n.dataset.b) {
         S.selBuildingId = +n.dataset.b;
       }
       if (S.view === 'building') {
         S.treeSel = 'floors';
-        // 用户要求：点击后保持，不 toggle —— 点 L4 就一直是 L4，再点 L4 不变回所有楼层
         let code = n.dataset.floor;
-        if (code === '') code = null; // 所有楼层
+        if (code === '') code = null;
         S.floorSel = code;
-        // 【修复】切换 building 时，用 loadJob 完整加载（包含中间 PDF 预览）
-        // 避免手动拼 S.job 漏掉 S.jobId 和 showPdf
+        // 同步切换 building 的所有状态（不用异步 loadJob，直接用缓存）
         const bp = S.projects.find(pp => pp.id === S.selBuildingId);
-        const jid = bp?.jobData?.jobId;
-        if (jid && jid !== S.jobId) {
-          // 异步加载，不阻塞高亮渲染
-          loadJob(jid).then(() => {
-            if (S.floorSel) showFloorPanel(S.floorSel);
-            else { S.floorFilter = null; showAllFloorsPanel(); }
-          });
-          return; // loadJob 会 renderTree，直接返回
+        if (bp?.jobData) {
+          S.job = bp.jobData;
+          S.jobId = bp.jobData.jobId;
+          // 中间 PDF 跟随
+          const pages = bp.jobData.pages?.length ? bp.jobData.pages
+            : Array.from({ length: bp.jobData.page_count || 1 }, (_, i) => ({ title: 'p' + (i + 1) }));
+          showPdf(S.jobId, pages);
         }
         renderTree();
         if (S.floorSel) showFloorPanel(S.floorSel);
