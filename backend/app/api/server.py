@@ -877,20 +877,6 @@ def _assert_not_in_use(s: Session, vid: int) -> None:
         )
 
 
-@app.delete("/api/variants/{variant_id}")
-def delete_variant(variant_id: int) -> dict[str, Any]:
-    """删除单个柜型。用户诉求：「里面不需要的数据，我需要可以删除」。"""
-    with Session(_pipeline().engine) as s:
-        v = s.get(CupboardVariant, variant_id)
-        if v is None:
-            raise HTTPException(404, f"柜型 {variant_id} 不存在")
-        _assert_not_in_use(s, variant_id)
-        code = v.variant_code
-        _delete_variant_row(s, v)
-        s.commit()
-    return {"deleted": 1, "code": code}
-
-
 class DeleteBody(BaseModel):
     ids: list[int] = []
 
