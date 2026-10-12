@@ -433,8 +433,9 @@ def page_image(job_id: int, page: int, dpi: int = Query(110, ge=40, le=300)):
 
     pages = cached[2]
     if page in pages:
+        # 缓存时间改短：用户删库重导后 jobId 可能复用，24h 缓存会导致浏览器拿到旧图
         return Response(pages[page], media_type="image/png",
-                        headers={"Cache-Control": "public, max-age=86400"})
+                        headers={"Cache-Control": "public, max-age=300"})
 
     try:
         doc = fitz.open(src)
