@@ -95,3 +95,4 @@ temp/
 
 # ---- 本地备份产物（git bundle 等）----
 *.bundle
+.venv_test/
