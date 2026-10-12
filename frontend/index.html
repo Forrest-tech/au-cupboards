@@ -3639,7 +3639,10 @@ async function submitUpload() {
 
   const fd = new FormData();
   fd.append('file', S.uploadFile);
-  fd.append('project', document.querySelector('#pname')?.value || '74 KEELER ST CARLINGFORD');
+  // 每个 PDF 都是一个新的 building 根节点：用文件名（去扩展名）做项目名，
+  // 而不是写死的 '74 KEELER ST CARLINGFORD'（否则第二个 PDF 会覆盖第一个）
+  const baseName = S.uploadFile.name.replace(/\.[^.]+$/, '');
+  fd.append('project', baseName || 'UNNAMED');
   try {
     const r = await api(`/parse?kind=${S.uploadKind}`, { method: 'POST', body: fd });
     clearInterval(timer);
