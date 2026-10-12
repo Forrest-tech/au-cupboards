@@ -967,6 +967,33 @@ def clear_variants(body: ClearVariantsBody) -> dict[str, Any]:
     return {"deleted": n, "kept": kept, "only_dwg": body.only_dwg}
 
 
+class RenameSourceBody(BaseModel):
+    old_name: str
+    new_name: str
+
+
+@app.post("/api/variants/rename-source")
+def rename_variant_source(body: RenameSourceBody) -> dict[str, Any]:
+    """重命名图纸（更新该文件下所有变体的 source_name）。
+    
+    用于柜型库 DWG 根节点的重命名。空文件名的变体（old_name 为 'DWG'
+    或空）也会被匹配到。
+    """
+    n = 0
+    with Session(_pipeline().engine) as s:
+        # 匹配逻辑与前端 libraryGroups 一致
+        rows = s.scalars(select(CupboardVariant).where(CupboardVariant.source == "dwg")).all()
+        for r in rows:
+            cur = r.source_name or r.dwg_name or ""
+            # old_name 为 DWG/空时匹配空文件名的
+            match = (cur == body.old_name) or (not cur and body.old_name in ("DWG", ""))
+            if match:
+                r.source_name = body.new_name
+                n += 1
+        s.commit()
+    return {"renamed": n, "new_name": body.new_name}
+
+
 class VariantIn(BaseModel):
     code: str
     rows: int = 1

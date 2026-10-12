@@ -1980,10 +1980,17 @@ function bindTreeRename() {
         });
       } else if (type === 'dwg') {
         const fname = rest.join(':');
-        btn(zh ? '重命名图纸' : 'Rename drawing', 'pencil', false, () => {
+        btn(zh ? '重命名图纸' : 'Rename drawing', 'pencil', false, async () => {
           const name = prompt(zh ? `重命名图纸「${fname}」：` : `Rename drawing "${fname}":`, fname);
           if (name === null || !name.trim() || name.trim() === fname) return;
-          toast(zh ? '重命名图纸功能开发中' : 'Rename drawing coming soon', 'err');
+          try {
+            const r = await api('/variants/rename-source', { method: 'POST', body: { old_name: fname, new_name: name.trim() } });
+            toast(zh ? `已重命名 ${r.renamed} 个柜型的图纸` : `Renamed ${r.renamed} variants`, 'ok');
+            await loadVariants();
+            renderTree();
+          } catch (e) {
+            toast(zh ? '重命名失败' : 'Rename failed', 'err');
+          }
         });
         btn(zh ? '删除图纸' : 'Delete drawing', 'trash', true, async () => {
           if (!confirm(zh ? `删除图纸「${fname}」下的全部柜型？` : `Delete all variants from "${fname}"?`)) return;
