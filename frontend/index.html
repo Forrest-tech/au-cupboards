@@ -1664,7 +1664,8 @@ function renderTreeLibrary() {
   }
 
   // 根节点：文件名（用户要求）
-  const rootName = files.length === 1 ? files[0].fname : t('tree.library');
+  let rootName = files.length === 1 ? files[0].fname : t('tree.library');
+  if (!rootName || !rootName.trim()) rootName = 'DWG';
   const rootOpen = S.lfOpen['root'] !== false; // 默认展开
   h += `<div class="node lv1" data-lfroot="1">
     <span class="nm" style="font-weight:600">${esc(rootName)}</span></div>`;
