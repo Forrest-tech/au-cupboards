@@ -1663,6 +1663,14 @@ function renderTreeLibrary() {
     return;
   }
 
+  // 根节点：文件名（用户要求）
+  const rootName = files.length === 1 ? files[0].fname : t('tree.library');
+  const rootOpen = S.lfOpen['root'] !== false; // 默认展开
+  h += `<div class="node lv1" data-lfroot="1">
+    <span class="nm" style="font-weight:600">${esc(rootName)}</span></div>`;
+  if (rootOpen) {
+    h += `<div class="lfroot-children">`;
+
   for (const grp of unitsList) {
     const ukey = 'u' + grp.n;
     // 父子都要显示的计数：这个套数下一共有几个柜
@@ -1693,6 +1701,7 @@ function renderTreeLibrary() {
       }
     }
   }
+  } // end if (rootOpen)
   $('#tree').innerHTML = h;
   bindTree();
 }
@@ -2326,6 +2335,12 @@ function bindTree() {
       const fk = 'b' + n.dataset.b;
       S.fold[fk] = !S.fold[fk];
       S.curBuilding = +n.dataset.b; S.treeSel = null; renderTree();
+    }
+    else if (n.dataset.lfroot !== undefined) {
+      // 柜型库文件根节点：点它展开/收起
+      S.lfOpen = S.lfOpen || {};
+      S.lfOpen['root'] = S.lfOpen['root'] === false ? true : false;
+      renderTree();
     }
     else if (n.dataset.lu !== undefined) {
       // 柜型库根节点 = units 数量。点它 -> 右侧显示该套数下**全部** model。
