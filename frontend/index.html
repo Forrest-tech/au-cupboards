@@ -1119,11 +1119,36 @@ async function doExportConfirm() {
   let buildingIds = checkedBoxes.map(cb => +cb.value);
   if (!buildingIds.length) buildingIds = [S.selBuildingId].filter(Boolean);
   closeModal();
-  // 单选：走原逻辑；多选：逐个导出
+  // 单选：走原逻辑；多选：逐个导出为独立文件（合成PDF待修复）
   if (buildingIds.length <= 1) {
     await doExport(fmt, picked, customName);
   } else {
-    await doExportMultiple(fmt, picked, customName, buildingIds);
+    // 暂时用分文件导出，合成PDF有bug待修
+    for (const bid of buildingIds) {
+      const bp = S.projects.find(pp => pp.id == bid);
+      if (!bp) continue;
+      let jobData = bp.jobData;
+      if (!jobData) {
+        const drawings = bp.drawings || [];
+        const latestDrawing = drawings[drawings.length - 1];
+        const jobId = latestDrawing?.latest_job_id;
+        if (jobId) {
+          try {
+            const j = await api(`/jobs/${jobId}`);
+            jobData = { ...j, jobId };
+            bp.jobData = jobData;
+          } catch (e) { continue; }
+        }
+      }
+      if (!jobData) continue;
+      const origJob = S.job, origJobId = S.jobId, origSel = S.selBuildingId;
+      S.job = jobData; S.jobId = jobData.jobId; S.selBuildingId = bid;
+      const suffix = '_' + (bp.name || ('b' + bid)).replace(/[\\/:*?"<>|]/g, '_').slice(0, 30);
+      await doExport(fmt, picked, (customName || 'cupboards') + suffix);
+      S.job = origJob; S.jobId = origJobId; S.selBuildingId = origSel;
+      await new Promise(r => setTimeout(r, 800));
+    }
+    renderTree();
   }
 }
 
@@ -1213,7 +1238,18 @@ async function doExportPdfCombined(baseName, allData, fileHandle) {
     for (const { bp, jobData } of allData) {
       S.job = jobData; S.jobId = jobData.jobId; S.selBuildingId = bp.id;
       S.pane = 'matrix';
-      if (typeof renderMatrix === 'function') renderMatrix();
+      // 确保 #rpane 存在
+      let rpaneCheck = document.querySelector('#rpane');
+      if (!rpaneCheck) {
+        console.error('[export] #rpane not found before renderMatrix, skipping', bp.name);
+        continue;
+      }
+      try {
+        if (typeof renderMatrix === 'function') renderMatrix();
+      } catch (e) {
+        console.error('[export] renderMatrix failed for', bp.name, e);
+        continue;
+      }
       await new Promise(r => setTimeout(r, 800));
       const rpane = document.querySelector('#rpane');
       if (!rpane || rpane.textContent.trim().length < 100) continue;
