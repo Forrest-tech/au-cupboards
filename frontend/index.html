@@ -1120,57 +1120,91 @@ async function doExportConfirm() {
   let buildingIds = checkedBoxes.map(cb => +cb.value);
   if (!buildingIds.length) buildingIds = [S.selBuildingId].filter(Boolean);
   closeModal();
-  // 单选：走原逻辑；多选：逐个导出为独立文件（合成PDF待修复）
+  // 单选：走原逻辑；多选：合成一个PDF
   if (buildingIds.length <= 1) {
     await doExport(fmt, picked, customName);
   } else {
-    // 保存完整 UI 状态
-    const saved = {
-      job: S.job, jobId: S.jobId, selBuildingId: S.selBuildingId,
-      pane: S.pane, view: S.view, floorFilter: S.floorFilter,
-      floorSel: S.floorSel, treeSel: S.treeSel,
-    };
-    // 全屏遮罩
-    const mask = document.createElement('div');
-    mask.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:999999;display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px';
-    mask.textContent = (LANGNOW === 'zh' ? `正在导出 ${buildingIds.length} 个建筑…` : `Exporting ${buildingIds.length} buildings...`);
-    document.body.appendChild(mask);
-    try {
-      for (const bid of buildingIds) {
-        const bp = S.projects.find(pp => pp.id == bid);
-        if (!bp) continue;
-        let jobData = bp.jobData;
-        if (!jobData) {
-          const drawings = bp.drawings || [];
-          const latestDrawing = drawings[drawings.length - 1];
-          const jobId = latestDrawing?.latest_job_id;
-          if (jobId) {
-            try {
-              const j = await api(`/jobs/${jobId}`);
-              jobData = { ...j, jobId };
-              bp.jobData = jobData;
-            } catch (e) { continue; }
-          }
-        }
-        if (!jobData) continue;
-        S.job = jobData; S.jobId = jobData.jobId; S.selBuildingId = bid;
-        const suffix = '_' + (bp.name || ('b' + bid)).replace(/[\\/:*?"<>|]/g, '_').slice(0, 30);
-        await doExport(fmt, picked, (customName || 'cupboards') + suffix);
-        await new Promise(r => setTimeout(r, 800));
-      }
-    } finally {
-      if (mask.parentNode) mask.parentNode.removeChild(mask);
-      // 完整恢复
-      S.job = saved.job; S.jobId = saved.jobId; S.selBuildingId = saved.selBuildingId;
-      S.pane = saved.pane; S.view = saved.view;
-      S.floorFilter = saved.floorFilter; S.floorSel = saved.floorSel; S.treeSel = saved.treeSel;
-      // 用 gotoView 正确恢复视图（不只是 renderTree）
-      if (typeof gotoView === 'function') gotoView(saved.view);
-      else renderTree();
-      // 根据原来的 pane 恢复右栏
-      if (saved.pane === 'matrix' && typeof renderMatrix === 'function') renderMatrix();
-      else if (typeof showAllFloorsPanel === 'function') showAllFloorsPanel();
+    await doExportCombinedSimple(fmt, picked, customName, buildingIds);
+  }
+}
+
+// 合成PDF（简化数据版）：不依赖renderMatrix，直接按jobData生成
+async function doExportCombinedSimple(fmt, fileHandle, customName, buildingIds) {
+  const zh = LANGNOW === 'zh';
+  // 只支持PDF合成，其他格式回退到分文件
+  if (fmt !== 'pdf') {
+    toast(zh ? '多选仅支持PDF合成，其他格式将分文件导出' : 'Multi-select only supports PDF merge', 'info');
+  }
+  const mask = document.createElement('div');
+  mask.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:999999;display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px';
+  mask.textContent = zh ? `正在生成合成PDF（${buildingIds.length}个建筑）…` : `Generating PDF...`;
+  document.body.appendChild(mask);
+  let combinedDiv = null;
+  try {
+    // html2pdf 应该已在单文件导出时加载过，直接用
+    if (!window.html2pdf) {
+      throw new Error('html2pdf 未加载，请先做一次单文件导出');
     }
+    combinedDiv = document.createElement('div');
+    combinedDiv.style.cssText = 'font-family:sans-serif;background:#fff;color:#000;padding:20px;max-width:800px';
+    for (const bid of buildingIds) {
+      const bp = S.projects.find(pp => pp.id == bid);
+      if (!bp) continue;
+      let jobData = bp.jobData;
+      if (!jobData) {
+        const drawings = bp.drawings || [];
+        const latestDrawing = drawings[drawings.length - 1];
+        const jobId = latestDrawing?.latest_job_id;
+        if (jobId) {
+          try {
+            const j = await api(`/jobs/${jobId}`);
+            jobData = { ...j, jobId };
+            bp.jobData = jobData;
+          } catch (e) { continue; }
+        }
+      }
+      if (!jobData) continue;
+      const floors = jobData.floors || [];
+      const totalUnits = floors.reduce((a, f) => a + Number(f.unit_count || 0), 0);
+      const titleDiv = document.createElement('div');
+      titleDiv.innerHTML = `<h1 style="font-size:20px;margin:25px 0 10px;padding-bottom:8px;border-bottom:2px solid #333">${esc(bp.name || '')}</h1>
+        <p style="color:#666;font-size:13px;margin-bottom:12px">${floors.length} 楼层 / ${totalUnits} units</p>`;
+      combinedDiv.appendChild(titleDiv);
+      // 表格：楼层 | 户数 | 柜型
+      let tbl = '<table style="width:100%;border-collapse:collapse;margin-bottom:20px;font-size:13px">';
+      tbl += '<thead><tr style="background:#f0f0f0"><th style="border:1px solid #ccc;padding:8px;text-align:left">楼层</th><th style="border:1px solid #ccc;padding:8px">户数</th><th style="border:1px solid #ccc;padding:8px;text-align:left">柜型</th></tr></thead><tbody>';
+      for (const f of floors) {
+        const n = Number(f.unit_count || 0);
+        const matched = (S.variants || []).filter(v => v.source === 'dwg' && Number(v.positions || 0) === n);
+        const cups = matched.map(v => `${esc(v.code || '')} (${fmtMM(v.w)}×${fmtMM(v.h)}mm)`).join('; ') || '-';
+        tbl += `<tr><td style="border:1px solid #ccc;padding:8px"><b>${esc(f.floor_code || '')}</b></td><td style="border:1px solid #ccc;padding:8px;text-align:center">${n}</td><td style="border:1px solid #ccc;padding:8px">${cups}</td></tr>`;
+      }
+      tbl += '</tbody></table>';
+      const tblDiv = document.createElement('div');
+      tblDiv.innerHTML = tbl;
+      tblDiv.style.pageBreakInside = 'avoid';
+      combinedDiv.appendChild(tblDiv);
+    }
+    document.body.appendChild(combinedDiv);
+    await new Promise(r => setTimeout(r, 500));
+    const opt = {
+      margin: 12,
+      filename: `${customName || 'cupboards'}.pdf`,
+      image: { type: 'jpeg', quality: 0.95 },
+      html2canvas: { scale: 2, useCORS: true },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+    };
+    const pdfBlob = await window.html2pdf().set(opt).from(combinedDiv).outputPdf('blob');
+    if (!pdfBlob || pdfBlob.size < 2000) throw new Error('PDF内容为空');
+    saveExportBlob(pdfBlob, `${customName || 'cupboards'}.pdf`, fileHandle);
+    toast(zh ? '导出成功' : 'Export done', 'ok');
+  } catch (e) {
+    const msg = e?.message || String(e);
+    console.error('[export] combined failed:', msg, e?.stack?.slice(0, 500));
+    toast((zh ? 'PDF 生成失败：' : 'PDF failed: ') + msg, 'err');
+  } finally {
+    if (combinedDiv && combinedDiv.parentNode) combinedDiv.parentNode.removeChild(combinedDiv);
+    if (mask.parentNode) mask.parentNode.removeChild(mask);
   }
 }
 
