@@ -1209,9 +1209,17 @@ async function doExportConfirm() {
       document.body.removeChild(mask);
       S.job = savedJob; S.jobId = savedJobId; S.selBuildingId = savedBuilding;
       S.pane = savedPane; S.floorFilter = savedFloorFilter; S.floorSel = savedFloorSel;
-      // 恢复原来显示的内容
+      // 恢复原来显示的内容：右栏 + 中栏 PDF
       if (typeof renderMatrix === 'function' && savedPane === 'matrix') renderMatrix();
       else if (typeof renderCurrentPane === 'function') renderCurrentPane();
+      // 中栏文档跟随恢复
+      if (savedJob && typeof showPdf === 'function') {
+        try {
+          const pages = savedJob.pages?.length ? savedJob.pages
+            : Array.from({ length: savedJob.page_count || 1 }, (_, i) => ({ title: 'p' + (i + 1) }));
+          showPdf(savedJobId, pages);
+        } catch (e) { console.error('[export] restore showPdf failed:', e); }
+      }
     }
   } else {
     toast('多选仅支持PDF', 'info');
