@@ -1127,14 +1127,15 @@ async function doExportConfirm() {
   }
 }
 
-// 多建筑导出：逐个切换 S.job 并导出，文件名加建筑名后缀
+// 多建筑导出：合成一个文件（用户要求：不要多个文件）
 async function doExportMultiple(fmt, fileHandle, customName, buildingIds) {
   const origJob = S.job, origJobId = S.jobId, origSel = S.selBuildingId;
   try {
+    // 收集所有选中建筑的数据
+    const allData = [];
     for (const bid of buildingIds) {
       const bp = S.projects.find(pp => pp.id == bid);
       if (!bp) continue;
-      // 确保 jobData 已加载
       let jobData = bp.jobData;
       if (!jobData) {
         const drawings = bp.drawings || [];
@@ -1149,29 +1150,93 @@ async function doExportMultiple(fmt, fileHandle, customName, buildingIds) {
         }
       }
       if (!jobData) continue;
-      S.job = jobData; S.jobId = jobData.jobId; S.selBuildingId = bid;
-      // 【修复】重渲染右栏，确保 html2pdf 抓到的是当前 building 的 DOM
-      renderTree();
-      if (typeof showAllFloorsPanel === 'function') {
-        S.floorFilter = null;
-        showAllFloorsPanel();
+      allData.push({ bp, jobData });
+    }
+    if (!allData.length) {
+      toast('没有可导出的数据', 'err');
+      return;
+    }
+    // PDF：合成一个 HTML，包含所有建筑，一次性转 PDF
+    if (fmt === 'pdf') {
+      await doExportPdfCombined(customName || 'cupboards', allData, fileHandle);
+    } else {
+      // 其他格式：逐个导出（保持原逻辑）
+      for (const { bp, jobData } of allData) {
+        S.job = jobData; S.jobId = jobData.jobId; S.selBuildingId = bp.id;
+        renderTree();
+        if (typeof showAllFloorsPanel === 'function') {
+          S.floorFilter = null;
+          showAllFloorsPanel();
+        }
+        await new Promise(r => setTimeout(r, 300));
+        const suffix = '_' + (bp.name || ('b' + bp.id)).replace(/[\\/:*?"<>|]/g, '_').slice(0, 30);
+        const name = (customName || 'cupboards') + suffix;
+        await doExport(fmt, fileHandle, name);
+        await new Promise(r => setTimeout(r, 800));
       }
-      // 等 DOM 更新完成
-      await new Promise(r => setTimeout(r, 300));
-      const suffix = '_' + (bp.name || ('b' + bid)).replace(/[\\/:*?"<>|]/g, '_').slice(0, 30);
-      const name = (customName || 'cupboards') + suffix;
-      await doExport(fmt, fileHandle, name);
-      // 每个文件导出后稍等，避免浏览器拦截多文件下载
-      await new Promise(r => setTimeout(r, 800));
     }
   } finally {
-    // 恢复原选中
     S.job = origJob; S.jobId = origJobId; S.selBuildingId = origSel;
     renderTree();
     if (typeof showAllFloorsPanel === 'function') {
       S.floorFilter = null;
       showAllFloorsPanel();
     }
+  }
+}
+
+// 多建筑合成 PDF：生成包含所有建筑的 HTML，一次性转 PDF
+async function doExportPdfCombined(baseName, allData, fileHandle) {
+  const zh = LANGNOW === 'zh';
+  toast(zh ? '正在生成合成 PDF…' : 'Generating combined PDF…', 'info');
+  try {
+    if (!window.html2pdf) {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+        s.onload = resolve;
+        s.onerror = reject;
+        document.head.appendChild(s);
+      });
+    }
+    // 构建合成 HTML
+    let html = '<div style="font-family:sans-serif;padding:20px">';
+    for (const { bp, jobData } of allData) {
+      const floors = jobData.floors || [];
+      const totalUnits = floors.reduce((a, f) => a + Number(f.unit_count || 0), 0);
+      html += `<h1 style="font-size:20px;margin:20px 0 10px;border-bottom:2px solid #333;padding-bottom:8px">${esc(bp.name || '')}</h1>`;
+      html += `<p style="color:#666">${floors.length} 楼层 / ${totalUnits} units</p>`;
+      html += '<table style="width:100%;border-collapse:collapse;margin:10px 0 30px">';
+      html += '<thead><tr style="background:#f5f5f5"><th style="border:1px solid #ddd;padding:8px;text-align:left">楼层</th><th style="border:1px solid #ddd;padding:8px">户数</th><th style="border:1px solid #ddd;padding:8px">柜型</th></tr></thead><tbody>';
+      for (const f of floors) {
+        const n = Number(f.unit_count || 0);
+        const matched = (S.variants || []).filter(v => v.source === 'dwg' && Number(v.positions || 0) === n);
+        const cupboards = matched.map(v => `${v.code || ''}`).join('; ') || '-';
+        html += `<tr><td style="border:1px solid #ddd;padding:8px"><b>${esc(f.floor_code)}</b></td><td style="border:1px solid #ddd;padding:8px;text-align:center">${n}</td><td style="border:1px solid #ddd;padding:8px">${esc(cupboards)}</td></tr>`;
+      }
+      html += '</tbody></table>';
+    }
+    html += '</div>';
+    // 创建临时容器
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    tmp.style.position = 'absolute';
+    tmp.style.left = '-9999px';
+    document.body.appendChild(tmp);
+    const opt = {
+      margin: 10,
+      filename: `${baseName}.pdf`,
+      image: { type: 'jpeg', quality: 0.95 },
+      html2canvas: { scale: 2, useCORS: true },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
+    };
+    const pdfBlob = await window.html2pdf().set(opt).from(tmp).outputPdf('blob');
+    document.body.removeChild(tmp);
+    saveExportBlob(pdfBlob, `${baseName}.pdf`, fileHandle);
+    toast(zh ? '导出成功' : 'Export done', 'ok');
+  } catch (e) {
+    toast((zh ? 'PDF 生成失败：' : 'PDF failed: ') + e.message, 'err');
   }
 }
 
