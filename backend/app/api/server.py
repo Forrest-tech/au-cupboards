@@ -173,27 +173,32 @@ def list_projects() -> list[dict[str, Any]]:
             drawings = s.scalars(
                 select(Drawing).where(Drawing.building_id == b.id).order_by(Drawing.id)
             ).all()
-            jobs = s.scalars(
-                select(ParseJob).join(DrawingVersion, DrawingVersion.id == ParseJob.drawing_version_id)
-                .where(DrawingVersion.drawing_id.in_([d.id for d in drawings] or [0]))
-                .order_by(ParseJob.id.desc())
-            ).all()
+            # 【修复】每个 drawing 单独查最新 job，避免共用 jobs[0] 导致错位
+            drawings_out = []
+            for d in drawings:
+                latest_job = s.scalars(
+                    select(ParseJob)
+                    .join(DrawingVersion, DrawingVersion.id == ParseJob.drawing_version_id)
+                    .where(DrawingVersion.drawing_id == d.id)
+                    .order_by(ParseJob.id.desc())
+                    .limit(1)
+                ).first()
+                drawings_out.append(
+                    {
+                        "id": d.id,
+                        "drawing_no": d.drawing_no,
+                        "title": d.title,
+                        "page_count": d.page_count,
+                        "text_layer": d.text_layer,
+                        "latest_job_id": latest_job.id if latest_job else None,
+                    }
+                )
             out.append(
                 {
                     "id": b.id,
                     "name": b.name,
                     "address": b.address,
-                    "drawings": [
-                        {
-                            "id": d.id,
-                            "drawing_no": d.drawing_no,
-                            "title": d.title,
-                            "page_count": d.page_count,
-                            "text_layer": d.text_layer,
-                            "latest_job_id": jobs[0].id if jobs else None,
-                        }
-                        for d in drawings
-                    ],
+                    "drawings": drawings_out,
                 }
             )
         return out
