@@ -38,19 +38,19 @@ input,select{font:inherit}
 /* ---------- 顶栏 ---------- */
 header{
   height:52px;display:flex;align-items:center;gap:18px;
-  background:var(--panel);border-bottom:1px solid var(--line);padding:0 16px;flex-shrink:0;
+  background:#2563eb;padding:0 16px;flex-shrink:0;
 }
-.logo{font-weight:700;font-size:15px;color:var(--txt);letter-spacing:.3px;white-space:nowrap}
-.logo span{color:var(--accent)}
+.logo{font-weight:700;font-size:15px;color:#fff;letter-spacing:.3px;white-space:nowrap}
+.logo span{color:#bfdbfe}
 nav{display:flex;gap:2px;flex:1}
 nav button{
-  padding:7px 14px;border-radius:6px;color:var(--dim);font-weight:500;transition:.15s;
+  padding:7px 14px;border-radius:6px;color:#dbeafe;font-weight:500;transition:.15s;
   display:inline-flex;align-items:center;gap:7px;
 }
 nav button .ic{width:16px;height:16px;flex-shrink:0}
-nav button:hover{background:var(--panel2);color:var(--txt)}
-nav button.on{background:var(--accent);color:#fff}
-.hstat{font-size:11px;color:var(--dim);white-space:nowrap;display:flex;align-items:center;gap:10px}
+nav button:hover{background:rgba(255,255,255,.15);color:#fff}
+nav button.on{background:rgba(255,255,255,.25);color:#fff}
+.hstat{font-size:11px;color:#dbeafe;white-space:nowrap;display:flex;align-items:center;gap:10px}
 /* 问题13：标准网站式用户菜单 */
 .huser{position:relative}
 .huser-btn{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);cursor:pointer;font-size:12px;font-weight:500}
@@ -68,16 +68,16 @@ nav button.on{background:var(--accent);color:#fff}
 .hexport:hover{filter:brightness(0.95)}
 
 /* 语言切换 + 顶栏上传按钮 */
-.langsw{display:flex;border:1px solid var(--line);border-radius:5px;overflow:hidden;background:#fff}
-.langsw button{padding:4px 9px;font-size:11px;color:var(--dim);transition:.15s}
-.langsw button.on{background:var(--accent);color:#fff}
-.langsw button:not(.on):hover{background:var(--panel2)}
+.langsw{display:flex;border:1px solid rgba(255,255,255,.3);border-radius:5px;overflow:hidden;background:rgba(255,255,255,.15)}
+.langsw button{padding:4px 9px;font-size:11px;color:#dbeafe;transition:.15s}
+.langsw button.on{background:#fff;color:#2563eb}
+.langsw button:not(.on):hover{background:rgba(255,255,255,.25);color:#fff}
 .hupload{
-  padding:6px 13px;border-radius:6px;background:var(--accent);color:#fff;
+  padding:6px 13px;border-radius:6px;background:#fff;color:#2563eb;
   font-size:12px;font-weight:600;transition:.15s;white-space:nowrap;
   display:inline-flex;align-items:center;gap:5px;
 }
-.hupload:hover{background:var(--accent2)}
+.hupload:hover{background:#dbeafe}
 .badge{
   display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:600;
   background:var(--panel2);color:var(--dim);border:1px solid var(--line);
