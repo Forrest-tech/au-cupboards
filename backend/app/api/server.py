@@ -481,6 +481,69 @@ def job_exports(job_id: int) -> dict[str, Any]:
     return latest
 
 
+@app.post("/api/export/combined-pdf")
+def export_combined_pdf(body: dict[str, Any]):
+    """多建筑合成一个PDF（用户要求：勾选的建筑合并导出）。
+
+    body: {"job_ids": [1,2,3], "names": ["b1","b2","b3"], "name": "文件名(不含扩展名)"}
+    后端直接用 WeasyPrint 生成，不依赖前端 DOM，可靠。
+    """
+    from fastapi.responses import Response
+    import io
+    job_ids = body.get("job_ids") or []
+    names = body.get("names") or []
+    name = str(body.get("name") or "cupboards")
+    if not job_ids:
+        raise HTTPException(400, "job_ids 为空")
+    pl = _pipeline()
+    html_parts = []
+    with Session(pl.engine) as s:
+        for idx, jid in enumerate(job_ids):
+            j = s.get(ParseJob, int(jid))
+            if not j:
+                continue
+            ms = j.multi_signals or {}
+            floors = ms.get("floor_summary", [])
+            # 商业回退
+            commercial = ms.get("commercial")
+            if not floors and commercial and commercial.get("floors"):
+                floors = [
+                    {"floor_code": f.get("floor_code"), "unit_count": f.get("space_count", 0),
+                     "labels": f.get("spaces", [])}
+                    for f in commercial["floors"]
+                ]
+            bname = names[idx] if idx < len(names) else f"Building {jid}"
+            total = sum(int(f.get("unit_count", 0) or 0) for f in floors)
+            # 转义
+            import html as _html
+            bname_e = _html.escape(str(bname))
+            html_parts.append(f'<h1 style="font-size:20px;border-bottom:2px solid #333;padding-bottom:8px;margin:25px 0 10px">{bname_e}</h1>')
+            html_parts.append(f'<p style="color:#666;font-size:12px">{len(floors)} 楼层 / {total} units</p>')
+            html_parts.append('<table><thead><tr><th>楼层</th><th>户数</th><th>单元</th></tr></thead><tbody>')
+            for f in floors:
+                fc = _html.escape(str(f.get("floor_code", "")))
+                uc = int(f.get("unit_count", 0) or 0)
+                labels = ", ".join(str(x) for x in (f.get("labels") or [])[:30])
+                labels_e = _html.escape(labels)
+                html_parts.append(f'<tr><td><b>{fc}</b></td><td style="text-align:center">{uc}</td><td style="font-size:11px">{labels_e}</td></tr>')
+            html_parts.append('</tbody></table>')
+    full_html = f"""<html><head><meta charset="utf-8"><style>
+      body {{ font-family: sans-serif; font-size: 12px; color: #1e293b; }}
+      table {{ border-collapse: collapse; width: 100%; margin: 10px 0 20px; }}
+      th, td {{ border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; }}
+      th {{ background: #f1f5f9; }}
+      h1 {{ page-break-before: auto; }}
+    </style></head><body>{''.join(html_parts)}</body></html>"""
+    try:
+        from weasyprint import HTML
+        buf = io.BytesIO()
+        HTML(string=full_html).write_pdf(buf)
+        return Response(buf.getvalue(), media_type="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="{name}.pdf"'})
+    except Exception as e:
+        raise HTTPException(500, f"PDF生成失败: {e}")
+
+
 @app.post("/api/jobs/{job_id}/export/{fmt}")
 def export_report(job_id: int, fmt: str, body: dict[str, Any]):
     """问题15：直接生成楼层×柜型报告（pdf/docx/xlsx/jpg），返回文件流。

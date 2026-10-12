@@ -1120,11 +1120,141 @@ async function doExportConfirm() {
   let buildingIds = checkedBoxes.map(cb => +cb.value);
   if (!buildingIds.length) buildingIds = [S.selBuildingId].filter(Boolean);
   closeModal();
-  // 单选：走原逻辑；多选：合成一个PDF
+  // 单选：走原逻辑；多选PDF：调后端合成接口（可靠）
   if (buildingIds.length <= 1) {
     await doExport(fmt, picked, customName);
+  } else if (fmt === 'pdf') {
+    // 收集 jobId 和建筑名
+    const jobIds = [];
+    const names = [];
+    for (const bid of buildingIds) {
+      const bp = S.projects.find(pp => pp.id == bid);
+      if (!bp) continue;
+      const drawings = bp.drawings || [];
+      const latestDrawing = drawings[drawings.length - 1];
+      const jobId = latestDrawing?.latest_job_id || bp.jobData?.jobId;
+      if (!jobId) continue;
+      jobIds.push(jobId);
+      names.push(bp.name || ('#' + bid));
+    }
+    if (!jobIds.length) {
+      toast('没有可导出的建筑', 'err');
+      return;
+    }
+    const zh = LANGNOW === 'zh';
+    toast(zh ? `正在生成合成PDF（${jobIds.length}个建筑）…` : 'Generating...', 'info');
+    try {
+      const res = await fetch('/api/export/combined-pdf', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ job_ids: jobIds, names, name: customName || 'cupboards' }),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const blob = await res.blob();
+      saveExportBlob(blob, `${customName || 'cupboards'}.pdf`, picked);
+      toast(zh ? '导出成功' : 'Export done', 'ok');
+    } catch (e) {
+      toast((zh ? '合成PDF失败：' : 'Failed: ') + e.message, 'err');
+    }
   } else {
-    await doExportCombinedSimple(fmt, picked, customName, buildingIds);
+    toast('多选仅支持PDF', 'info');
+    await doExport(fmt, picked, customName);
+  }
+}
+
+// 合并PDF：逐个生成单建筑PDF blob，再用pdf-lib合并
+async function doExportMergedPdf(fileHandle, customName, buildingIds) {
+  const zh = LANGNOW === 'zh';
+  const mask = document.createElement('div');
+  mask.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:999999;display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px';
+  mask.textContent = zh ? `正在生成合并PDF（${buildingIds.length}个建筑）…` : `Generating merged PDF...`;
+  document.body.appendChild(mask);
+  const saved = {
+    job: S.job, jobId: S.jobId, selBuildingId: S.selBuildingId,
+    pane: S.pane, view: S.view, floorFilter: S.floorFilter,
+    floorSel: S.floorSel, treeSel: S.treeSel,
+  };
+  try {
+    // 加载 pdf-lib
+    if (!window.PDFLib) {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js';
+        s.onload = resolve; s.onerror = reject;
+        document.head.appendChild(s);
+      });
+    }
+    if (!window.html2pdf) {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+        s.onload = resolve; s.onerror = reject;
+        document.head.appendChild(s);
+      });
+    }
+    const pdfBlobs = [];
+    for (let i = 0; i < buildingIds.length; i++) {
+      const bid = buildingIds[i];
+      const bp = S.projects.find(pp => pp.id == bid);
+      if (!bp) continue;
+      let jobData = bp.jobData;
+      if (!jobData) {
+        const drawings = bp.drawings || [];
+        const latestDrawing = drawings[drawings.length - 1];
+        const jobId = latestDrawing?.latest_job_id;
+        if (jobId) {
+          try {
+            const j = await api(`/jobs/${jobId}`);
+            jobData = { ...j, jobId };
+            bp.jobData = jobData;
+          } catch (e) { continue; }
+        }
+      }
+      if (!jobData) continue;
+      mask.textContent = zh ? `正在生成 ${i+1}/${buildingIds.length}: ${bp.name}…` : `Generating ${i+1}/${buildingIds.length}...`;
+      // 切换到该建筑并渲染
+      S.job = jobData; S.jobId = jobData.jobId; S.selBuildingId = bid;
+      S.pane = 'matrix';
+      if (typeof renderMatrix === 'function') renderMatrix();
+      await new Promise(r => setTimeout(r, 1000));
+      const rpane = document.querySelector('#rpane');
+      if (!rpane) continue;
+      // 生成PDF blob（不下载）
+      const opt = {
+        margin: 10,
+        image: { type: 'jpeg', quality: 0.9 },
+        html2canvas: { scale: 1.5, useCORS: true },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
+      };
+      const blob = await window.html2pdf().set(opt).from(rpane).outputPdf('blob');
+      if (blob && blob.size > 1000) pdfBlobs.push(blob);
+    }
+    if (!pdfBlobs.length) throw new Error('没有生成任何PDF');
+    // 用 pdf-lib 合并
+    mask.textContent = zh ? '正在合并PDF…' : 'Merging...';
+    const mergedPdf = await window.PDFLib.PDFDocument.create();
+    for (const blob of pdfBlobs) {
+      const bytes = await blob.arrayBuffer();
+      const pdf = await window.PDFLib.PDFDocument.load(bytes);
+      const pages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
+      pages.forEach(p => mergedPdf.addPage(p));
+    }
+    const mergedBytes = await mergedPdf.save();
+    const mergedBlob = new Blob([mergedBytes], { type: 'application/pdf' });
+    saveExportBlob(mergedBlob, `${customName || 'cupboards'}.pdf`, fileHandle);
+    toast(zh ? `导出成功（${pdfBlobs.length}个建筑已合并）` : 'Export done', 'ok');
+  } catch (e) {
+    console.error('[export] merge failed:', e);
+    toast((zh ? 'PDF合并失败：' : 'Merge failed: ') + (e.message || e), 'err');
+  } finally {
+    if (mask.parentNode) mask.parentNode.removeChild(mask);
+    S.job = saved.job; S.jobId = saved.jobId; S.selBuildingId = saved.selBuildingId;
+    S.pane = saved.pane; S.view = saved.view;
+    S.floorFilter = saved.floorFilter; S.floorSel = saved.floorSel; S.treeSel = saved.treeSel;
+    if (typeof gotoView === 'function') gotoView(saved.view);
+    else renderTree();
+    if (saved.pane === 'matrix' && typeof renderMatrix === 'function') renderMatrix();
   }
 }
 
