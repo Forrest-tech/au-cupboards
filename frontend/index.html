@@ -1684,8 +1684,9 @@ function renderTreeLibrary() {
   }
 
   // 根节点：文件名（用户要求）
-  let rootName = files.length === 1 ? files[0].fname : t('tree.library');
-  if (!rootName || !rootName.trim()) rootName = 'DWG';
+  let rootName = files.length === 1 ? files[0].name : t('tree.library');
+  // 无名图纸沿用 'DWG' 显示（与后端 rename-source 的 old_name 匹配规则一致）
+  if (!rootName || !rootName.trim() || rootName === t('tree.library')) rootName = 'DWG';
   const rootOpen = S.lfOpen['root'] !== false; // 默认展开
   const rootSel = S.treeSel === 'lfroot' ? ' on' : '';
   h += `<div class="node lv1${rootSel}" data-lfroot="1">
