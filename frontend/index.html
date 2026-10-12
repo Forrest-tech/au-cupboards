@@ -1193,7 +1193,6 @@ async function doExportPdfCombined(baseName, allData, fileHandle) {
     return;
   }
   toast(zh ? `正在生成合成 PDF（${allData.length}个建筑）…` : `Generating…`, 'info');
-  const origJob = S.job, origJobId = S.jobId, origSel = S.selBuildingId;
   let combinedDiv = null;
   try {
     if (!window.html2pdf) {
@@ -1204,50 +1203,35 @@ async function doExportPdfCombined(baseName, allData, fileHandle) {
         document.head.appendChild(s);
       });
     }
-    // 创建合成容器
+    // 【后台生成】不碰 S.job、不碰可见 DOM，直接用 jobData 生成 HTML
     combinedDiv = document.createElement('div');
     combinedDiv.style.cssText = 'font-family:sans-serif;background:#fff;color:#000;padding:20px;max-width:800px';
-    // 逐个建筑：切换 S.job，重渲染右栏（楼层×柜型详细视图），克隆内容
-    for (let i = 0; i < allData.length; i++) {
-      const { bp, jobData } = allData[i];
-      console.log(`[export] processing ${i+1}/${allData.length}: ${bp.name}`);
-      S.job = jobData; S.jobId = jobData.jobId; S.selBuildingId = bp.id;
-      S.pane = 'matrix';
-      renderTree();
-      if (typeof renderMatrix === 'function') {
-        renderMatrix();
-      }
-      // 等待右栏渲染完成（检查内容非空）
-      let retries = 0;
-      let rpane = null;
-      while (retries < 20) {
-        await new Promise(r => setTimeout(r, 500));
-        rpane = document.querySelector('#rpane');
-        // 检查右栏有内容（至少有楼层表格）
-        if (rpane && rpane.textContent.trim().length > 100) break;
-        retries++;
-      }
-      if (!rpane || rpane.textContent.trim().length <= 100) {
-        console.warn(`[export] building ${bp.name} render timeout, skipping`);
-        continue;
-      }
+    for (const { bp, jobData } of allData) {
+      const floors = jobData.floors || [];
+      const totalUnits = floors.reduce((a, f) => a + Number(f.unit_count || 0), 0);
       // 建筑标题
       const titleDiv = document.createElement('div');
-      titleDiv.innerHTML = `<h1 style="font-size:22px;margin:30px 0 15px;padding-bottom:10px;border-bottom:3px solid #333">${esc(bp.name || '')}</h1>`;
+      titleDiv.innerHTML = `<h1 style="font-size:22px;margin:30px 0 15px;padding-bottom:10px;border-bottom:3px solid #333">${esc(bp.name || '')}</h1>
+        <p style="color:#666;margin-bottom:15px">${floors.length} 楼层 / ${totalUnits} units</p>`;
       combinedDiv.appendChild(titleDiv);
-      // 克隆右栏内容
-      const clone = rpane.cloneNode(true);
-      clone.style.display = 'block';
-      clone.style.maxHeight = 'none';
-      clone.style.overflow = 'visible';
-      combinedDiv.appendChild(clone);
-      // 分隔
+      // 每层：units + 柜型（简化版，不含图片，避免跨域问题）
+      for (const f of floors) {
+        const n = Number(f.unit_count || 0);
+        const labels = (f.labels || []).slice(0, 20).join(', ');
+        const floorDiv = document.createElement('div');
+        floorDiv.style.cssText = 'margin-bottom:15px;padding:12px;border:1px solid #e0e0e0;border-radius:6px';
+        floorDiv.innerHTML = `
+          <div style="font-weight:700;font-size:15px;margin-bottom:6px">${esc(f.floor_code || '')} · ${n} Units</div>
+          ${labels ? `<div style="font-size:12px;color:#555;word-break:break-all">${esc(labels)}</div>` : '<div style="font-size:12px;color:#999">暂无单元数据</div>'}
+        `;
+        combinedDiv.appendChild(floorDiv);
+      }
       const hr = document.createElement('div');
       hr.style.cssText = 'height:2px;background:#ddd;margin:30px 0';
       combinedDiv.appendChild(hr);
     }
     document.body.appendChild(combinedDiv);
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r => setTimeout(r, 500));
     const opt = {
       margin: 10,
       filename: `${baseName}.pdf`,
@@ -1265,15 +1249,7 @@ async function doExportPdfCombined(baseName, allData, fileHandle) {
     toast((zh ? 'PDF 生成失败：' : 'PDF failed: ') + e.message, 'err');
   } finally {
     if (combinedDiv && combinedDiv.parentNode) combinedDiv.parentNode.removeChild(combinedDiv);
-    // 恢复原选中
-    S.job = origJob; S.jobId = origJobId; S.selBuildingId = origSel;
-    renderTree();
-    if (S.pane === 'matrix' && typeof renderMatrix === 'function') {
-      renderMatrix();
-    } else if (typeof showAllFloorsPanel === 'function') {
-      S.floorFilter = null;
-      showAllFloorsPanel();
-    }
+    // 不恢复 S.job——全程没动过
   }
 }
 
