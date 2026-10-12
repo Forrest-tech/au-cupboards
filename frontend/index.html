@@ -1671,7 +1671,6 @@ function renderTreeLibrary() {
     const uopen = !!S.lfOpen[ukey];
     const usel = S.treeSel === ukey;
     h += `<div class="node${usel ? ' on' : ''}" data-lu="${grp.n}">
-      <span class="tw">${twIcon(uopen)}</span>
       <span class="nm">${grp.n} ${t('lib.units')}</span>
       <span class="ct">${total}</span>
       ${S.treeEditMode ? `<span class="treedrop"><button class="ib" data-emenu="lu:${grp.n}" title="${LANGNOW==='zh'?'操作':'Actions'}">${ic('more')}</button></span>` : ''}</div>`;
