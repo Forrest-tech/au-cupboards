@@ -554,13 +554,71 @@ def export_combined_pdf(body: dict[str, Any]):
             weasy_err = str(we)
             print(f"[combined-pdf] weasyprint failed: {weasy_err}, fallback to reportlab")
         if not pdf_bytes or len(pdf_bytes) < 1000:
-            # reportlab 兜底：重新查数据生成简单表格
+            # reportlab 兜底：按 renderMatrix 格式生成（楼层×柜型）
             from reportlab.lib.pagesizes import A4
-            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage, KeepTogether
             from reportlab.lib.styles import getSampleStyleSheet
             from reportlab.lib import colors
+            from reportlab.lib.units import mm
+            # 获取柜型库（只认 DWG 实测，和前端 cupboardsForUnits 一致；无 DWG 时退回全部）
+            def _get_variants():
+                try:
+                    import sqlite3
+                    db_path = VAR_DIR / "aucup.db"
+                    conn = sqlite3.connect(str(db_path))
+                    cur = conn.cursor()
+                    cur.execute("""
+                        SELECT variant_code, positions_total, w, h, d, image_path, source
+                        FROM cupboard_variants WHERE source='dwg'
+                    """)
+                    rows = cur.fetchall()
+                    if not rows:
+                        cur.execute("""
+                            SELECT variant_code, positions_total, w, h, d, image_path, source
+                            FROM cupboard_variants
+                        """)
+                        rows = cur.fetchall()
+                    conn.close()
+                    return [
+                        {"code": r[0], "positions": r[1], "w": r[2], "h": r[3], "d": r[4],
+                         "image_path": r[5], "source": r[6]}
+                        for r in rows
+                    ]
+                except Exception as e:
+                    print(f"[combined-pdf] get variants failed: {e}")
+                    return []
+            all_variants = _get_variants()
+            def _cupboards_for_units(n):
+                want = int(n or 0)
+                matched = [v for v in all_variants if int(v.get("positions") or 0) == want]
+                matched.sort(key=lambda v: (float(v.get("w") or 0), float(v.get("h") or 0), str(v.get("code"))))
+                return matched
+            def _thumb_path(image_path):
+                if not image_path:
+                    return None
+                try:
+                    from pathlib import Path
+                    # image_path 可能是相对路径或绝对路径
+                    p = Path(str(image_path))
+                    if not p.is_absolute():
+                        # 尝试相对于 THUMB_DIR_PATH
+                        p = (THUMB_DIR_PATH / p.name).resolve()
+                    else:
+                        p = p.resolve()
+                    if p.is_file():
+                        return str(p)
+                    # 再试 THUMB_DIR_PATH 下按文件名找
+                    iname = Path(str(image_path)).name
+                    ipath = (THUMB_DIR_PATH / iname).resolve()
+                    if str(ipath).startswith(str(THUMB_DIR_PATH.resolve())) and ipath.is_file():
+                        return str(ipath)
+                except Exception:
+                    pass
+                return None
             buf = io.BytesIO()
-            doc = SimpleDocTemplate(buf, pagesize=A4)
+            doc = SimpleDocTemplate(buf, pagesize=A4,
+                                    leftMargin=15*mm, rightMargin=15*mm,
+                                    topMargin=15*mm, bottomMargin=15*mm)
             styles = getSampleStyleSheet()
             elems = []
             with Session(pl.engine) as s2:
@@ -581,47 +639,67 @@ def export_combined_pdf(body: dict[str, Any]):
                             for f in commercial["floors"]
                         ]
                     bname = names[idx] if idx < len(names) else f"Building {jid}"
-                    # 标题 + 统计
-                    elems.append(Paragraph(str(bname), styles["Heading1"]))
                     total = sum(int(f.get("unit_count", 0) or 0) for f in floors)
+                    # 建筑标题 + KPI
+                    elems.append(Paragraph(f"<b>{bname}</b>", styles["Heading1"]))
                     elems.append(Paragraph(f"{len(floors)} floors / {total} units", styles["Normal"]))
-                    elems.append(Spacer(1, 12))
-                    # 每层：楼层 | 户数 | 单元号
-                    data = [["Floor", "Units", "Unit Numbers"]]
+                    elems.append(Spacer(1, 8))
+                    # 每层
                     for f in floors:
                         fc = str(f.get("floor_code", ""))
-                        uc = str(int(f.get("unit_count", 0) or 0))
-                        labels = ", ".join(str(x) for x in (f.get("labels") or []))
-                        # 长标签换行
-                        if len(labels) > 80:
-                            labels = labels[:77] + "..."
-                        data.append([fc, uc, labels])
-                    # 列宽：Floor 60, Units 50, Labels 剩余
-                    col_widths = [60, 50, 400]
-                    t = Table(data, colWidths=col_widths, repeatRows=1)
-                    t.setStyle(TableStyle([
-                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eeeeee")),
-                        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#999999")),
-                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                        ("FONTSIZE", (0, 0), (-1, -1), 9),
-                    ]))
-                    elems.append(t)
-                    elems.append(Spacer(1, 12))
-                    # 柜型信息
-                    by_variant = ms.get("by_variant", {}) or {}
-                    if by_variant:
-                        elems.append(Paragraph("Matched Cupboards:", styles["Heading3"]))
-                        cup_data = [["Cupboard Type", "Count"]]
-                        for code, cnt in by_variant.items():
-                            cup_data.append([str(code), str(cnt)])
-                        ct = Table(cup_data, colWidths=[200, 80])
-                        ct.setStyle(TableStyle([
-                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f0f0f0")),
-                            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#999999")),
-                            ("FONTSIZE", (0, 0), (-1, -1), 9),
-                        ]))
-                        elems.append(ct)
-                    elems.append(Spacer(1, 24))
+                        uc = int(f.get("unit_count", 0) or 0)
+                        labels = [str(x) for x in (f.get("labels") or [])]
+                        matched = _cupboards_for_units(uc)
+                        # 楼层标题：L2 · 21 Units → 柜型库中 X 种
+                        elems.append(Paragraph(
+                            f"<b>{fc}</b> &middot; {uc} Units &rarr; {len(matched)} types",
+                            styles["Heading2"]))
+                        # 单元号
+                        if labels:
+                            # 每行8个，避免太长
+                            label_lines = []
+                            for i in range(0, len(labels), 8):
+                                label_lines.append(", ".join(labels[i:i+8]))
+                            elems.append(Paragraph("<br/>".join(label_lines), styles["Normal"]))
+                            elems.append(Spacer(1, 4))
+                        # 柜型缩略图 + 尺寸
+                        if matched:
+                            # 每行3个柜型
+                            for i in range(0, len(matched), 3):
+                                row_vars = matched[i:i+3]
+                                img_cells = []
+                                cap_cells = []
+                                for v in row_vars:
+                                    code = str(v.get("code", ""))
+                                    w = v.get("w"); h = v.get("h"); d = v.get("d")
+                                    dim = f"{w}x{h}x{d}mm" if w and h else ""
+                                    tpath = _thumb_path(v.get("image_path"))
+                                    if tpath:
+                                        try:
+                                            img = RLImage(tpath, width=40*mm, height=40*mm)
+                                            img_cells.append(img)
+                                        except Exception:
+                                            img_cells.append(Paragraph(f"[{code}]", styles["Normal"]))
+                                    else:
+                                        img_cells.append(Paragraph(f"[{code}]", styles["Normal"]))
+                                    cap_cells.append(Paragraph(f"<b>{code}</b><br/>{dim}", styles["Normal"]))
+                                # 图片行
+                                t_img = Table([img_cells], colWidths=[55*mm]*len(img_cells))
+                                t_img.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+                                                           ("ALIGN", (0,0), (-1,-1), "CENTER")]))
+                                elems.append(t_img)
+                                # 说明行
+                                t_cap = Table([cap_cells], colWidths=[55*mm]*len(cap_cells))
+                                t_cap.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "TOP"),
+                                                           ("ALIGN", (0,0), (-1,-1), "CENTER"),
+                                                           ("FONTSIZE", (0,0), (-1,-1), 8)]))
+                                elems.append(t_cap)
+                                elems.append(Spacer(1, 6))
+                        elems.append(Spacer(1, 8))
+                    # 建筑之间分页
+                    if idx < len(job_ids) - 1:
+                        from reportlab.platypus import PageBreak
+                        elems.append(PageBreak())
             if not elems:
                 raise HTTPException(400, "没有找到有效的建筑数据")
             doc.build(elems)
