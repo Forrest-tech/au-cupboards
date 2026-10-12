@@ -1683,8 +1683,12 @@ function renderTreeLibrary() {
     return;
   }
 
-  // 根节点：文件名（用户要求）
-  let rootName = files.length === 1 ? files[0].name : t('tree.library');
+  // 根节点：文件名（用户要求）。优先用用户自定义的重命名（localStorage）
+  let rootName = null;
+  try { rootName = localStorage.getItem('cupboardRootName'); } catch (e) {}
+  if (!rootName) {
+    rootName = files.length === 1 ? files[0].name : t('tree.library');
+  }
   // 无名图纸沿用 'DWG' 显示（与后端 rename-source 的 old_name 匹配规则一致）
   if (!rootName || !rootName.trim() || rootName === t('tree.library')) rootName = 'DWG';
   const rootOpen = S.lfOpen['root'] !== false; // 默认展开
@@ -1984,13 +1988,14 @@ function bindTreeRename() {
         btn(zh ? '重命名图纸' : 'Rename drawing', 'pencil', false, async () => {
           const name = prompt(zh ? `重命名图纸「${fname}」：` : `Rename drawing "${fname}":`, fname);
           if (name === null || !name.trim() || name.trim() === fname) return;
+          // 存 localStorage，前端直接显示（最稳，不依赖后端字段）
+          try { localStorage.setItem('cupboardRootName', name.trim()); } catch (e) {}
+          // 同时尝试更新后端（失败也不影响显示）
           try {
-            const r = await api('/variants/rename-source', { method: 'POST', body: { old_name: fname, new_name: name.trim() } });
-            toast(zh ? `图纸已重命名为「${name.trim()}」，刷新中…` : `Drawing renamed to "${name.trim()}", reloading…`, 'ok');
-            setTimeout(() => location.reload(), 600);
-          } catch (e) {
-            toast(zh ? '重命名失败' : 'Rename failed', 'err');
-          }
+            await api('/variants/rename-source', { method: 'POST', body: { old_name: fname, new_name: name.trim() } });
+          } catch (e) {}
+          toast(zh ? `图纸已重命名为「${name.trim()}」` : `Drawing renamed to "${name.trim()}"`, 'ok');
+          renderTree();
         });
         btn(zh ? '删除图纸' : 'Delete drawing', 'trash', true, async () => {
           if (!confirm(zh ? `删除图纸「${fname}」下的全部柜型？` : `Delete all variants from "${fname}"?`)) return;
