@@ -4283,6 +4283,8 @@ function gotoView(v) {
       }
     } else {
       $('#mfn').textContent = t('mid.none');
+      // 无数据时清掉中栏残留（比如从柜型库切过来时的柜型图）
+      $('#viewer').innerHTML = `<div class="ph"><div class="big">${ic('file-text')}</div><div>${t('mid.ph')}</div></div>`;
     }
     // renderHub/resetViewer 会把提示清掉，切回工作台要重新挂上
     // #bhelp 已在 c4a3a63 被去掉，这里只留空检查，避免 gotoView('work') 中断
