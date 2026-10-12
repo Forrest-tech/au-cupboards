@@ -1104,8 +1104,12 @@ def rename_variant(variant_id: int, body: VariantRenameIn) -> dict[str, Any]:
 
 
 @app.delete("/api/variants/{variant_id}")
-def delete_variant(variant_id: int) -> dict[str, Any]:
-    """需求 2：删除柜型（CRUD 的 Delete）。"""
+def delete_variant(variant_id: int, force: bool = False) -> dict[str, Any]:
+    """需求 2：删除柜型（CRUD 的 Delete）。
+    
+    force=true 时：先删除该变体的所有选用关系（Selection），再删变体。
+    用于 DWG 整图删除场景，用户明确要清掉整图数据。
+    """
     pl = _pipeline()
     with Session(pl.engine) as s:
         v = s.get(CupboardVariant, variant_id)
@@ -1114,8 +1118,10 @@ def delete_variant(variant_id: int) -> dict[str, Any]:
         used = s.scalar(
             select(Selection).where(Selection.variant_id == variant_id).limit(1)
         )
-        if used:
+        if used and not force:
             raise HTTPException(409, "该变体已被单元选用，请先改派后再删除")
+        if used and force:
+            s.execute(delete(Selection).where(Selection.variant_id == variant_id))
         s.delete(v)
         s.commit()
         return {"deleted": variant_id}

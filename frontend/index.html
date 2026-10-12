@@ -1961,8 +1961,8 @@ function bindTreeRename() {
             return vf === fname;
           });
           if (!vs.length) { toast(zh ? '没有找到该图纸的柜型' : 'No variants found', 'err'); return; }
-          if (!confirm(zh ? `删除图纸「${fname}」下的全部 ${vs.length} 个柜型？` : `Delete all ${vs.length} variants from "${fname}"?`)) return;
-          delVariants(vs);
+          if (!confirm(zh ? `删除图纸「${fname}」下的全部 ${vs.length} 个柜型？（含被单元选用的）` : `Delete all ${vs.length} variants from "${fname}" (including selected)?`)) return;
+          delVariants(vs, true);
         });
       }
       // 移动功能：演示版暂留空
@@ -2008,11 +2008,13 @@ async function renameVariants(vs, name) {
   await loadVariants(); renderTree(); refreshOpenGroups();
 }
 
-/** 批量删除。同样串行，失败项如实报数。 */
-async function delVariants(vs) {
+/** 批量删除。同样串行，失败项如实报数。
+ * @param force 为 true 时后端会先清掉选用关系再删（DWG 整图删除用） */
+async function delVariants(vs, force = false) {
   let ok = 0, bad = 0;
+  const q = force ? '?force=true' : '';
   for (const v of vs) {
-    try { await api(`/variants/${v.id}`, { method: 'DELETE' }); ok++; }
+    try { await api(`/variants/${v.id}${q}`, { method: 'DELETE' }); ok++; }
     catch (e) { bad++; }
   }
   toast((LANGNOW === 'zh' ? `已删除 ${ok} 个柜型` : `Deleted ${ok} variants`)
