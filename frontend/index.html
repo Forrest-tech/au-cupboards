@@ -2441,7 +2441,7 @@ function bindTree() {
       renderTree();
     };
   }
-  $$('#tree .node').forEach(n => n.onclick = ev => {
+  $$('#tree .node').forEach(n => n.onclick = async ev => {
     // 点箭头只折叠/展开，不触发选中
     const tw = ev.target.closest('.tw');
     if (tw && tw.dataset.fold) {
@@ -2459,7 +2459,6 @@ function bindTree() {
       // 【修复】单点同步三栏：左树高亮 + 中间 PDF + 右边数据，原子更新避免竞态
       if (n.dataset.b) {
         S.selBuildingId = +n.dataset.b;
-        console.log('[tree-click] data-b=', n.dataset.b, 'selBuildingId=', S.selBuildingId);
       }
       if (S.view === 'building') {
         S.treeSel = 'floors';
@@ -2468,14 +2467,28 @@ function bindTree() {
         S.floorSel = code;
         // 同步切换 building 的所有状态（不用异步 loadJob，直接用缓存）
         const bp = S.projects.find(pp => pp.id == S.selBuildingId);
-        console.log('[tree-click] found bp:', bp?.id, 'hasJobData:', !!bp?.jobData, 'jobId:', bp?.jobData?.jobId);
-        if (bp?.jobData) {
-          S.job = bp.jobData;
-          S.jobId = bp.jobData.jobId;
-          console.log('[tree-click] S.job set to jobId=', S.jobId);
+        // 【修复】若 jobData 还没预加载完，现场取（避免竞态导致右栏不更新）
+        let jobData = bp?.jobData;
+        if (!jobData && bp) {
+          const drawings = bp.drawings || [];
+          const latestDrawing = drawings[drawings.length - 1];
+          const jobId = latestDrawing?.latest_job_id;
+          if (jobId) {
+            try {
+              const j = await api(`/jobs/${jobId}`);
+              jobData = { ...j, jobId };
+              bp.jobData = jobData;  // 回填缓存
+            } catch (e) {
+              console.error('[tree-click] fetch jobData failed:', e);
+            }
+          }
+        }
+        if (jobData) {
+          S.job = jobData;
+          S.jobId = jobData.jobId;
           // 中间 PDF 跟随
-          const pages = bp.jobData.pages?.length ? bp.jobData.pages
-            : Array.from({ length: bp.jobData.page_count || 1 }, (_, i) => ({ title: 'p' + (i + 1) }));
+          const pages = jobData.pages?.length ? jobData.pages
+            : Array.from({ length: jobData.page_count || 1 }, (_, i) => ({ title: 'p' + (i + 1) }));
           showPdf(S.jobId, pages);
         }
         renderTree();
