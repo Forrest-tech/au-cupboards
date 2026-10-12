@@ -1124,15 +1124,11 @@ async function doExportConfirm() {
   if (buildingIds.length <= 1) {
     await doExport(fmt, picked, customName);
   } else if (fmt === 'pdf') {
-    // 多选合成PDF：全屏遮罩下逐个建筑用单文件逻辑生成（已验证可靠），pdf-lib 合并
+    // 多选合成PDF：逐个建筑用单文件逻辑生成（已验证可靠），pdf-lib 合并
+    // 用户要求去掉全屏遮罩，只用右下角 toast 提示进度
     const zh = LANGNOW === 'zh';
     const savedJob = S.job, savedJobId = S.jobId, savedBuilding = S.selBuildingId;
     const savedPane = S.pane, savedFloorFilter = S.floorFilter, savedFloorSel = S.floorSel;
-    // 全屏遮罩盖住切换闪烁
-    const mask = document.createElement('div');
-    mask.style.cssText = 'position:fixed;inset:0;background:rgba(255,255,255,0.95);z-index:99999;display:flex;align-items:center;justify-content:center;font-size:16px;color:#333;';
-    mask.textContent = zh ? '正在生成合成PDF…' : 'Generating...';
-    document.body.appendChild(mask);
     try {
       if (!window.html2pdf) {
         await new Promise((resolve, reject) => {
@@ -1169,7 +1165,7 @@ async function doExportConfirm() {
           }
         }
         if (!jobData) continue;
-        mask.textContent = zh ? `正在生成 ${i+1}/${buildingIds.length}: ${bp.name}…` : `Generating ${i+1}/${buildingIds.length}...`;
+        toast(zh ? `正在生成 ${i+1}/${buildingIds.length}: ${bp.name}…` : `Generating ${i+1}/${buildingIds.length}...`, 'info');
         // 用和单文件导出完全相同的逻辑渲染到可见 #rpane（被遮罩盖住）
         window._matrixTarget = null;
         S.job = jobData; S.jobId = jobData.jobId; S.selBuildingId = bid;
@@ -1206,7 +1202,6 @@ async function doExportConfirm() {
       toast((zh ? '合成PDF失败：' : 'Failed: ') + e.message, 'err');
     } finally {
       // 恢复状态
-      document.body.removeChild(mask);
       S.job = savedJob; S.jobId = savedJobId; S.selBuildingId = savedBuilding;
       S.pane = savedPane; S.floorFilter = savedFloorFilter; S.floorSel = savedFloorSel;
       // 恢复原来显示的内容：右栏 + 中栏 PDF
