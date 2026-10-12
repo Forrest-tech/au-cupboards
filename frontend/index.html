@@ -2515,12 +2515,14 @@ function bindTree() {
         if (jobData2) {
           S.job = jobData2;
           S.jobId = jobData2.jobId;
-          // 【修复】工作台中栏 PDF 也要跟随更新
-          const pages2 = jobData2.pages?.length ? jobData2.pages
-            : Array.from({ length: jobData2.page_count || 1 }, (_, i) => ({ title: 'p' + (i + 1) }));
-          if (typeof showPdf === 'function') showPdf(S.jobId, pages2);
         }
         filterFloor(n.dataset.floor);
+        // 【修复】工作台中栏 PDF 跟随更新（放 filterFloor 之后，避免被 renderDetail 覆盖）
+        if (jobData2 && typeof showPdf === 'function') {
+          const pages2 = jobData2.pages?.length ? jobData2.pages
+            : Array.from({ length: jobData2.page_count || 1 }, (_, i) => ({ title: 'p' + (i + 1) }));
+          showPdf(S.jobId, pages2);
+        }
       }
     }
     else if (n.dataset.b) {
