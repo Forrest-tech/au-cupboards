@@ -1193,42 +1193,43 @@ async function doExportPdfCombined(baseName, allData, fileHandle) {
     return;
   }
   toast(zh ? `正在生成合成 PDF（${allData.length}个建筑）…` : `Generating…`, 'info');
-  let tmp = null;
   try {
-    // 单独加载 jsPDF UMD
-    if (!window.jspdf?.jsPDF) {
+    if (!window.html2pdf) {
       await new Promise((resolve, reject) => {
         const s = document.createElement('script');
-        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
         s.onload = resolve; s.onerror = reject;
         document.head.appendChild(s);
       });
     }
-    // 用 jsPDF 直接写文本，不依赖 html2canvas 截图（更可靠）
-    const { jsPDF } = window.jspdf || {};
-    if (!jsPDF) throw new Error('jsPDF not loaded');
-    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-    let y = 20;
+    // 构建简单的 HTML 表格
+    let html = '<div style="font-family:sans-serif;padding:20px;background:#fff;color:#000">';
     for (const { bp, jobData } of allData) {
       const floors = jobData.floors || [];
-      const totalUnits = floors.reduce((a, f) => a + Number(f.unit_count || 0), 0);
-      if (y > 250) { doc.addPage(); y = 20; }
-      doc.setFontSize(16);
-      doc.text(String(bp.name || 'Building').slice(0, 60), 15, y);
-      y += 8;
-      doc.setFontSize(11);
-      doc.text(`${floors.length} floors, ${totalUnits} units`, 15, y);
-      y += 8;
+      html += `<h2 style="margin:20px 0 10px">${esc(bp.name || '')}</h2>`;
+      html += `<p>${floors.length} floors</p>`;
+      html += '<table border="1" cellpadding="8" style="border-collapse:collapse;width:100%;margin-bottom:20px">';
+      html += '<tr><th>Floor</th><th>Units</th></tr>';
       for (const f of floors) {
-        if (y > 270) { doc.addPage(); y = 20; }
-        const n = Number(f.unit_count || 0);
-        doc.setFontSize(10);
-        doc.text(`${String(f.floor_code || '')}: ${n} units`, 20, y);
-        y += 6;
+        html += `<tr><td>${esc(String(f.floor_code || ''))}</td><td>${Number(f.unit_count || 0)}</td></tr>`;
       }
-      y += 10;
+      html += '</table>';
     }
-    const pdfBlob = doc.output('blob');
+    html += '</div>';
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    document.body.appendChild(tmp);
+    await new Promise(r => setTimeout(r, 500));
+    const opt = {
+      margin: 10,
+      filename: `${baseName}.pdf`,
+      image: { type: 'jpeg', quality: 0.95 },
+      html2canvas: { scale: 1 },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+    };
+    const pdfBlob = await window.html2pdf().set(opt).from(tmp).outputPdf('blob');
+    if (tmp.parentNode) tmp.parentNode.removeChild(tmp);
+    if (!pdfBlob || pdfBlob.size < 1000) throw new Error('PDF 为空，生成失败');
     saveExportBlob(pdfBlob, `${baseName}.pdf`, fileHandle);
     toast(zh ? '导出成功' : 'Export done', 'ok');
   } catch (e) {
