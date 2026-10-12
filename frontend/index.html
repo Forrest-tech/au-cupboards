@@ -1108,7 +1108,7 @@ function showExportModal() {
 }
 
 /** 读取对话框选择并执行导出 */
-function doExportConfirm() {
+async function doExportConfirm() {
   const fmt = document.querySelector('#expFmt')?.value || 'pdf';
   // 用户输入的文件名（不含扩展名）—— 用户要求可自定义
   const customName = (document.querySelector('#expName')?.value || '').trim();
@@ -1121,9 +1121,9 @@ function doExportConfirm() {
   closeModal();
   // 单选：走原逻辑；多选：逐个导出
   if (buildingIds.length <= 1) {
-    doExport(fmt, picked, customName);
+    await doExport(fmt, picked, customName);
   } else {
-    doExportMultiple(fmt, picked, customName, buildingIds);
+    await doExportMultiple(fmt, picked, customName, buildingIds);
   }
 }
 
@@ -1209,7 +1209,7 @@ async function saveExportBlob(blob, filename, fileHandle) {
   toast(zh ? `已导出 ${filename}` : `Exported ${filename}`, 'ok');
 }
 
-function doExport(fmt, fileHandle, customName) {
+async function doExport(fmt, fileHandle, customName) {
   const rows = buildExportData();
   // 用户自定义文件名优先，否则用项目名 —— 用户要求
   const jname = (customName || S.job?.name || 'export').replace(/[^\w\-\u4e00-\u9fa5]+/g, '_');
@@ -1218,7 +1218,7 @@ function doExport(fmt, fileHandle, customName) {
 
   // PDF / DOCX / XLSX / JPG：走后端直接生成
   if (['pdf', 'docx', 'xlsx', 'jpg'].includes(fmt)) {
-    doExportViaBackend(fmt, jname, fileHandle);
+    await doExportViaBackend(fmt, jname, fileHandle);
     return;
   }
 
@@ -1301,7 +1301,7 @@ async function doExportViaBackend(fmt, jname, fileHandle) {
     saveExportBlob(blob, `${jname}.${fmt}`, fileHandle);
   } catch (e) {
     toast((zh ? '后端导出失败，已降级为 HTML：' : 'Backend export failed, fell back to HTML: ') + e.message, 'err');
-    doExport('html', fileHandle, jname);
+    await doExport('html', fileHandle, jname);
   }
 }
 
