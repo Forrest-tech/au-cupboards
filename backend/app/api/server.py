@@ -536,16 +536,68 @@ def export_combined_pdf(body: dict[str, Any]):
                 html_parts.append('</tbody></table>')
         if not html_parts:
             raise HTTPException(400, "没有找到有效的建筑数据")
-        full_html = f"""<html><head><meta charset="utf-8"><style>
-          body {{ font-family: sans-serif; font-size: 12px; }}
-          table {{ border-collapse: collapse; width: 100%; margin: 10px 0; }}
-          th, td {{ border: 1px solid #999; padding: 6px; text-align: left; }}
-          th {{ background: #eee; }}
-        </style></head><body>{''.join(html_parts)}</body></html>"""
-        from weasyprint import HTML
-        buf = io.BytesIO()
-        HTML(string=full_html).write_pdf(buf)
-        pdf_bytes = buf.getvalue()
+        # 优先 WeasyPrint，失败则用 reportlab 兜底（用户 Mac 可能没装 weasyprint）
+        pdf_bytes = None
+        weasy_err = None
+        try:
+            from weasyprint import HTML
+            full_html = f"""<html><head><meta charset="utf-8"><style>
+              body {{ font-family: sans-serif; font-size: 12px; }}
+              table {{ border-collapse: collapse; width: 100%; margin: 10px 0; }}
+              th, td {{ border: 1px solid #999; padding: 6px; text-align: left; }}
+              th {{ background: #eee; }}
+            </style></head><body>{''.join(html_parts)}</body></html>"""
+            buf = io.BytesIO()
+            HTML(string=full_html).write_pdf(buf)
+            pdf_bytes = buf.getvalue()
+        except Exception as we:
+            weasy_err = str(we)
+            print(f"[combined-pdf] weasyprint failed: {weasy_err}, fallback to reportlab")
+        if not pdf_bytes or len(pdf_bytes) < 1000:
+            # reportlab 兜底：重新查数据生成简单表格
+            from reportlab.lib.pagesizes import A4
+            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+            from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.lib import colors
+            buf = io.BytesIO()
+            doc = SimpleDocTemplate(buf, pagesize=A4)
+            styles = getSampleStyleSheet()
+            elems = []
+            with Session(pl.engine) as s2:
+                for idx, jid in enumerate(job_ids):
+                    try:
+                        j = s2.get(ParseJob, int(jid))
+                    except Exception:
+                        continue
+                    if not j:
+                        continue
+                    ms = j.multi_signals or {}
+                    floors = ms.get("floor_summary", []) or []
+                    commercial = ms.get("commercial")
+                    if not floors and commercial and commercial.get("floors"):
+                        floors = [
+                            {"floor_code": f.get("floor_code"), "unit_count": f.get("space_count", 0)}
+                            for f in commercial["floors"]
+                        ]
+                    bname = names[idx] if idx < len(names) else f"Building {jid}"
+                    elems.append(Paragraph(str(bname), styles["Heading1"]))
+                    total = sum(int(f.get("unit_count", 0) or 0) for f in floors)
+                    elems.append(Paragraph(f"{len(floors)} floors / {total} units", styles["Normal"]))
+                    elems.append(Spacer(1, 12))
+                    data = [["Floor", "Units"]]
+                    for f in floors:
+                        data.append([str(f.get("floor_code", "")), str(int(f.get("unit_count", 0) or 0))])
+                    t = Table(data)
+                    t.setStyle(TableStyle([
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eeeeee")),
+                        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#999999")),
+                    ]))
+                    elems.append(t)
+                    elems.append(Spacer(1, 24))
+            if not elems:
+                raise HTTPException(400, "没有找到有效的建筑数据")
+            doc.build(elems)
+            pdf_bytes = buf.getvalue()
         if len(pdf_bytes) < 1000:
             raise Exception("生成的PDF为空")
         return Response(pdf_bytes, media_type="application/pdf",
