@@ -1150,16 +1150,28 @@ async function doExportMultiple(fmt, fileHandle, customName, buildingIds) {
       }
       if (!jobData) continue;
       S.job = jobData; S.jobId = jobData.jobId; S.selBuildingId = bid;
+      // 【修复】重渲染右栏，确保 html2pdf 抓到的是当前 building 的 DOM
+      renderTree();
+      if (typeof showAllFloorsPanel === 'function') {
+        S.floorFilter = null;
+        showAllFloorsPanel();
+      }
+      // 等 DOM 更新完成
+      await new Promise(r => setTimeout(r, 300));
       const suffix = '_' + (bp.name || ('b' + bid)).replace(/[\\/:*?"<>|]/g, '_').slice(0, 30);
       const name = (customName || 'cupboards') + suffix;
       await doExport(fmt, fileHandle, name);
       // 每个文件导出后稍等，避免浏览器拦截多文件下载
-      await new Promise(r => setTimeout(r, 500));
+      await new Promise(r => setTimeout(r, 800));
     }
   } finally {
     // 恢复原选中
     S.job = origJob; S.jobId = origJobId; S.selBuildingId = origSel;
     renderTree();
+    if (typeof showAllFloorsPanel === 'function') {
+      S.floorFilter = null;
+      showAllFloorsPanel();
+    }
   }
 }
 
