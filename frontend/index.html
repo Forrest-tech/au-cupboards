@@ -3870,8 +3870,18 @@ function showPdf(jobId, pages) {
   $('#bprev').style.display = '';
   $('#bnext').style.display = '';
   $('#bpage').style.display = '';
-  renderPages(pages);
-  bindScrollNav();
+  // 修复：切换建筑时 viewer 宽度可能未稳定（如 69px），导致页面渲染成 33×47px。
+  // 延迟到浏览器完成布局后再渲染，确保 clientWidth 正确。
+  requestAnimationFrame(() => {
+    // 二次确认宽度有效，无效则再等一帧
+    const vw = $('#viewer')?.clientWidth || 0;
+    if (vw < 200) {
+      requestAnimationFrame(() => { renderPages(pages); bindScrollNav(); });
+    } else {
+      renderPages(pages);
+      bindScrollNav();
+    }
+  });
 }
 
 /** 单页图片 URL —— 走服务端渲染，不加载整份 PDF */
