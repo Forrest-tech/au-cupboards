@@ -1193,6 +1193,8 @@ async function doExportPdfCombined(baseName, allData, fileHandle) {
     return;
   }
   toast(zh ? `正在生成合成 PDF（${allData.length}个建筑）…` : `Generating…`, 'info');
+  const origJob = S.job, origJobId = S.jobId, origSel = S.selBuildingId;
+  let combinedDiv = null;
   try {
     if (!window.html2pdf) {
       await new Promise((resolve, reject) => {
@@ -1202,39 +1204,61 @@ async function doExportPdfCombined(baseName, allData, fileHandle) {
         document.head.appendChild(s);
       });
     }
-    // 构建简单的 HTML 表格
-    let html = '<div style="font-family:sans-serif;padding:20px;background:#fff;color:#000">';
+    // 创建合成容器
+    combinedDiv = document.createElement('div');
+    combinedDiv.style.cssText = 'font-family:sans-serif;background:#fff;color:#000;padding:20px;max-width:800px';
+    // 逐个建筑：切换 S.job，重渲染右栏，克隆内容
     for (const { bp, jobData } of allData) {
-      const floors = jobData.floors || [];
-      html += `<h2 style="margin:20px 0 10px">${esc(bp.name || '')}</h2>`;
-      html += `<p>${floors.length} floors</p>`;
-      html += '<table border="1" cellpadding="8" style="border-collapse:collapse;width:100%;margin-bottom:20px">';
-      html += '<tr><th>Floor</th><th>Units</th></tr>';
-      for (const f of floors) {
-        html += `<tr><td>${esc(String(f.floor_code || ''))}</td><td>${Number(f.unit_count || 0)}</td></tr>`;
+      S.job = jobData; S.jobId = jobData.jobId; S.selBuildingId = bp.id;
+      renderTree();
+      if (typeof showAllFloorsPanel === 'function') {
+        S.floorFilter = null;
+        showAllFloorsPanel();
       }
-      html += '</table>';
+      await new Promise(r => setTimeout(r, 600));
+      const rpane = document.querySelector('#rpane');
+      if (!rpane) continue;
+      // 建筑标题
+      const titleDiv = document.createElement('div');
+      titleDiv.innerHTML = `<h1 style="font-size:22px;margin:30px 0 15px;padding-bottom:10px;border-bottom:3px solid #333">${esc(bp.name || '')}</h1>`;
+      combinedDiv.appendChild(titleDiv);
+      // 克隆右栏内容
+      const clone = rpane.cloneNode(true);
+      clone.style.display = 'block';
+      clone.style.maxHeight = 'none';
+      clone.style.overflow = 'visible';
+      combinedDiv.appendChild(clone);
+      // 分隔
+      const hr = document.createElement('div');
+      hr.style.cssText = 'height:2px;background:#ddd;margin:30px 0';
+      combinedDiv.appendChild(hr);
     }
-    html += '</div>';
-    const tmp = document.createElement('div');
-    tmp.innerHTML = html;
-    document.body.appendChild(tmp);
-    await new Promise(r => setTimeout(r, 500));
+    document.body.appendChild(combinedDiv);
+    await new Promise(r => setTimeout(r, 800));
     const opt = {
       margin: 10,
       filename: `${baseName}.pdf`,
-      image: { type: 'jpeg', quality: 0.95 },
-      html2canvas: { scale: 1 },
+      image: { type: 'jpeg', quality: 0.9 },
+      html2canvas: { scale: 1.5, useCORS: true },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      pagebreak: { mode: ['css', 'legacy'] },
     };
-    const pdfBlob = await window.html2pdf().set(opt).from(tmp).outputPdf('blob');
-    if (tmp.parentNode) tmp.parentNode.removeChild(tmp);
-    if (!pdfBlob || pdfBlob.size < 1000) throw new Error('PDF 为空，生成失败');
+    const pdfBlob = await window.html2pdf().set(opt).from(combinedDiv).outputPdf('blob');
+    if (!pdfBlob || pdfBlob.size < 5000) throw new Error('PDF 生成失败（内容为空）');
     saveExportBlob(pdfBlob, `${baseName}.pdf`, fileHandle);
     toast(zh ? '导出成功' : 'Export done', 'ok');
   } catch (e) {
     console.error('[export] combined pdf failed:', e);
     toast((zh ? 'PDF 生成失败：' : 'PDF failed: ') + e.message, 'err');
+  } finally {
+    if (combinedDiv && combinedDiv.parentNode) combinedDiv.parentNode.removeChild(combinedDiv);
+    // 恢复原选中
+    S.job = origJob; S.jobId = origJobId; S.selBuildingId = origSel;
+    renderTree();
+    if (typeof showAllFloorsPanel === 'function') {
+      S.floorFilter = null;
+      showAllFloorsPanel();
+    }
   }
 }
 
