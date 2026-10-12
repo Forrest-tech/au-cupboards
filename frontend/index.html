@@ -1985,9 +1985,8 @@ function bindTreeRename() {
           if (name === null || !name.trim() || name.trim() === fname) return;
           try {
             const r = await api('/variants/rename-source', { method: 'POST', body: { old_name: fname, new_name: name.trim() } });
-            toast(zh ? `已重命名 ${r.renamed} 个柜型的图纸` : `Renamed ${r.renamed} variants`, 'ok');
-            await loadVariants();
-            renderTree();
+            toast(zh ? `已重命名 ${r.renamed} 个柜型，刷新中…` : `Renamed ${r.renamed} variants, reloading…`, 'ok');
+            setTimeout(() => location.reload(), 600);
           } catch (e) {
             toast(zh ? '重命名失败' : 'Rename failed', 'err');
           }
