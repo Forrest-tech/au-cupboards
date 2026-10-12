@@ -38,6 +38,7 @@ class UnitLabelRule:
     #   leading_digit  编号首位数字 == 楼层号（L1 的 101/110）
     #   letter_ground  编号形如 G0X，仅 GROUND 层（floor_no == 0）
     #   any_floor      不做楼层隔离（CLA 等）
+    #   dotted         点分隔式 N.NN，点前是楼层号（如 4.01 的 4）
     floor_prefix_mode: str = "leading_digit"
     # 编号体系标识，写入 Unit.label_scheme
     label_scheme: str = "floor_coded"
@@ -64,6 +65,10 @@ class UnitLabelRule:
             return True
         if self.floor_prefix_mode == "letter_ground":
             return floor_no == 0
+        if self.floor_prefix_mode == "dotted":
+            # 4.01 -> 楼层 4
+            m = re.match(r"([1-9])\.", token)
+            return m and int(m.group(1)) == floor_no
         # leading_digit
         return token[:1] == str(floor_no)
 
@@ -83,6 +88,10 @@ class UnitLabelRule:
             return int(m.group(1)) if m else None
         if self.floor_prefix_mode == "any_floor":
             m = re.search(r"(\d+)$", token)
+            return int(m.group(1)) if m else None
+        if self.floor_prefix_mode == "dotted":
+            # 4.01 -> 1
+            m = re.fullmatch(r"[1-9]\.(\d+)", token)
             return int(m.group(1)) if m else None
         # leading_digit：首位是楼层号，其余是层内序号
         m = re.fullmatch(r"[1-9](\d{1,2})", token)

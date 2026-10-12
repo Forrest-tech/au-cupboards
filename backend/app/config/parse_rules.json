@@ -52,6 +52,22 @@
       "floor_prefix_mode": "any_floor",
       "label_scheme": "communal",
       "communal_pattern": "\\b(CLA\\d*)\\b"
+    },
+    {
+      "rule_id": "UR-004-dotted",
+      "description": "点分隔式单元号（4.01/3.10/...）。楼层.序号通用格式，见 _Arch_Set 警察局项目。点前的数字是楼层，点后是层内序号。",
+      "code_pattern": "\\b([1-9])\\.(\\d{2})\\b",
+      "area_pattern": "^([\\d]+\\.?[\\d]*)$|^m2$|^m²$",
+      "applies_to": [
+        "floor_plan"
+      ],
+      "pair_window": 8,
+      "seq_min": 1,
+      "seq_max": 30,
+      "floor_prefix_mode": "dotted",
+      "label_scheme": "dotted",
+      "noise_labels": [],
+      "_noise_reason": ""
     }
   ],
   "unit_schedule_rules": [

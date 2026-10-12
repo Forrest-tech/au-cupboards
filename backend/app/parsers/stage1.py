@@ -177,7 +177,14 @@ def floor_code(no: int | None) -> str:
 
 # 页面身份标识（实测 74KEELER ST 全部图纸）
 _LEVEL_PLAN_RE = re.compile(
-    r"\bLEVEL\s*\d\s*PLAN\b|\bGROUND\s+FLOOR\s*PLAN\b|\bGROUND\s+PLAN\b",
+    # 通用楼层标题识别（不硬编码特定建筑师的格式）：
+    # - LEVEL n PLAN / LEVEL nn PLAN（支持多位数，如 Level 01）
+    # - LEVEL n（无 PLAN 后缀，如 "GAP Level 01 - CP1"），但排除 PLANTER/ROOF 等非楼层
+    # - GROUND FLOOR PLAN / GROUND PLAN
+    # - 单独的 GROUND（配合单元编号二次确认）
+    r"\bLEVEL\s*\d{1,2}\s*PLAN\b"
+    r"|\bLEVEL\s*\d{1,2}\b(?!\s*(PLANTER|ROOF))"
+    r"|\bGROUND\s+FLOOR\s*PLAN\b|\bGROUND\s+PLAN\b",
     re.I,
 )
 # 剖面图/立面图标识 —— 这些页面会在索引条里列出各层编号，须否决
