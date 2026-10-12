@@ -1192,10 +1192,13 @@ async function doExportPdfCombined(baseName, allData, fileHandle) {
     toast(zh ? '没有可导出的数据' : 'No data', 'err');
     return;
   }
-  toast(zh ? `正在生成合成 PDF（${allData.length}个建筑）…` : `Generating…`, 'info');
+  // 全屏遮罩，避免用户看到页面闪烁
+  const mask = document.createElement('div');
+  mask.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:999999;display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px';
+  mask.textContent = zh ? `正在生成 PDF（${allData.length}个建筑），请稍候…` : `Generating PDF (${allData.length} buildings)...`;
+  document.body.appendChild(mask);
   const origJob = S.job, origJobId = S.jobId, origSel = S.selBuildingId, origPane = S.pane;
   let combinedDiv = null;
-  let hiddenRpane = null;
   try {
     if (!window.html2pdf) {
       await new Promise((resolve, reject) => {
@@ -1205,45 +1208,24 @@ async function doExportPdfCombined(baseName, allData, fileHandle) {
         document.head.appendChild(s);
       });
     }
-    // 创建隐藏的渲染容器（不影响可见页面）
-    hiddenRpane = document.createElement('div');
-    hiddenRpane.id = 'rpane-export-hidden';
-    hiddenRpane.style.cssText = 'position:absolute;left:-9999px;top:0;width:800px;background:#fff';
-    document.body.appendChild(hiddenRpane);
-    // 创建合成容器
     combinedDiv = document.createElement('div');
     combinedDiv.style.cssText = 'font-family:sans-serif;background:#fff;color:#000;padding:20px;max-width:800px';
-    // 逐个建筑：临时切换 S.job，渲染到隐藏容器，克隆
     for (const { bp, jobData } of allData) {
       S.job = jobData; S.jobId = jobData.jobId; S.selBuildingId = bp.id;
       S.pane = 'matrix';
-      // 渲染到隐藏容器：临时替换 #rpane 的引用
-      const realRpane = document.querySelector('#rpane');
-      const parent = realRpane?.parentNode;
-      const nextSibling = realRpane?.nextSibling;
-      if (parent && realRpane) parent.replaceChild(hiddenRpane, realRpane);
-      try {
-        if (typeof renderMatrix === 'function') renderMatrix();
-        await new Promise(r => setTimeout(r, 800));
-      } finally {
-        // 恢复真实的 #rpane
-        if (parent && hiddenRpane.parentNode === parent) parent.replaceChild(realRpane, hiddenRpane);
-      }
-      // 建筑标题
+      if (typeof renderMatrix === 'function') renderMatrix();
+      await new Promise(r => setTimeout(r, 800));
+      const rpane = document.querySelector('#rpane');
+      if (!rpane || rpane.textContent.trim().length < 100) continue;
       const titleDiv = document.createElement('div');
       titleDiv.innerHTML = `<h1 style="font-size:22px;margin:30px 0 15px;padding-bottom:10px;border-bottom:3px solid #333">${esc(bp.name || '')}</h1>`;
       combinedDiv.appendChild(titleDiv);
-      // 克隆隐藏容器的内容
-      const clone = hiddenRpane.cloneNode(true);
-      clone.style.position = 'static';
-      clone.style.left = 'auto';
+      const clone = rpane.cloneNode(true);
       clone.removeAttribute('id');
       combinedDiv.appendChild(clone);
       const hr = document.createElement('div');
       hr.style.cssText = 'height:2px;background:#ddd;margin:30px 0';
       combinedDiv.appendChild(hr);
-      // 清空隐藏容器，准备下一个
-      hiddenRpane.innerHTML = '';
     }
     document.body.appendChild(combinedDiv);
     await new Promise(r => setTimeout(r, 500));
@@ -1264,8 +1246,7 @@ async function doExportPdfCombined(baseName, allData, fileHandle) {
     toast((zh ? 'PDF 生成失败：' : 'PDF failed: ') + e.message, 'err');
   } finally {
     if (combinedDiv && combinedDiv.parentNode) combinedDiv.parentNode.removeChild(combinedDiv);
-    if (hiddenRpane && hiddenRpane.parentNode) hiddenRpane.parentNode.removeChild(hiddenRpane);
-    // 恢复原状态
+    if (mask.parentNode) mask.parentNode.removeChild(mask);
     S.job = origJob; S.jobId = origJobId; S.selBuildingId = origSel; S.pane = origPane;
     renderTree();
     if (origPane === 'matrix' && typeof renderMatrix === 'function') renderMatrix();
