@@ -1149,7 +1149,11 @@ async function doExportConfirm() {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ job_ids: jobIds, names, name: customName || 'cupboards' }),
       });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
+      if (!res.ok) {
+        let detail = '';
+        try { const j = await res.json(); detail = j.detail || ''; } catch (e) {}
+        throw new Error(`HTTP ${res.status}${detail ? ': ' + detail : ''}`);
+      }
       const blob = await res.blob();
       saveExportBlob(blob, `${customName || 'cupboards'}.pdf`, picked);
       toast(zh ? '导出成功' : 'Export done', 'ok');
