@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import create_engine, inspect, select, text
+from sqlalchemy import create_engine, delete, inspect, select, text
 from sqlalchemy.orm import Session
 
 from app.config import load_config
@@ -184,8 +184,18 @@ class Pipeline:
         pr = self.parser.parse(str(pdf_path))
 
         with Session(self.engine) as s:
+            version_id = self._ensure_version(s, did, pdf_path)
+            # 【去重修复】同一图纸重复上传时，删除该版本旧 Job 的 Units/PageParses，
+            # 否则新旧数据混杂导致前端显示混乱。按 drawing_version_id 清理。
+            old_job_ids = s.scalars(
+                select(ParseJob.id).where(ParseJob.drawing_version_id == version_id)
+            ).all()
+            for oid in old_job_ids:
+                s.execute(delete(Unit).where(Unit.parse_job_id == oid))
+                s.execute(delete(PageParse).where(PageParse.parse_job_id == oid))
+            s.flush()
             job = ParseJob(
-                drawing_version_id=self._ensure_version(s, did, pdf_path),
+                drawing_version_id=version_id,
                 status=JobStatus.RUNNING,
                 config_version=self.cfg.version,
                 multi_signals={
