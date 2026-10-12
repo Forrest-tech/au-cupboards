@@ -984,7 +984,7 @@ def rename_variant_source(body: RenameSourceBody) -> dict[str, Any]:
         # 不按 source 过滤，直接按名称匹配（更稳）
         rows = s.scalars(select(CupboardVariant)).all()
         for r in rows:
-            cur = r.source_name or r.dwg_name or ""
+            cur = r.source_name or ""
             # old_name 为 DWG/空时匹配空文件名的；否则精确匹配
             # 注意：空 cur 只匹配 DWG/空，避免误伤有名的
             if cur:
