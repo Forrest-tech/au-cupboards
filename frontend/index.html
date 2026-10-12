@@ -106,6 +106,7 @@ nav button.on{background:var(--accent);color:#fff}
 .cupcard{
   border:1px solid var(--line);border-radius:8px;background:var(--panel);
   overflow:hidden;cursor:pointer;transition:border-color .12s,box-shadow .12s;
+  page-break-inside:avoid;break-inside:avoid;
 }
 .cupcard:hover{border-color:var(--accent);box-shadow:var(--shadow)}
 .cupcard.on{border-color:var(--accent);box-shadow:0 0 0 2px #2563eb33}
@@ -174,7 +175,7 @@ nav button.on{background:var(--accent);color:#fff}
 .mthumb.no .ic{width:18px;height:18px}
 .mtxinfo{flex:1 1 auto;min-width:0}
 /* 每层「units 数 → 柜型库里全部可选柜型」的缩略图带 */
-.mtxlib{border-left:3px solid var(--accent);padding-left:9px}
+.mtxlib{border-left:3px solid var(--accent);padding-left:9px;page-break-inside:avoid;break-inside:avoid}
 .mtxlibhd{font-size:11px;color:var(--accent2);font-weight:600;margin-bottom:6px}
 .mtxlib .cupgrid{grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:7px}
 .mtxlib .cupcard .thumb{padding:3px}
