@@ -1946,8 +1946,16 @@ function bindTreeRename() {
       } else if (type === 'dwg') {
         const fname = rest.join(':');
         btn(zh ? '删除图纸' : 'Delete drawing', 'trash', true, () => {
-          const ids = S.variants.filter(v => (v.source_name || v.dwg_name) === fname).map(v => v.id);
-          if (!ids.length) return;
+          // fname 可能是 "DWG" fallback，要按 libraryGroups 的逻辑匹配：
+          // v.source_name || v.dwg_name || t('tree.library')
+          const libName = t('tree.library');
+          const ids = S.variants.filter(v => {
+            const vf = v.source_name || v.dwg_name || libName;
+            // rootName 为 "DWG" 时，对应的是空文件名的变体
+            if (fname === 'DWG') return !v.source_name && !v.dwg_name;
+            return vf === fname;
+          }).map(v => v.id);
+          if (!ids.length) { toast(zh ? '没有找到该图纸的柜型' : 'No variants found', 'err'); return; }
           if (!confirm(zh ? `删除图纸「${fname}」下的全部 ${ids.length} 个柜型？` : `Delete all ${ids.length} variants from "${fname}"?`)) return;
           delVariants(ids);
         });
