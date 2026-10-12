@@ -981,12 +981,16 @@ def rename_variant_source(body: RenameSourceBody) -> dict[str, Any]:
     """
     n = 0
     with Session(_pipeline().engine) as s:
-        # 匹配逻辑与前端 libraryGroups 一致
-        rows = s.scalars(select(CupboardVariant).where(CupboardVariant.source == "dwg")).all()
+        # 不按 source 过滤，直接按名称匹配（更稳）
+        rows = s.scalars(select(CupboardVariant)).all()
         for r in rows:
             cur = r.source_name or r.dwg_name or ""
-            # old_name 为 DWG/空时匹配空文件名的
-            match = (cur == body.old_name) or (not cur and body.old_name in ("DWG", ""))
+            # old_name 为 DWG/空时匹配空文件名的；否则精确匹配
+            # 注意：空 cur 只匹配 DWG/空，避免误伤有名的
+            if cur:
+                match = (cur == body.old_name)
+            else:
+                match = body.old_name in ("DWG", "")
             if match:
                 r.source_name = body.new_name
                 n += 1
