@@ -1950,19 +1950,16 @@ function bindTreeRename() {
           if (name === null || !name.trim() || name.trim() === fname) return;
           toast(zh ? '重命名图纸功能开发中' : 'Rename drawing coming soon', 'err');
         });
-        btn(zh ? '删除图纸' : 'Delete drawing', 'trash', true, () => {
-          // fname 可能是 "DWG" fallback，要按 libraryGroups 的逻辑匹配：
-          // v.source_name || v.dwg_name || t('tree.library')
-          const libName = t('tree.library');
-          const vs = S.variants.filter(v => {
-            const vf = v.source_name || v.dwg_name || libName;
-            // rootName 为 "DWG" 时，对应的是空文件名的变体
-            if (fname === 'DWG') return !v.source_name && !v.dwg_name;
-            return vf === fname;
-          });
-          if (!vs.length) { toast(zh ? '没有找到该图纸的柜型' : 'No variants found', 'err'); return; }
-          if (!confirm(zh ? `删除图纸「${fname}」下的全部 ${vs.length} 个柜型？（含被单元选用的）` : `Delete all ${vs.length} variants from "${fname}" (including selected)?`)) return;
-          delVariants(vs, true);
+        btn(zh ? '删除图纸' : 'Delete drawing', 'trash', true, async () => {
+          if (!confirm(zh ? `删除图纸「${fname}」下的全部柜型？` : `Delete all variants from "${fname}"?`)) return;
+          try {
+            // 用批量清空接口（已验证有效），只清 DWG 解析的
+            const r = await api('/variants/clear', { method: 'POST', body: { only_dwg: true } });
+            toast(zh ? `已删除 ${r.deleted ?? ''} 个柜型` : `Deleted ${r.deleted ?? ''} variants`, 'ok');
+            setTimeout(() => location.reload(), 600);
+          } catch (e) {
+            toast(zh ? '删除失败' : 'Delete failed', 'err');
+          }
         });
       }
       // 移动功能：演示版暂留空
