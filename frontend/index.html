@@ -1360,15 +1360,8 @@ async function boot() {
     // 说明存错了，切回 work —— 用户报的刷新后跳 tab bug
     if (S.treeSel === 'floors' && S.view === 'cupboard') S.view = 'work';
   }
-  // 自动恢复最近一次解析结果 —— 否则刷新后界面是空的
-  try {
-    const jobs = await api('/jobs?limit=1');
-    if (jobs.length) {
-      S.curBuilding = jobs[0].building_id ?? S.curBuilding;
-      await loadJob(jobs[0].id);
-      showPdf(jobs[0].id, S.pages?.length ? S.pages : []);
-    }
-  } catch (e) {}
+  // 【删除】自动恢复最近一次解析结果 —— 与 loadTree 并发导致 S.job 竞态错位
+  // loadTree 已负责初始化选中第一个 building，不需要这里再 loadJob(jobs[0])
   // 统一走 gotoView 归位：首屏也必须把上传按钮、树、中栏按 tab 摆对，
   // 否则默认可见 #bup（工作台不该有上传入口）
   gotoView(S.view);
