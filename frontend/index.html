@@ -1518,19 +1518,19 @@ async function loadTree() {
       } catch (e) { p.jobData = null; }
     }
   }
-  // 【修复】初始化 S.job 和 S.selBuildingId，避免刷新后左右不一致
-  // 默认选中第一个 building，三栏同步
-  if (S.projects.length && !S.selBuildingId) {
+  // 【修复】初始化：强制选中第一个 building，三栏同步
+  // 不保留旧的 selBuildingId，避免状态不一致
+  if (S.projects.length) {
     S.selBuildingId = S.projects[0].id;
+    S.floorSel = null;
+    S.floorFilter = null;
   }
   const selP = S.projects.find(pp => pp.id === S.selBuildingId);
   if (selP?.jobData) {
     S.job = selP.jobData;
     S.jobId = selP.jobData.jobId;
-    // 中间 PDF 初始化
     const pages = selP.jobData.pages?.length ? selP.jobData.pages
       : Array.from({ length: selP.jobData.page_count || 1 }, (_, i) => ({ title: 'p' + (i + 1) }));
-    // 延迟调用，等 DOM 就绪
     setTimeout(() => showPdf(S.jobId, pages), 0);
   }
   renderTree();
