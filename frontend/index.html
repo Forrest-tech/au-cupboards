@@ -1515,6 +1515,13 @@ async function loadTree() {
       } catch (e) { p.jobData = null; }
     }
   }
+  // 【修复】初始化 S.job 和 S.selBuildingId，避免刷新后左右不一致
+  // 默认选中第一个 building
+  if (S.projects.length && !S.selBuildingId) {
+    S.selBuildingId = S.projects[0].id;
+  }
+  const selP = S.projects.find(pp => pp.id === S.selBuildingId);
+  if (selP?.jobData) S.job = selP.jobData;
   renderTree();
 }
 
