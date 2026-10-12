@@ -1124,40 +1124,88 @@ async function doExportConfirm() {
   if (buildingIds.length <= 1) {
     await doExport(fmt, picked, customName);
   } else if (fmt === 'pdf') {
-    // 收集 jobId 和建筑名
-    const jobIds = [];
-    const names = [];
-    for (const bid of buildingIds) {
-      const bp = S.projects.find(pp => pp.id == bid);
-      if (!bp) continue;
-      const drawings = bp.drawings || [];
-      const latestDrawing = drawings[drawings.length - 1];
-      const jobId = latestDrawing?.latest_job_id || bp.jobData?.jobId;
-      if (!jobId) continue;
-      jobIds.push(jobId);
-      names.push(bp.name || ('#' + bid));
-    }
-    if (!jobIds.length) {
-      toast('没有可导出的建筑', 'err');
-      return;
-    }
+    // 多选合成PDF：前端隐藏容器渲染每个建筑的 matrix HTML（和页面显示完全一致），
+    // 拼合后用 html2pdf 一次生成，不触碰可见页面 —— 用户要求
     const zh = LANGNOW === 'zh';
-    toast(zh ? `正在生成合成PDF（${jobIds.length}个建筑）…` : 'Generating...', 'info');
+    // 保存当前状态
+    const savedJob = S.job, savedJobId = S.jobId, savedBuilding = S.selBuildingId;
+    const savedPane = S.pane, savedFloorFilter = S.floorFilter, savedFloorSel = S.floorSel;
     try {
-      const res = await fetch('/api/export/combined-pdf', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ job_ids: jobIds, names, name: customName || 'cupboards' }),
-      });
-      if (!res.ok) {
-        let detail = '';
-        try { const j = await res.json(); detail = j.detail || ''; } catch (e) {}
-        throw new Error(`HTTP ${res.status}${detail ? ': ' + detail : ''}`);
+      if (!window.html2pdf) {
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+          s.onload = resolve; s.onerror = () => reject(new Error('html2pdf load failed'));
+          document.head.appendChild(s);
+        });
       }
-      const blob = await res.blob();
-      saveExportBlob(blob, `${customName || 'cupboards'}.pdf`, picked);
+      toast(zh ? `正在生成合成PDF（${buildingIds.length}个建筑）…` : 'Generating...', 'info');
+      // 隐藏容器
+      const holder = document.createElement('div');
+      holder.style.cssText = 'position:fixed;left:-99999px;top:0;width:800px;background:#fff;';
+      document.body.appendChild(holder);
+      window._matrixTarget = holder;
+      const htmlParts = [];
+      for (let i = 0; i < buildingIds.length; i++) {
+        const bid = buildingIds[i];
+        const bp = S.projects.find(pp => pp.id == bid);
+        if (!bp) continue;
+        let jobData = bp.jobData;
+        if (!jobData) {
+          const drawings = bp.drawings || [];
+          const latestDrawing = drawings[drawings.length - 1];
+          const jobId = latestDrawing?.latest_job_id;
+          if (jobId) {
+            try {
+              const j = await api(`/jobs/${jobId}`);
+              jobData = { ...j, jobId };
+              bp.jobData = jobData;
+            } catch (e) { continue; }
+          }
+        }
+        if (!jobData) continue;
+        // 切换数据（不触碰可见 DOM）
+        S.job = jobData; S.jobId = jobData.jobId; S.selBuildingId = bid;
+        S.pane = 'matrix'; S.floorFilter = null; S.floorSel = null;
+        holder.innerHTML = '';
+        if (typeof renderMatrix === 'function') renderMatrix();
+        // 等图片加载
+        await new Promise(r => setTimeout(r, 800));
+        let h = holder.innerHTML;
+        // 建筑标题
+        const bname = (bp.name || ('#' + bid)).replace(/</g, '&lt;');
+        h = `<div style="page-break-before:${i > 0 ? 'always' : 'auto'};padding:10px;">` +
+            `<h2 style="font-size:18px;border-bottom:2px solid #333;padding-bottom:6px;">${bname}</h2>${h}</div>`;
+        htmlParts.push(h);
+      }
+      window._matrixTarget = null;
+      document.body.removeChild(holder);
+      // 恢复状态
+      S.job = savedJob; S.jobId = savedJobId; S.selBuildingId = savedBuilding;
+      S.pane = savedPane; S.floorFilter = savedFloorFilter; S.floorSel = savedFloorSel;
+      if (!htmlParts.length) throw new Error(zh ? '没有可导出的建筑' : 'No buildings');
+      // 拼合到隐藏容器并转 PDF
+      const combo = document.createElement('div');
+      combo.style.cssText = 'position:fixed;left:-99999px;top:0;width:800px;background:#fff;';
+      combo.innerHTML = htmlParts.join('');
+      document.body.appendChild(combo);
+      const opt = {
+        margin: 10,
+        filename: `${customName || 'cupboards'}.pdf`,
+        image: { type: 'jpeg', quality: 0.95 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
+      };
+      const pdfBlob = await window.html2pdf().set(opt).from(combo).outputPdf('blob');
+      document.body.removeChild(combo);
+      saveExportBlob(pdfBlob, `${customName || 'cupboards'}.pdf`, picked);
       toast(zh ? '导出成功' : 'Export done', 'ok');
     } catch (e) {
+      // 恢复状态
+      window._matrixTarget = null;
+      S.job = savedJob; S.jobId = savedJobId; S.selBuildingId = savedBuilding;
+      S.pane = savedPane; S.floorFilter = savedFloorFilter; S.floorSel = savedFloorSel;
       toast((zh ? '合成PDF失败：' : 'Failed: ') + e.message, 'err');
     }
   } else {
@@ -3206,7 +3254,9 @@ function renderMatrix() {
   for (const [c, n] of Object.entries(s.by_variant || {}))
     h += `<span><b style="background:var(--accent)"></b>${esc(c)} × ${n}</span>`;
   h += '</div></div>';
-  $('#rpane').innerHTML = h;
+  // 导出时可指定隐藏容器，避免触碰可见页面 —— 用户要求后台操作
+  const _target = window._matrixTarget || $('#rpane');
+  if (_target) _target.innerHTML = h;
   // 缩略图 → 点开看中栏大图（矩阵内的两种：.mthumb 小图 + .cupcard 卡片）
   // 问题11：点击缩略图弹 modal 大图，不替换中间面板；点外部关闭
   const openBig = (url, el) => {
