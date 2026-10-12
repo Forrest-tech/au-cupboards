@@ -1407,6 +1407,11 @@ function autoSelectFirstInView() {
     }
     S.floorSel = null;
   }
+  // 柜型库：如果存的是 lfroot（旧逻辑），改成选第一个套数 —— 必须放在
+  // 通用 restoreSelection 之前，否则会被旧选中覆盖
+  if (S.view === 'cupboard' && S.treeSel === 'lfroot') {
+    S.treeSel = null;
+  }
   if (S.treeSel) {
     // 刷新恢复来的选中：gotoView 已经把右栏重画成占位内容了（renderHub），
     // 这里必须按treeSel 把真实内容重新灌上，否则「树里选中 3 Units、
@@ -1445,8 +1450,9 @@ function autoSelectFirstInView() {
     return;
   }
   // 柜型库默认：选中第一个套数（用户要求：默认选 3套，不是 root）
-  // root 保持展开，但高亮在第一个套数上
-  if (S.view === 'cupboard') {
+  // root 保持展开，但高亮在第一个套数上。注意要放在 S.treeSel 恢复之前，
+  // 否则 localStorage 里存的 'lfroot' 会覆盖掉。
+  if (S.view === 'cupboard' && !S.treeSel) {
     const firstLu = $('#tree [data-lu]');
     if (firstLu) {
       S.lfOpen = S.lfOpen || {};
