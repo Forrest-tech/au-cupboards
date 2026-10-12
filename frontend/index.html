@@ -1684,7 +1684,7 @@ function renderTreeLibrary() {
     // 注意：展开≠选中，高亮只看 usel
     const uopen = !!S.lfOpen[ukey];
     const usel = S.treeSel === ukey;
-    h += `<div class="node${usel ? ' on' : ''}" data-lu="${grp.n}">
+    h += `<div class="node${usel ? ' on' : ''}" data-lu="${grp.n}" style="padding-left:26px">
       <span class="nm">${grp.n} ${t('lib.units')}</span>
       <span class="ct">${total}</span>
       ${S.treeEditMode ? `<span class="treedrop"><button class="ib" data-emenu="lu:${grp.n}" title="${LANGNOW==='zh'?'操作':'Actions'}">${ic('more')}</button></span>` : ''}</div>`;
@@ -1699,7 +1699,7 @@ function renderTreeLibrary() {
         // 单模型组强制显示 Model A（用户要求：不能空白）
         let disp = vLabel(lb.v, lb.suffix.replace(/^-\s*/, 'Model '));
         if (!disp) disp = 'Model A';
-        h += `<div class="node lv2${on}" data-lg="${esc(key)}" data-vid="${esc(lb.v.id)}">
+        h += `<div class="node lv2${on}" data-lg="${esc(key)}" data-vid="${esc(lb.v.id)}" style="padding-left:52px">
           <span class="nm">${esc(disp)}</span>
           <span class="ct">${fmtMM(lb.v.w)}×${fmtMM(lb.v.h)}</span>
           ${S.treeEditMode ? `<span class="treedrop"><button class="ib" data-emenu="vid:${esc(lb.v.id)}:${esc(disp)}" title="${LANGNOW==='zh'?'操作':'Actions'}">${ic('more')}</button></span>` : ''}</div>`;
