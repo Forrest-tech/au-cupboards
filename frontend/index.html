@@ -1444,15 +1444,14 @@ function autoSelectFirstInView() {
     else renderDetail();
     return;
   }
-  // 柜型库默认：选中 DWG 根节点（用户要求：刷新/进入默认选 root）
+  // 柜型库默认：选中第一个套数（用户要求：默认选 3套，不是 root）
+  // root 保持展开，但高亮在第一个套数上
   if (S.view === 'cupboard') {
-    const root = $('#tree [data-lfroot]');
-    if (root) {
-      S.treeSel = 'lfroot';
+    const firstLu = $('#tree [data-lu]');
+    if (firstLu) {
       S.lfOpen = S.lfOpen || {};
       S.lfOpen['root'] = true;
-      renderTree();
-      showLibraryOverview();
+      firstLu.click();
       return;
     }
   }
