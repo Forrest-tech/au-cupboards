@@ -1498,8 +1498,11 @@ async function loadTree() {
   } catch (e) { S.projects = []; }
   // 【修复】每个 building 加载自己的 job 数据，避免共用全局 S.job 导致数据串扰
   // 用户报：两个 building 显示完全相同的楼层（L2=21, L1=9）
+  // 【修复】取最后一个 drawing（最新上传的），不是第一个
   for (const p of S.projects) {
-    const jobId = p.drawings?.[0]?.latest_job_id;
+    const drawings = p.drawings || [];
+    const latestDrawing = drawings[drawings.length - 1];
+    const jobId = latestDrawing?.latest_job_id;
     if (jobId) {
       try {
         const j = await api(`/jobs/${jobId}`);
