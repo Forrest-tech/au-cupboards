@@ -1193,7 +1193,9 @@ async function doExportPdfCombined(baseName, allData, fileHandle) {
     return;
   }
   toast(zh ? `正在生成合成 PDF（${allData.length}个建筑）…` : `Generating…`, 'info');
+  const origJob = S.job, origJobId = S.jobId, origSel = S.selBuildingId, origPane = S.pane;
   let combinedDiv = null;
+  let hiddenRpane = null;
   try {
     if (!window.html2pdf) {
       await new Promise((resolve, reject) => {
@@ -1203,32 +1205,45 @@ async function doExportPdfCombined(baseName, allData, fileHandle) {
         document.head.appendChild(s);
       });
     }
-    // 【后台生成】不碰 S.job、不碰可见 DOM，直接用 jobData 生成 HTML
+    // 创建隐藏的渲染容器（不影响可见页面）
+    hiddenRpane = document.createElement('div');
+    hiddenRpane.id = 'rpane-export-hidden';
+    hiddenRpane.style.cssText = 'position:absolute;left:-9999px;top:0;width:800px;background:#fff';
+    document.body.appendChild(hiddenRpane);
+    // 创建合成容器
     combinedDiv = document.createElement('div');
     combinedDiv.style.cssText = 'font-family:sans-serif;background:#fff;color:#000;padding:20px;max-width:800px';
+    // 逐个建筑：临时切换 S.job，渲染到隐藏容器，克隆
     for (const { bp, jobData } of allData) {
-      const floors = jobData.floors || [];
-      const totalUnits = floors.reduce((a, f) => a + Number(f.unit_count || 0), 0);
+      S.job = jobData; S.jobId = jobData.jobId; S.selBuildingId = bp.id;
+      S.pane = 'matrix';
+      // 渲染到隐藏容器：临时替换 #rpane 的引用
+      const realRpane = document.querySelector('#rpane');
+      const parent = realRpane?.parentNode;
+      const nextSibling = realRpane?.nextSibling;
+      if (parent && realRpane) parent.replaceChild(hiddenRpane, realRpane);
+      try {
+        if (typeof renderMatrix === 'function') renderMatrix();
+        await new Promise(r => setTimeout(r, 800));
+      } finally {
+        // 恢复真实的 #rpane
+        if (parent && hiddenRpane.parentNode === parent) parent.replaceChild(realRpane, hiddenRpane);
+      }
       // 建筑标题
       const titleDiv = document.createElement('div');
-      titleDiv.innerHTML = `<h1 style="font-size:22px;margin:30px 0 15px;padding-bottom:10px;border-bottom:3px solid #333">${esc(bp.name || '')}</h1>
-        <p style="color:#666;margin-bottom:15px">${floors.length} 楼层 / ${totalUnits} units</p>`;
+      titleDiv.innerHTML = `<h1 style="font-size:22px;margin:30px 0 15px;padding-bottom:10px;border-bottom:3px solid #333">${esc(bp.name || '')}</h1>`;
       combinedDiv.appendChild(titleDiv);
-      // 每层：units + 柜型（简化版，不含图片，避免跨域问题）
-      for (const f of floors) {
-        const n = Number(f.unit_count || 0);
-        const labels = (f.labels || []).slice(0, 20).join(', ');
-        const floorDiv = document.createElement('div');
-        floorDiv.style.cssText = 'margin-bottom:15px;padding:12px;border:1px solid #e0e0e0;border-radius:6px';
-        floorDiv.innerHTML = `
-          <div style="font-weight:700;font-size:15px;margin-bottom:6px">${esc(f.floor_code || '')} · ${n} Units</div>
-          ${labels ? `<div style="font-size:12px;color:#555;word-break:break-all">${esc(labels)}</div>` : '<div style="font-size:12px;color:#999">暂无单元数据</div>'}
-        `;
-        combinedDiv.appendChild(floorDiv);
-      }
+      // 克隆隐藏容器的内容
+      const clone = hiddenRpane.cloneNode(true);
+      clone.style.position = 'static';
+      clone.style.left = 'auto';
+      clone.removeAttribute('id');
+      combinedDiv.appendChild(clone);
       const hr = document.createElement('div');
       hr.style.cssText = 'height:2px;background:#ddd;margin:30px 0';
       combinedDiv.appendChild(hr);
+      // 清空隐藏容器，准备下一个
+      hiddenRpane.innerHTML = '';
     }
     document.body.appendChild(combinedDiv);
     await new Promise(r => setTimeout(r, 500));
@@ -1249,7 +1264,11 @@ async function doExportPdfCombined(baseName, allData, fileHandle) {
     toast((zh ? 'PDF 生成失败：' : 'PDF failed: ') + e.message, 'err');
   } finally {
     if (combinedDiv && combinedDiv.parentNode) combinedDiv.parentNode.removeChild(combinedDiv);
-    // 不恢复 S.job——全程没动过
+    if (hiddenRpane && hiddenRpane.parentNode) hiddenRpane.parentNode.removeChild(hiddenRpane);
+    // 恢复原状态
+    S.job = origJob; S.jobId = origJobId; S.selBuildingId = origSel; S.pane = origPane;
+    renderTree();
+    if (origPane === 'matrix' && typeof renderMatrix === 'function') renderMatrix();
   }
 }
 
