@@ -1188,7 +1188,12 @@ async function doExportMultiple(fmt, fileHandle, customName, buildingIds) {
 // 多建筑合成 PDF：生成包含所有建筑的 HTML，一次性转 PDF
 async function doExportPdfCombined(baseName, allData, fileHandle) {
   const zh = LANGNOW === 'zh';
-  toast(zh ? '正在生成合成 PDF…' : 'Generating combined PDF…', 'info');
+  if (!allData.length) {
+    toast(zh ? '没有可导出的数据（allData为空）' : 'No data (allData empty)', 'err');
+    console.error('[export] allData is empty, buildingIds may be wrong');
+    return;
+  }
+  toast(zh ? `正在生成合成 PDF（${allData.length}个建筑）…` : `Generating combined PDF (${allData.length} buildings)…`, 'info');
   try {
     if (!window.html2pdf) {
       await new Promise((resolve, reject) => {
@@ -1217,12 +1222,18 @@ async function doExportPdfCombined(baseName, allData, fileHandle) {
       html += '</tbody></table>';
     }
     html += '</div>';
-    // 创建临时容器
+    // 创建临时容器（可见渲染，避免 html2canvas 截屏失败）
     const tmp = document.createElement('div');
     tmp.innerHTML = html;
-    tmp.style.position = 'absolute';
-    tmp.style.left = '-9999px';
+    tmp.style.position = 'fixed';
+    tmp.style.top = '0';
+    tmp.style.left = '0';
+    tmp.style.width = '800px';
+    tmp.style.background = '#fff';
+    tmp.style.zIndex = '99999';
     document.body.appendChild(tmp);
+    // 等 DOM 渲染
+    await new Promise(r => setTimeout(r, 500));
     const opt = {
       margin: 10,
       filename: `${baseName}.pdf`,
