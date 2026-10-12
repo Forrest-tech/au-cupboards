@@ -600,7 +600,7 @@ tr.floor-row td{background:#eef2f7;font-weight:700;border-top:2px solid var(--li
  *   （🗑 在Windows 上是彩色 emoji，在 Linux 上是黑白），而且不可控。
  * 现在统一换成 Lucide 的线性 SVG：路径直接内联，不引外部 CDN
  *   —— 这个应用要能离线跑（现场解析 DWG），CDN 挂了就全崩。
- * 用法：<svg class="ic"><use href="#i-pencil"></use></svg>
+ * 用法：<svg class="ic" viewBox="0 0 24 24"><use href="#i-pencil"></use></svg>
  */
 .ic{width:1em;height:1em;fill:currentColor;flex:0 0 auto;
   vertical-align:-.15em}
@@ -657,7 +657,7 @@ tr.floor-row td{background:#eef2f7;font-weight:700;border-top:2px solid var(--li
     <button data-view="building"><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-layers"></use></svg><span data-i18n="nav.building">建筑图纸</span></button>
   </nav>
   <!-- 工作台不放上传入口，默认隐藏，由 gotoView 按 tab 控制 -->
-  <button class="hupload" id="bup" style="display:none"><svg class="ic" aria-hidden="true"><use href="#i-upload"></use></svg><span data-i18n="btn.upload">上传图纸</span></button>
+  <button class="hupload" id="bup" style="display:none"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-upload"></use></svg><span data-i18n="btn.upload">上传图纸</span></button>
   <div class="langsw">
     <button id="lzh" class="on">中文</button>
     <button id="len">EN</button>
@@ -677,19 +677,19 @@ tr.floor-row td{background:#eef2f7;font-weight:700;border-top:2px solid var(--li
       <div class="viewer" id="viewer">
         <!-- 静态 HTML 里的 ${...} 不会被求值，必须给真实文本，
              boot() 会用 data-i18n 覆盖 -->
-        <div class="ph"><div class="big"><svg class="ic" aria-hidden="true"><use href="#i-file-text"></use></svg></div><div data-i18n="mid.ph">上传建筑图纸后在此原样预览</div></div>
+        <div class="ph"><div class="big"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-file-text"></use></svg></div><div data-i18n="mid.ph">上传建筑图纸后在此原样预览</div></div>
       </div>
     </div>
     <div class="mid-bar">
       <span class="fn" id="mfn"></span>
-      <button class="btn" id="bedit" title="编辑" style="display:none"><svg class="ic" aria-hidden="true"><use href="#i-pencil"></use></svg></button>
-      <button class="btn" id="bprev" data-i18n-title="ui.prevpage"><svg class="ic" aria-hidden="true"><use href="#i-chevron-left"></use></svg></button>
+      <button class="btn" id="bedit" title="编辑" style="display:none"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-pencil"></use></svg></button>
+      <button class="btn" id="bprev" data-i18n-title="ui.prevpage"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chevron-left"></use></svg></button>
       <span class="badge" id="bpage">– / –</span>
-      <button class="btn" id="bnext" data-i18n-title="ui.nextpage"><svg class="ic" aria-hidden="true"><use href="#i-chevron-right"></use></svg></button>
+      <button class="btn" id="bnext" data-i18n-title="ui.nextpage"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chevron-right"></use></svg></button>
       <span style="width:6px"></span>
-      <button class="btn" id="bzout" title="zoom out"><svg class="ic" aria-hidden="true"><use href="#i-zoom-out"></use></svg></button>
+      <button class="btn" id="bzout" title="zoom out"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-zoom-out"></use></svg></button>
       <span class="badge" id="bzoom">100%</span>
-      <button class="btn" id="bzin" title="zoom in"><svg class="ic" aria-hidden="true"><use href="#i-zoom-in"></use></svg></button>
+      <button class="btn" id="bzin" title="zoom in"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-zoom-in"></use></svg></button>
     </div>
   </div>
 
@@ -929,7 +929,7 @@ const $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 /** 内联一个开源图标（Lucide, ISC）。名字见上方 sprite 里的 #i-* */
 const ic = (n, cls = '') =>
-  `<svg class="ic${cls ? ' ' + cls : ''}" aria-hidden="true"><use href="#i-${n}"></use></svg>`;
+  `<svg class="ic${cls ? ' ' + cls : ''}" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-${n}"></use></svg>`;
 const twIcon = (open) => ic(open ? 'chevron-down' : 'chevron-right');
 const num = (v, d = 2) => (v === null || v === undefined || v === '') ? '—' : Number(v).toFixed(d);
 
@@ -4084,7 +4084,7 @@ function openUpload(kind) {
     <div class="mbody">
       <div class="alert info">${esc(cfg.d)}</div>
       <div class="drop" id="dz">
-        <div class="big"><svg class="ic" aria-hidden="true"><use href="#i-upload"></use></svg></div>
+        <div class="big"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-upload"></use></svg></div>
         <div><b>${t('up.pick')}</b> ${t('up.drag')}</div>
         <div class="muted" style="font-size:11px;margin-top:4px">${esc(cfg.accept)}</div>
       </div>
