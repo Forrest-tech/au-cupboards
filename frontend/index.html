@@ -45,7 +45,9 @@ header{
 nav{display:flex;gap:2px;flex:1}
 nav button{
   padding:7px 14px;border-radius:6px;color:var(--dim);font-weight:500;transition:.15s;
+  display:inline-flex;align-items:center;gap:7px;
 }
+nav button .ic{width:16px;height:16px;flex-shrink:0}
 nav button:hover{background:var(--panel2);color:var(--txt)}
 nav button.on{background:var(--accent);color:#fff}
 .hstat{font-size:11px;color:var(--dim);white-space:nowrap;display:flex;align-items:center;gap:10px}
@@ -650,9 +652,9 @@ tr.floor-row td{background:#eef2f7;font-weight:700;border-top:2px solid var(--li
 <header>
   <div class="logo">AU<span>·</span>Cupboards</div>
   <nav>
-    <button class="on" data-view="work" data-i18n="nav.work">工作台</button>
-    <button data-view="cupboard" data-i18n="nav.cupboard">柜型库</button>
-    <button data-view="building" data-i18n="nav.building">建筑图纸</button>
+    <button class="on" data-view="work"><svg class="ic" aria-hidden="true"><use href="#i-table"></use></svg><span data-i18n="nav.work">工作台</span></button>
+    <button data-view="cupboard"><svg class="ic" aria-hidden="true"><use href="#i-grid"></use></svg><span data-i18n="nav.cupboard">柜型库</span></button>
+    <button data-view="building"><svg class="ic" aria-hidden="true"><use href="#i-layers"></use></svg><span data-i18n="nav.building">建筑图纸</span></button>
   </nav>
   <!-- 工作台不放上传入口，默认隐藏，由 gotoView 按 tab 控制 -->
   <button class="hupload" id="bup" style="display:none"><svg class="ic" aria-hidden="true"><use href="#i-upload"></use></svg><span data-i18n="btn.upload">上传图纸</span></button>
