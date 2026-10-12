@@ -1207,15 +1207,15 @@ async function doExportPdfCombined(baseName, allData, fileHandle) {
     // 创建合成容器
     combinedDiv = document.createElement('div');
     combinedDiv.style.cssText = 'font-family:sans-serif;background:#fff;color:#000;padding:20px;max-width:800px';
-    // 逐个建筑：切换 S.job，重渲染右栏，克隆内容
+    // 逐个建筑：切换 S.job，重渲染右栏（楼层×柜型详细视图），克隆内容
     for (let i = 0; i < allData.length; i++) {
       const { bp, jobData } = allData[i];
       console.log(`[export] processing ${i+1}/${allData.length}: ${bp.name}`);
       S.job = jobData; S.jobId = jobData.jobId; S.selBuildingId = bp.id;
+      S.pane = 'matrix';
       renderTree();
-      if (typeof showAllFloorsPanel === 'function') {
-        S.floorFilter = null;
-        await showAllFloorsPanel();
+      if (typeof renderMatrix === 'function') {
+        renderMatrix();
       }
       // 等待右栏渲染完成（检查内容非空）
       let retries = 0;
@@ -1268,7 +1268,9 @@ async function doExportPdfCombined(baseName, allData, fileHandle) {
     // 恢复原选中
     S.job = origJob; S.jobId = origJobId; S.selBuildingId = origSel;
     renderTree();
-    if (typeof showAllFloorsPanel === 'function') {
+    if (S.pane === 'matrix' && typeof renderMatrix === 'function') {
+      renderMatrix();
+    } else if (typeof showAllFloorsPanel === 'function') {
       S.floorFilter = null;
       showAllFloorsPanel();
     }
