@@ -2431,7 +2431,28 @@ function bindTree() {
       renderTree();
       return;
     }
-    if (n.dataset.b) {
+    // 【修复】先判断 floor（楼层节点也有 data-b 做高亮隔离），再判断 building
+    // 否则点楼层会被当成点 building，导致折叠
+    if (n.dataset.floor !== undefined) {
+      // 建筑图纸 tab：点楼层 -> 右栏显示该层 units 数对应的柜型种类；
+      // 工作台 tab：沿用原来的户表筛选。
+      // 注意：data-floor=""（所有楼层）是空字符串，不能用 truthy 判断
+      // 【修复】记录选中的 building ID，确保高亮只出现在一个 building 下
+      if (n.dataset.b) S.selBuildingId = +n.dataset.b;
+      if (S.view === 'building') {
+        S.treeSel = 'floors';
+        // 用户要求：点击后保持，不 toggle —— 点 L4 就一直是 L4，再点 L4 不变回所有楼层
+        let code = n.dataset.floor;
+        if (code === '') code = null; // 所有楼层
+        S.floorSel = code;
+        renderTree();
+        if (S.floorSel) showFloorPanel(S.floorSel);
+        else { S.floorFilter = null; showAllFloorsPanel(); }
+      } else {
+        filterFloor(n.dataset.floor);
+      }
+    }
+    else if (n.dataset.b) {
       // 问题8b：点击根节点同时切换折叠/展开状态
       const fk = 'b' + n.dataset.b;
       S.fold[fk] = !S.fold[fk];
@@ -2534,25 +2555,6 @@ function bindTree() {
       }
       S.treeSel = S.treeSel === k ? null : k;
       renderTree();
-    }
-    else if (n.dataset.floor !== undefined) {
-      // 建筑图纸 tab：点楼层 -> 右栏显示该层 units 数对应的柜型种类；
-      // 工作台 tab：沿用原来的户表筛选。
-      // 注意：data-floor=""（所有楼层）是空字符串，不能用 truthy 判断
-      // 【修复】记录选中的 building ID，确保高亮只出现在一个 building 下
-      if (n.dataset.b) S.selBuildingId = +n.dataset.b;
-      if (S.view === 'building') {
-        S.treeSel = 'floors';
-        // 用户要求：点击后保持，不 toggle —— 点 L4 就一直是 L4，再点 L4 不变回所有楼层
-        let code = n.dataset.floor;
-        if (code === '') code = null; // 所有楼层
-        S.floorSel = code;
-        renderTree();
-        if (S.floorSel) showFloorPanel(S.floorSel);
-        else { S.floorFilter = null; showAllFloorsPanel(); }
-      } else {
-        filterFloor(n.dataset.floor);
-      }
     }
     else if (n.dataset.vg) {
       S.treeSel = S.treeSel === n.dataset.vg ? null : n.dataset.vg;
