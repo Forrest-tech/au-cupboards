@@ -220,17 +220,18 @@ class Stage1Parser:
             self._hit(rule.rule_id)
             return "other"
 
-        if any(m.upper() in upper for m in rule.unit_schedule_markers):
-            self._hit(rule.rule_id)
-            return "unit_schedule"
-
-        # **主判据**：标题栏 'LEVEL n PLAN' / 'GROUND FLOOR PLAN' —— 实测
-        #   A103=LEVEL 1 PLAN, A104=LEVEL 2, A105=LEVEL 3, A106=LEVEL 4，
-        #   GROUND 平面图（A010/A011/A014/A102）虽无 LEVEL 字样但有 GROUND FLOOR。
-        #   这是唯一 100% 可靠的平面图身份标识。
+        # **主判据（优先）**：标题栏 'LEVEL n PLAN' / 'GROUND FLOOR PLAN'
+        # 必须在 unit_schedule_markers 之前检查 —— 楼层平面图里的单元标注
+        # 如 "101 DOUBLE" 会含有 DOUBLE/SINGLE 标记词，若先检查标记词
+        # 会把真正的楼层平面图误判为 unit_schedule（实测 9 Ashford Ave）。
+        # 标题栏的 LEVEL n PLAN 是比标记词更强的信号。
         if _LEVEL_PLAN_RE.search(text):
             self._hit(rule.rule_id)
             return "floor_plan"
+
+        if any(m.upper() in upper for m in rule.unit_schedule_markers):
+            self._hit(rule.rule_id)
+            return "unit_schedule"
 
         # **否决项（先于编号判据）**：剖面图/立面图 —— 实测 A301/A302/A404
         # 等剖面图会在剖面索引条里列出各层单元编号（105/205/305...），
