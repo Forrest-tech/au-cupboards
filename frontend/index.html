@@ -1525,7 +1525,7 @@ async function loadTree() {
     S.floorSel = null;
     S.floorFilter = null;
   }
-  const selP = S.projects.find(pp => pp.id === S.selBuildingId);
+  const selP = S.projects.find(pp => pp.id == S.selBuildingId);
   if (selP?.jobData) {
     S.job = selP.jobData;
     S.jobId = selP.jobData.jobId;
@@ -2470,7 +2470,7 @@ function bindTree() {
         if (code === '') code = null;
         S.floorSel = code;
         // 同步切换 building 的所有状态（不用异步 loadJob，直接用缓存）
-        const bp = S.projects.find(pp => pp.id === S.selBuildingId);
+        const bp = S.projects.find(pp => pp.id == S.selBuildingId);
         if (bp?.jobData) {
           S.job = bp.jobData;
           S.jobId = bp.jobData.jobId;
