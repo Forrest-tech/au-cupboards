@@ -276,7 +276,7 @@ def rename_building(building_id: int, body: RenameBuildingBody) -> dict[str, Any
 @app.post("/api/parse")
 async def upload_and_parse(
     file: UploadFile = File(...),
-    project: str = Form("74 KEELER ST CARLINGFORD"),
+    project: str = Form("UNNAMED"),
     kind: str = Query("building", pattern="^(building|cupboard)$"),
 ) -> dict[str, Any]:
     suffix = Path(file.filename or "upload.pdf").suffix.lower()
