@@ -2495,6 +2495,27 @@ function bindTree() {
         if (S.floorSel) showFloorPanel(S.floorSel);
         else { S.floorFilter = null; showAllFloorsPanel(); }
       } else {
+        // 【修复】工作台 tab 也要同步切换 building 的 S.job，否则右栏显示旧数据
+        const bp2 = S.projects.find(pp => pp.id == S.selBuildingId);
+        let jobData2 = bp2?.jobData;
+        if (!jobData2 && bp2) {
+          const drawings2 = bp2.drawings || [];
+          const latestDrawing2 = drawings2[drawings2.length - 1];
+          const jobId2 = latestDrawing2?.latest_job_id;
+          if (jobId2) {
+            try {
+              const j2 = await api(`/jobs/${jobId2}`);
+              jobData2 = { ...j2, jobId: jobId2 };
+              bp2.jobData = jobData2;
+            } catch (e) {
+              console.error('[tree-click] workbench fetch jobData failed:', e);
+            }
+          }
+        }
+        if (jobData2) {
+          S.job = jobData2;
+          S.jobId = jobData2.jobId;
+        }
         filterFloor(n.dataset.floor);
       }
     }
