@@ -249,6 +249,22 @@ def create_building(name: str = Form(...), address: str | None = Form(None)) -> 
         return {"id": b.id, "name": b.name, "address": b.address}
 
 
+class RenameBuildingBody(BaseModel):
+    name: str
+
+
+@app.patch("/api/buildings/{building_id}/name")
+def rename_building(building_id: int, body: RenameBuildingBody) -> dict[str, Any]:
+    """重命名建筑项目。"""
+    with Session(_pipeline().engine) as s:
+        b = s.get(Building, building_id)
+        if not b:
+            raise HTTPException(404, "建筑项目不存在")
+        b.name = body.name.strip()
+        s.commit()
+        return {"id": b.id, "name": b.name}
+
+
 # ---------------------------------------------------------------- 上传与解析
 
 

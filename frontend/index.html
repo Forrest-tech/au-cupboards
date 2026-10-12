@@ -1979,6 +1979,17 @@ function bindTreeRename() {
         });
       } else if (type === 'bid') {
         const id = +rest[0], nm = rest.slice(1).join(':');
+        btn(zh ? '重命名项目' : 'Rename building', 'pencil', false, async () => {
+          const name = prompt(zh ? `重命名建筑项目「${nm}」：` : `Rename building "${nm}":`, nm);
+          if (name === null || !name.trim() || name.trim() === nm) return;
+          try {
+            await api(`/buildings/${id}/name`, { method: 'PATCH', body: { name: name.trim() } });
+            toast(zh ? `已重命名为「${name.trim()}」` : `Renamed to "${name.trim()}"`, 'ok');
+            await loadTree();
+          } catch (e) {
+            toast(zh ? '重命名失败' : 'Rename failed', 'err');
+          }
+        });
         btn(zh ? '删除项目' : 'Delete building', 'trash', true, () => {
           if (!confirm(zh ? `删除建筑项目「${nm}」及其下全部图纸和解析结果？` : `Delete building "${nm}"?`)) return;
           delBuilding(id);
