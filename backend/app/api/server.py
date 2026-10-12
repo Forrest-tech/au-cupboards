@@ -576,23 +576,51 @@ def export_combined_pdf(body: dict[str, Any]):
                     commercial = ms.get("commercial")
                     if not floors and commercial and commercial.get("floors"):
                         floors = [
-                            {"floor_code": f.get("floor_code"), "unit_count": f.get("space_count", 0)}
+                            {"floor_code": f.get("floor_code"), "unit_count": f.get("space_count", 0),
+                             "labels": f.get("spaces", [])}
                             for f in commercial["floors"]
                         ]
                     bname = names[idx] if idx < len(names) else f"Building {jid}"
+                    # 标题 + 统计
                     elems.append(Paragraph(str(bname), styles["Heading1"]))
                     total = sum(int(f.get("unit_count", 0) or 0) for f in floors)
                     elems.append(Paragraph(f"{len(floors)} floors / {total} units", styles["Normal"]))
                     elems.append(Spacer(1, 12))
-                    data = [["Floor", "Units"]]
+                    # 每层：楼层 | 户数 | 单元号
+                    data = [["Floor", "Units", "Unit Numbers"]]
                     for f in floors:
-                        data.append([str(f.get("floor_code", "")), str(int(f.get("unit_count", 0) or 0))])
-                    t = Table(data)
+                        fc = str(f.get("floor_code", ""))
+                        uc = str(int(f.get("unit_count", 0) or 0))
+                        labels = ", ".join(str(x) for x in (f.get("labels") or []))
+                        # 长标签换行
+                        if len(labels) > 80:
+                            labels = labels[:77] + "..."
+                        data.append([fc, uc, labels])
+                    # 列宽：Floor 60, Units 50, Labels 剩余
+                    col_widths = [60, 50, 400]
+                    t = Table(data, colWidths=col_widths, repeatRows=1)
                     t.setStyle(TableStyle([
                         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eeeeee")),
                         ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#999999")),
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ("FONTSIZE", (0, 0), (-1, -1), 9),
                     ]))
                     elems.append(t)
+                    elems.append(Spacer(1, 12))
+                    # 柜型信息
+                    by_variant = ms.get("by_variant", {}) or {}
+                    if by_variant:
+                        elems.append(Paragraph("Matched Cupboards:", styles["Heading3"]))
+                        cup_data = [["Cupboard Type", "Count"]]
+                        for code, cnt in by_variant.items():
+                            cup_data.append([str(code), str(cnt)])
+                        ct = Table(cup_data, colWidths=[200, 80])
+                        ct.setStyle(TableStyle([
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f0f0f0")),
+                            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#999999")),
+                            ("FONTSIZE", (0, 0), (-1, -1), 9),
+                        ]))
+                        elems.append(ct)
                     elems.append(Spacer(1, 24))
             if not elems:
                 raise HTTPException(400, "没有找到有效的建筑数据")
