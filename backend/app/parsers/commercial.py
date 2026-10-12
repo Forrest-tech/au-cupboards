@@ -43,6 +43,8 @@ _NOISE_CONTAINS = [
     'SPECIFICATION', 'DOCUMENTATION', 'CONJUNCTION', 'PRELIMINARY',
     'ACCORDANCE', 'INFORMATION', 'DIMENSIONS', 'PROPERTIES',
 ]
+# 不完整的短语结尾（介词/连词）
+_INCOMPLETE_ENDINGS = {'TO', 'AND', 'OR', 'OF', 'THE', 'A', 'AN', 'IN', 'ON', 'FOR', 'WITH'}
 
 # 楼层标题识别（复用通用规则）
 _LEVEL_RE = re.compile(
@@ -94,6 +96,9 @@ def _extract_spaces(page: fitz.Page) -> list[str]:
             continue
         words = c.split()
         if not (1 <= len(words) <= 3):
+            continue
+        # 排除不完整短语（以介词/连词结尾）
+        if words[-1] in _INCOMPLETE_ENDINGS:
             continue
         # 去重合并的标签 (如 "LIFT\nLIFT" -> "LIFT")
         uniq_words = []

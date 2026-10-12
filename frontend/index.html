@@ -2459,6 +2459,7 @@ function bindTree() {
       // 【修复】单点同步三栏：左树高亮 + 中间 PDF + 右边数据，原子更新避免竞态
       if (n.dataset.b) {
         S.selBuildingId = +n.dataset.b;
+        console.log('[tree-click] data-b=', n.dataset.b, 'selBuildingId=', S.selBuildingId);
       }
       if (S.view === 'building') {
         S.treeSel = 'floors';

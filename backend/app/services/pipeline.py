@@ -173,8 +173,8 @@ class Pipeline:
     def run(
         self,
         pdf_path: str | Path,
-        project: str = "74 KEELER ST CARLINGFORD",
-        address: str | None = "74 Keeler St, Carlingford NSW",
+        project: str = "UNNAMED",
+        address: str | None = None,
     ) -> PipelineResult:
         pdf_path = Path(pdf_path)
         bid, did = self.ensure_project(project, address)
@@ -182,6 +182,23 @@ class Pipeline:
 
         # ---- STAGE 1
         pr = self.parser.parse(str(pdf_path))
+
+        # ---- 商业分支（独立逻辑，不影响住宅）
+        # 若住宅单元数为 0，尝试商业空间解析
+        commercial_data = None
+        if pr.total_units == 0:
+            try:
+                from app.parsers.commercial import parse_commercial
+                cr = parse_commercial(str(pdf_path))
+                commercial_data = {
+                    "floors": [
+                        {"floor_code": f.floor_code, "space_count": f.space_count, "spaces": f.spaces}
+                        for f in cr.floors
+                    ],
+                    "total_spaces": cr.total_spaces,
+                }
+            except Exception:
+                pass  # 商业解析失败不影响主流程
 
         with Session(self.engine) as s:
             version_id = self._ensure_version(s, did, pdf_path)
@@ -206,6 +223,8 @@ class Pipeline:
                     "floor_summary": pr.floor_summary(),
                     "cross_validation": pr.cross_validation,
                     "raw_units_before_dedup": sum(len(p.units) for p in pr.pages),
+                    # 商业空间数据（独立逻辑，住宅为 None）
+                    "commercial": commercial_data,
                 },
                 diagnostics=pr.diagnostics,
             )
