@@ -1945,6 +1945,11 @@ function bindTreeRename() {
         });
       } else if (type === 'dwg') {
         const fname = rest.join(':');
+        btn(zh ? '重命名图纸' : 'Rename drawing', 'pencil', false, () => {
+          const name = prompt(zh ? `重命名图纸「${fname}」：` : `Rename drawing "${fname}":`, fname);
+          if (name === null || !name.trim() || name.trim() === fname) return;
+          toast(zh ? '重命名图纸功能开发中' : 'Rename drawing coming soon', 'err');
+        });
         btn(zh ? '删除图纸' : 'Delete drawing', 'trash', true, () => {
           // fname 可能是 "DWG" fallback，要按 libraryGroups 的逻辑匹配：
           // v.source_name || v.dwg_name || t('tree.library')
@@ -1961,7 +1966,7 @@ function bindTreeRename() {
         });
       }
       // 移动功能：演示版暂留空
-      b.parentElement.style.position = 'relative';
+      // .treedrop 本身已经是 absolute 定位（CSS），不要覆盖成 relative
       b.parentElement.appendChild(menu);
       // 点别处关闭
       const close = (e) => {
