@@ -1038,7 +1038,7 @@ function showExportModal() {
         <div id="expBuildings" style="max-height:150px;overflow-y:auto;border:1px solid var(--line);border-radius:6px;padding:8px;display:flex;flex-direction:column;gap:6px">
           ${(S.projects || []).map(p => `
             <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
-              <input type="checkbox" class="expBuildingCb" value="${p.id}" ${p.id == S.selBuildingId ? 'checked' : ''}>
+              <input type="checkbox" class="expBuildingCb" value="${p.id}" checked>
               <span>${esc(p.name || ('#' + p.id))}</span>
             </label>
           `).join('')}
