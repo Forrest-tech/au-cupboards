@@ -4295,15 +4295,19 @@ function renderHub() {
     // 打开项目：回到工作台视图并加载该 building 的解析结果
     gotoView('work');
     S.curBuilding = +n.dataset.b; S.treeSel = 'floors';
+    S.selBuildingId = S.curBuilding;
+    // 【修复】用缓存的 p.jobData 同步切换，不用异步 loadJob 避免竞态和 jobs[0] 兜底错位
+    const bproj = S.projects.find(pp => pp.id == S.curBuilding);
+    if (bproj?.jobData) {
+      S.job = bproj.jobData;
+      S.jobId = bproj.jobData.jobId;
+      S.floorSel = null; S.floorFilter = null;
+      const bpages = bproj.jobData.pages?.length ? bproj.jobData.pages
+        : Array.from({ length: bproj.jobData.page_count || 1 }, (_, i) => ({ title: 'p' + (i + 1) }));
+      showPdf(S.jobId, bpages);
+    }
     renderTree();
-    (async () => {
-      try {
-        const jobs = await api('/jobs?limit=30');
-        const j = jobs.find(x => (x.building_id ?? null) === S.curBuilding) || jobs[0];
-        if (j) { await loadJob(j.id); showPdf(j.id, S.pages?.length ? S.pages : []); }
-        else renderPane();
-      } catch (e) { renderPane(); }
-    })();
+    renderPane();
   });
   bindLibraryManage();
 }
