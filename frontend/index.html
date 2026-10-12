@@ -1504,7 +1504,9 @@ async function loadTree() {
       try {
         const j = await api(`/jobs/${jobId}`);
         // 存完整 job 结构，右侧面板 showFloorPanel 用 S.job 时能直接切换
+        // 同时存 jobId，中间 PDF 预览 showPdf 需要
         p.jobData = {
+          jobId: jobId,
           summary: j.summary, floors: j.floors || j.multi_signals?.floor_summary || [],
           units: j.units || [], multi_signals: j.multi_signals,
           diagnostics: j.diagnostics, warnings: j.warnings || [],
@@ -2450,11 +2452,8 @@ function bindTree() {
       // 工作台 tab：沿用原来的户表筛选。
       // 注意：data-floor=""（所有楼层）是空字符串，不能用 truthy 判断
       // 【修复】记录选中的 building ID，确保高亮只出现在一个 building 下
-      // 同时把 S.job 切换到该 building 的 job，右侧面板才显示对的数据
       if (n.dataset.b) {
         S.selBuildingId = +n.dataset.b;
-        const bp = S.projects.find(pp => pp.id === S.selBuildingId);
-        if (bp?.jobData) S.job = bp.jobData;
       }
       if (S.view === 'building') {
         S.treeSel = 'floors';
@@ -2462,6 +2461,18 @@ function bindTree() {
         let code = n.dataset.floor;
         if (code === '') code = null; // 所有楼层
         S.floorSel = code;
+        // 【修复】切换 building 时，用 loadJob 完整加载（包含中间 PDF 预览）
+        // 避免手动拼 S.job 漏掉 S.jobId 和 showPdf
+        const bp = S.projects.find(pp => pp.id === S.selBuildingId);
+        const jid = bp?.jobData?.jobId;
+        if (jid && jid !== S.jobId) {
+          // 异步加载，不阻塞高亮渲染
+          loadJob(jid).then(() => {
+            if (S.floorSel) showFloorPanel(S.floorSel);
+            else { S.floorFilter = null; showAllFloorsPanel(); }
+          });
+          return; // loadJob 会 renderTree，直接返回
+        }
         renderTree();
         if (S.floorSel) showFloorPanel(S.floorSel);
         else { S.floorFilter = null; showAllFloorsPanel(); }
